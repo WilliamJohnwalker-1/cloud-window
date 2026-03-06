@@ -41,12 +41,25 @@
 
 ### 6) 报表与导出
 
-- 销售报表概览显示：零售总价、订单数量（不再显示“总收入(折扣)”）
+- 销售报表概览显示：零售总价、订单数量（不再显示"总收入(折扣)"）
 - 利润口径：
   - 总成本 = `销售数量 * unit_cost + 一次性成本`
   - `unit_cost` 固化在 `order_items`（下单时快照），避免后续商品成本修改影响历史利润
   - 一次性成本按商品聚合维度仅计一次，避免重复叠加
 - 利润报表支持导出：Excel / PDF
+
+### 7) 条码与入库/出库
+
+- **条码生成**：商品添加时自动生成 EAN-13 条码
+  - 格式：`2000000`（前缀）+ `XXXXX`（5位序号）+ 校验位
+  - 支持扫码枪快速输入（13位数字自动识别）
+- **入库功能**（库存管理页面）：
+  - 输入/扫描13位条码 → 自动识别商品 → 输入数量 → 确认入库
+  - 仅管理员/库存管理员可用
+- **出库功能**（订单页面）：
+  - 输入/扫描13位条码 → 自动识别商品 → 输入数量 → 确认出库
+  - 出库时自动创建订单并扣减库存
+  - 仅分销商可用（快速出库场景）
 
 ## 技术栈
 
@@ -83,14 +96,16 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 1. 执行 `supabase/schema.sql`
 2. 执行 `supabase/migrate-v2.1-notifications.sql`
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
-4. 执行 `supabase/storage-policies.sql`
+4. 执行 `supabase/migrate-v2.3-barcode.sql`
+5. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
 1. 执行 `supabase/migrate-v2.sql`
 2. 执行 `supabase/migrate-v2.1-notifications.sql`
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
-4. 执行 `supabase/storage-policies.sql`
+4. 执行 `supabase/migrate-v2.3-barcode.sql`
+5. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -188,3 +203,24 @@ npx expo start
 **设计系统：**
 - 粉蓝渐变主题（#FF6B9D → #5B8DEF）
 - Toast配置：success/error/info三种样式，圆角12px，左边框彩色指示
+
+### v2.0 - 条码与入库/出库
+
+**条码功能：**
+- 商品添加时自动生成 EAN-13 条码（2000000前缀 + 5位序号 + 校验位）
+- 条码字段存储在 `products.barcode`，带唯一索引
+- 支持扫码枪快速输入（13位数字自动识别）
+
+**入库功能：**
+- 入口：库存管理页面右上角"入库"按钮
+- 流程：扫描/输入条码 → 自动识别商品 → 输入数量 → 确认入库
+- 权限：仅管理员/库存管理员可用
+
+**出库功能：**
+- 入口：订单页面"出库"按钮
+- 流程：扫描/输入条码 → 自动识别商品 → 输入数量 → 确认出库
+- 特点：出库时自动创建订单并扣减库存
+- 权限：仅分销商可用（快速出库场景）
+
+**数据库迁移：**
+- `migrate-v2.3-barcode.sql`：添加 barcode 字段和索引
