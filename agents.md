@@ -161,6 +161,19 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 | src/lib/supabase.ts | Supabase client |
 | src/utils/barcode.ts | EAN-13 generation/validation |
 
+## DOMAIN RULES (IMPORTANT)
+
+- 入库、出库按钮仅 `admin` / `inventory_manager` 可见与可用
+- 分销商不提供入库/出库快捷功能（仅下单流程）
+- 出库创建的订单按零售价计算：
+  - `total_retail_amount = retail_price * qty`
+  - `total_discount_amount = retail_price * qty`
+  - `order_items.discount_price = retail_price`
+- 条码策略：
+  - 新增商品自动生成 EAN-13（`generateEAN13`）
+  - 旧商品可通过 `backfillBarcodes()` 批量补齐
+  - 商品页管理员可查看条码（卡片 + 编辑弹窗）
+
 ## DATABASE MIGRATIONS
 
 Execute in Supabase SQL Editor (paste SQL content, not file path):
