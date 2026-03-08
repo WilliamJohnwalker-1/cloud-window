@@ -10,10 +10,15 @@ import {
   RefreshControl,
   ScrollView,
   TextInput,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList } from 'lucide-react-native';
+import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import * as XLSX from 'xlsx';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius } from '../theme';
 import type { Order, ProductWithDetails } from '../types';
@@ -51,6 +56,8 @@ export default function OrdersScreen() {
   const [outboundProduct, setOutboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingOutbound, setSubmittingOutbound] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
+  const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin';
@@ -146,18 +153,72 @@ export default function OrdersScreen() {
     [cumulativeProductStats],
   );
 
-  const addToCart = (product: ProductWithDetails) => {
+  const addToCart = (product: ProductWithDetails, addQty: number = 1) => {
     setCart((prev) => {
       const next = new Map(prev);
       const existing = next.get(product.id);
       const currentQty = existing?.quantity || 0;
-      if (currentQty >= (product.quantity || 0)) {
+      const newQty = currentQty + addQty;
+      if (newQty > (product.quantity || 0)) {
         Toast.show({ type: 'error', text1: '库存不足', text2: `${product.name} 当前库存仅 ${product.quantity || 0}` });
         return prev;
       }
-      next.set(product.id, { product, quantity: currentQty + 1 });
+      next.set(product.id, { product, quantity: newQty });
       return next;
     });
+  };
+
+  const addFiveToCart = (product: ProductWithDetails) => {
+    addToCart(product, 5);
+  };
+
+  const updateCartQuantity = (product: ProductWithDetails, qtyStr: string) => {
+    setQuantityInputMode((prev) => {
+      const next = new Map(prev);
+      next.set(product.id, qtyStr);
+      return next;
+    });
+  };
+
+  const confirmCartQuantity = (product: ProductWithDetails) => {
+    const qtyStr = quantityInputMode.get(product.id) || '';
+    const currentQty = cart.get(product.id)?.quantity || 0;
+    
+    // If empty, cancel edit mode
+    if (!qtyStr.trim()) {
+      setQuantityInputMode((prev) => {
+        const next = new Map(prev);
+        next.delete(product.id);
+        return next;
+      });
+      setShowQuantityInput(null);
+      return;
+    }
+    
+    const qty = Number.parseInt(qtyStr, 10);
+    if (Number.isNaN(qty) || qty <= 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效数量' });
+      return;
+    }
+    if (qty % 5 !== 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '数量必须是5的倍数' });
+      return;
+    }
+    if (qty > (product.quantity || 0)) {
+      Toast.show({ type: 'error', text1: '库存不足', text2: `${product.name} 当前库存仅 ${product.quantity || 0}` });
+      return;
+    }
+    setCart((prev) => {
+      const next = new Map(prev);
+      next.set(product.id, { product, quantity: qty });
+      return next;
+    });
+    setQuantityInputMode((prev) => {
+      const next = new Map(prev);
+      next.delete(product.id);
+      return next;
+    });
+    setShowQuantityInput(null);
   };
 
   const removeFromCart = (productId: string) => {
@@ -165,10 +226,11 @@ export default function OrdersScreen() {
       const next = new Map(prev);
       const existing = next.get(productId);
       if (!existing) return prev;
-      if (existing.quantity <= 1) {
+      const newQty = existing.quantity - 5;
+      if (newQty <= 0) {
         next.delete(productId);
       } else {
-        next.set(productId, { ...existing, quantity: existing.quantity - 1 });
+        next.set(productId, { ...existing, quantity: newQty });
       }
       return next;
     });
@@ -190,6 +252,18 @@ export default function OrdersScreen() {
   const handleSubmitOrder = async () => {
     if (cartItems.length === 0) {
       Toast.show({ type: 'error', text1: '错误', text2: '购物车为空' });
+      return;
+    }
+
+    // Validate all items are multiples of 5
+    const invalidItems = cartItems.filter((item) => item.quantity % 5 !== 0);
+    if (invalidItems.length > 0) {
+      const invalidNames = invalidItems.map((item) => `${item.product.name}(${item.quantity})`).join(', ');
+      Toast.show({ 
+        type: 'error', 
+        text1: '下单失败', 
+        text2: `以下商品数量不是5的倍数: ${invalidNames}` 
+      });
       return;
     }
 
@@ -275,6 +349,53 @@ export default function OrdersScreen() {
     resetOutboundForm();
   };
 
+  const exportOrderToExcel = async (order: Order) => {
+    try {
+      const deliveryDate = new Date(order.created_at).toLocaleDateString('zh-CN');
+      const headers = ['商品名称', '送货数量', '单价', '查收'];
+      const dataRows = order.items.map((item) => [
+        item.product_name,
+        item.quantity,
+        item.discount_price,
+        '',
+      ]);
+      const sheetData = [headers, ...dataRows];
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+      const colWidths = headers.map((h, colIdx) => {
+        let maxLen = h.length * 2;
+        dataRows.forEach((row) => {
+          const len = String(row[colIdx]).length;
+          if (len > maxLen) maxLen = len;
+        });
+        return { wch: Math.max(maxLen + 2, 12) };
+      });
+      ws['!cols'] = colWidths;
+
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[addr]) continue;
+          if (!ws[addr].s) ws[addr].s = {};
+          ws[addr].s = { alignment: { horizontal: 'center', vertical: 'center' } };
+        }
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '送货单');
+      const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const uri = `${FileSystem.cacheDirectory}delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`;
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Excel 导出失败';
+      Toast.show({ type: 'error', text1: '导出失败', text2: message });
+    }
+  };
+
   const totalRetail = filteredOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
   const totalDiscount = filteredOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
 
@@ -309,6 +430,13 @@ export default function OrdersScreen() {
       </View>
 
       <View style={styles.orderActions}>
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={() => exportOrderToExcel(item)}
+        >
+          <Download size={14} color={Colors.blue} />
+          <Text style={styles.exportButtonText}>导出</Text>
+        </TouchableOpacity>
         {isAdmin && item.status === 'pending' && (
           <TouchableOpacity
             style={styles.acceptOrderButton}
@@ -341,14 +469,23 @@ export default function OrdersScreen() {
   const renderProductRow = ({ item }: { item: ProductWithDetails }) => {
     const inCart = cart.get(item.id);
     const qty = inCart?.quantity || 0;
+    const isEditingQty = showQuantityInput === item.id;
+    const inputValue = quantityInputMode.get(item.id) || '';
 
     return (
       <View style={styles.productRow}>
+        {item.image_url ? (
+          <Image source={{ uri: item.image_url }} style={styles.productThumb} />
+        ) : (
+          <View style={styles.productThumbPlaceholder}>
+            <Text style={styles.productThumbPlaceholderText}>{item.name.charAt(0)}</Text>
+          </View>
+        )}
         <View style={styles.productRowInfo}>
-          <Text style={styles.productRowName}>{item.name}</Text>
+          <Text style={styles.productRowName} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.productRowMeta}>
             {item.city_name ? `${item.city_name} · ` : ''}
-            零售价 {item.price}元 · 折扣价 {item.discount_price}元
+            零售 {item.price}元 · 折 {item.discount_price}元
           </Text>
         </View>
         <View style={styles.productRowActions}>
@@ -357,10 +494,34 @@ export default function OrdersScreen() {
               <TouchableOpacity style={styles.qtyBtn} onPress={() => removeFromCart(item.id)}>
                 <Text style={styles.qtyBtnText}>-</Text>
               </TouchableOpacity>
-              <Text style={styles.qtyValue}>{qty}</Text>
+              {isEditingQty ? (
+                <TextInput
+                  style={styles.qtyInput}
+                  value={inputValue}
+                  onChangeText={(text) => {
+                    // Auto-clear and only keep new input
+                    updateCartQuantity(item, text.replace(/[^0-9]/g, ''));
+                  }}
+                  onBlur={() => confirmCartQuantity(item)}
+                  onSubmitEditing={() => confirmCartQuantity(item)}
+                  keyboardType="number-pad"
+                  autoFocus
+                />
+              ) : (
+                <TouchableOpacity onPress={() => {
+                  setQuantityInputMode((prev) => {
+                    const next = new Map(prev);
+                    next.set(item.id, ''); // Start with empty for fresh input
+                    return next;
+                  });
+                  setShowQuantityInput(item.id);
+                }}>
+                  <Text style={styles.qtyValue}>{qty}</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : null}
-          <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.85}>
+          <TouchableOpacity onPress={() => addToCart(item, 5)} activeOpacity={0.85}>
             <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qtyBtnAdd}>
               <Text style={styles.qtyBtnAddText}>+</Text>
             </LinearGradient>
@@ -463,18 +624,24 @@ export default function OrdersScreen() {
       {isAdmin && (
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>商品数量统计（同商品自动累加）</Text>
-          <Text style={styles.statsSubTitle}>本月</Text>
-          {monthlyTopRows.map((row, idx) => (
-            <Text key={`m-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
-              {row ? `${row.name}: ${row.quantity}` : '—'}
-            </Text>
-          ))}
-          <Text style={[styles.statsSubTitle, { marginTop: 8 }]}>累计</Text>
-          {cumulativeTopRows.map((row, idx) => (
-            <Text key={`c-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
-              {row ? `${row.name}: ${row.quantity}` : '—'}
-            </Text>
-          ))}
+          <View style={styles.statsRow}>
+            <View style={styles.statsColumn}>
+              <Text style={styles.statsSubTitle}>本月</Text>
+              {monthlyTopRows.map((row, idx) => (
+                <Text key={`m-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                  {row ? `${row.name}: ${row.quantity}` : '—'}
+                </Text>
+              ))}
+            </View>
+            <View style={styles.statsColumn}>
+              <Text style={styles.statsSubTitle}>累计</Text>
+              {cumulativeTopRows.map((row, idx) => (
+                <Text key={`c-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                  {row ? `${row.name}: ${row.quantity}` : '—'}
+                </Text>
+              ))}
+            </View>
+          </View>
         </View>
       )}
 
@@ -655,17 +822,17 @@ const styles = StyleSheet.create({
   filterRow: { backgroundColor: Colors.surface, minHeight: 50 },
   filterRowContent: { paddingVertical: 8, paddingHorizontal: 10, alignItems: 'center' },
   chip: {
-    width: 136,
-    height: 34,
-    borderRadius: 16,
+    width: 100,
+    height: 30,
+    borderRadius: 14,
     backgroundColor: Colors.surfaceSecondary,
-    marginRight: 8,
+    marginRight: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
   chipActive: { backgroundColor: Colors.pink },
-  chipText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600', width: '100%', textAlign: 'center' },
-  chipTextActive: { color: '#fff', fontWeight: '600', width: '100%', textAlign: 'center' },
+  chipText: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
+  chipTextActive: { color: '#fff', fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
   monthSwitchRow: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 8 },
   switchChip: {
     paddingHorizontal: 12,
@@ -687,13 +854,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     marginBottom: 8,
     padding: 12,
-    minHeight: 206,
+    minHeight: 120,
     ...Shadow.card,
   },
   statsTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   statsSubTitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
   statsRowText: { fontSize: 12, color: Colors.textPrimary, marginTop: 2 },
   statsRowPlaceholder: { color: Colors.textTertiary },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  statsColumn: { flex: 1 },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -835,4 +1004,60 @@ const styles = StyleSheet.create({
   confirmButton: { height: 48, justifyContent: 'center', alignItems: 'center', borderRadius: Radius.lg },
   disabledButton: { opacity: 0.5 },
   confirmButtonText: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  exportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.blue,
+    backgroundColor: Colors.blueBg,
+    marginRight: 8,
+  },
+  exportButtonText: { fontSize: 12, color: Colors.blue, fontWeight: '600', marginLeft: 4 },
+  productThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.sm,
+    marginRight: 10,
+  },
+  productThumbPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.sm,
+    marginRight: 10,
+    backgroundColor: Colors.surfaceSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  productThumbPlaceholderText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textTertiary,
+  },
+  qtyInput: {
+    width: 50,
+    height: 28,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.surfaceSecondary,
+    paddingHorizontal: 6,
+    fontSize: 14,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  addFiveBtn: {
+    marginLeft: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.pink,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addFiveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });

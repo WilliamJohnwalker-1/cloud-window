@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  RefreshControl,
   TouchableOpacity,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,9 +11,11 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
+import { useShallow } from 'zustand/react/shallow';
+
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius } from '../theme';
-import { BarChart3, TrendingUp, FileText, Download } from 'lucide-react-native';
+import { BarChart3, TrendingUp, Download } from 'lucide-react-native';
 import { BarChart, PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
@@ -23,8 +24,15 @@ type ReportType = 'sales' | 'inventory' | 'profit';
 const CHART_COLORS = ['#FF6B9D', '#5B8DEF', '#C77DFF', '#4ECDC4', '#FFB347'];
 
 export default function ReportsScreen() {
-  const { user, products, orders, fetchProducts, fetchOrders } = useAppStore();
-  const [refreshing, setRefreshing] = useState(false);
+  const { user, products, orders, fetchProducts, fetchOrders } = useAppStore(
+    useShallow((state) => ({
+      user: state.user,
+      products: state.products,
+      orders: state.orders,
+      fetchProducts: state.fetchProducts,
+      fetchOrders: state.fetchOrders,
+    })),
+  );
   const [reportType, setReportType] = useState<ReportType>('sales');
 
   const isDistributor = user?.role === 'distributor';
@@ -34,27 +42,63 @@ export default function ReportsScreen() {
     fetchOrders();
   }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await Promise.all([fetchProducts(), fetchOrders()]);
-    setRefreshing(false);
-  };
-
   const salesData = useMemo(() => {
     const totalRetailSales = orders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
     const totalOrders = orders.length;
 
-    const productSales: { [key: string]: number } = {};
+    const productSalesQty: { [key: string]: { name: string; quantity: number } } = {};
+    const productSalesAmt: { [key: string]: { name: string; amount: number } } = {};
     orders.forEach((order) => {
       order.items.forEach((it) => {
         const name = it.product_name || '未知';
-        productSales[name] = (productSales[name] || 0) + Number(it.discount_price || 0) * it.quantity;
+        const key = it.product_id;
+        // Quantity
+        if (!productSalesQty[key]) {
+          productSalesQty[key] = { name, quantity: 0 };
+        }
+        productSalesQty[key].quantity += it.quantity;
+        // Amount
+        if (!productSalesAmt[key]) {
+          productSalesAmt[key] = { name, amount: 0 };
+        }
+        productSalesAmt[key].amount += Number(it.discount_price || 0) * it.quantity;
       });
     });
 
-    const topProducts = Object.entries(productSales)
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total)
+    const topProductsQty = Object.values(productSalesQty)
+      .map((item) => ({ name: item.name, quantity: item.quantity }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+
+    const topProductsAmt = Object.values(productSalesAmt)
+      .map((item) => ({ name: item.name, amount: item.amount }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+
+    // Calculate velocity (turnover rate) = sales quantity / current inventory
+    const productVelocity: { [key: string]: { name: string; velocity: number; quantity: number; inventory: number } } = {};
+    products.forEach((p) => {
+      const key = p.id;
+      const qty = productSalesQty[key]?.quantity || 0;
+      const inventory = p.quantity || 0;
+      const velocity = inventory > 0 ? qty / inventory : 0;
+      productVelocity[key] = {
+        name: p.name,
+        velocity,
+        quantity: qty,
+        inventory,
+      };
+    });
+
+    const topProductsVelocity = Object.values(productVelocity)
+      .map((item) => ({ 
+        name: item.name, 
+        velocity: item.velocity,
+        quantity: item.quantity,
+        inventory: item.inventory,
+        isUnhealthy: item.velocity < 0.5, // Less than 0.5 means slow turnover
+      }))
+      .sort((a, b) => b.velocity - a.velocity)
       .slice(0, 5);
 
     const citySales: { [key: string]: number } = {};
@@ -67,8 +111,8 @@ export default function ReportsScreen() {
       .map(([city, total]) => ({ city, total }))
       .sort((a, b) => b.total - a.total);
 
-    return { totalRetailSales, totalOrders, topProducts, salesByCity };
-  }, [orders]);
+    return { totalRetailSales, totalOrders, topProductsQty, topProductsAmt, topProductsVelocity, salesByCity };
+  }, [orders, products]);
 
   const inventoryData = useMemo(() => {
     const totalProducts = products.length;
@@ -204,8 +248,9 @@ export default function ReportsScreen() {
       await Sharing.shareAsync(uri, {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
-    } catch (error: any) {
-      Toast.show({ type: 'error', text1: '导出失败', text2: error?.message || 'Excel 导出失败' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Excel 导出失败';
+      Toast.show({ type: 'error', text1: '导出失败', text2: message });
     }
   };
 
@@ -244,8 +289,9 @@ export default function ReportsScreen() {
 
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
-    } catch (error: any) {
-      Toast.show({ type: 'error', text1: '导出失败', text2: error?.message || 'PDF 导出失败' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'PDF 导出失败';
+      Toast.show({ type: 'error', text1: '导出失败', text2: message });
     }
   };
 
@@ -281,16 +327,16 @@ export default function ReportsScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>商品销售排行</Text>
-        {salesData.topProducts.length > 0 ? (
+        <Text style={styles.cardTitle}>商品销量排行榜</Text>
+        {salesData.topProductsQty.length > 0 ? (
           <BarChart
-            data={salesData.topProducts.map((item, index) => ({
-              value: item.total,
+            data={salesData.topProductsQty.map((item, index) => ({
+              value: item.quantity,
               label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
               frontColor: CHART_COLORS[index % CHART_COLORS.length],
               topLabelComponent: () => (
                 <Text style={{ fontSize: 10, color: Colors.textSecondary, marginBottom: 4 }}>
-                  {item.total.toFixed(0)}
+                  {item.quantity}
                 </Text>
               ),
             }))}
@@ -304,7 +350,7 @@ export default function ReportsScreen() {
             yAxisThickness={0}
             yAxisTextStyle={{ fontSize: 10, color: Colors.textTertiary }}
             noOfSections={4}
-            maxValue={Math.ceil((salesData.topProducts[0]?.total || 1) * 1.2)}
+            maxValue={Math.ceil((salesData.topProductsQty[0]?.quantity || 1) * 1.2)}
             isAnimated
             animationDuration={500}
             height={150}
@@ -313,6 +359,70 @@ export default function ReportsScreen() {
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
             <Text style={styles.emptyText}>暂无销售数据</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>商品销售额排行榜</Text>
+        {salesData.topProductsAmt.length > 0 ? (
+          <BarChart
+            data={salesData.topProductsAmt.map((item, index) => ({
+              value: item.amount,
+              label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
+              frontColor: CHART_COLORS[index % CHART_COLORS.length],
+              topLabelComponent: () => (
+                <Text style={{ fontSize: 10, color: Colors.textSecondary, marginBottom: 4 }}>
+                  {item.amount.toFixed(0)}
+                </Text>
+              ),
+            }))}
+            barWidth={30}
+            spacing={20}
+            roundedTop
+            roundedBottom
+            hideRules
+            xAxisThickness={1}
+            xAxisColor={Colors.divider}
+            yAxisThickness={0}
+            yAxisTextStyle={{ fontSize: 10, color: Colors.textTertiary }}
+            noOfSections={4}
+            maxValue={Math.ceil((salesData.topProductsAmt[0]?.amount || 1) * 1.2)}
+            isAnimated
+            animationDuration={500}
+            height={150}
+          />
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
+            <Text style={styles.emptyText}>暂无销售数据</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>商品动销率排行榜</Text>
+        <Text style={styles.cardSubtitle}>动销率 = 销售数量 / 当前库存，低于0.5标红</Text>
+        {salesData.topProductsVelocity.length > 0 ? (
+          salesData.topProductsVelocity.map((item, index) => (
+            <View key={item.name} style={styles.velocityItem}>
+              <View style={styles.velocityRank}>
+                <Text style={styles.velocityRankText}>{index + 1}</Text>
+              </View>
+              <View style={styles.velocityInfo}>
+                <Text style={[styles.velocityName, item.isUnhealthy && styles.velocityUnhealthy]}>
+                  {item.name}
+                </Text>
+                <Text style={styles.velocityMeta}>
+                  销量{item.quantity} / 库存{item.inventory} = 动销率{item.velocity.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
+            <Text style={styles.emptyText}>暂无动销数据</Text>
           </View>
         )}
       </View>
@@ -531,4 +641,12 @@ const styles = StyleSheet.create({
   profitItemValue: { fontSize: 14, fontWeight: 'bold' },
   profitDetails: { flexDirection: 'row', justifyContent: 'space-between' },
   profitDetailText: { fontSize: 12, color: Colors.textSecondary },
+  cardSubtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 4, marginBottom: 10 },
+  velocityItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  velocityRank: { width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.pink, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  velocityRankText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  velocityInfo: { flex: 1 },
+  velocityName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  velocityUnhealthy: { color: Colors.danger },
+  velocityMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 });

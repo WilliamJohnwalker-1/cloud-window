@@ -173,16 +173,21 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
   - 新增商品自动生成 EAN-13（`generateEAN13`）
   - 旧商品可通过 `backfillBarcodes()` 批量补齐
   - 商品页管理员可查看条码（卡片 + 编辑弹窗）
+- **订单数量规则（重要）：**
+  - 所有订单商品数量必须是 **5 的倍数**
+  - 新建订单：+/- 按钮一次增减5件
+  - 支持直接输入数量，输入时自动清空输入框
+  - 确认下单时会验证，不满足5的倍数则提示具体商品
 
 ## DATABASE MIGRATIONS
 
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-5 same as above
+1. migrate-v2.sql -> 2-6 same as above
 
 ## GOTCHAS
 

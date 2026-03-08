@@ -99,7 +99,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 2. 执行 `supabase/migrate-v2.1-notifications.sql`
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
-5. 执行 `supabase/storage-policies.sql`
+5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
+6. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -107,7 +108,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 2. 执行 `supabase/migrate-v2.1-notifications.sql`
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
-5. 执行 `supabase/storage-policies.sql`
+5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
+6. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -143,6 +145,7 @@ npx expo start
 │   ├── migrate-v2.1-notifications.sql
 │   ├── migrate-v2.2-unit-cost-snapshot.sql
 │   ├── migrate-v2.3-barcode.sql
+│   ├── migrate-v2.4-atomic-order-workflows.sql
 │   └── storage-policies.sql
 └── assets/
     └── ui/              # UI资源
@@ -184,6 +187,29 @@ npx expo start
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### v2.2 (2026-03-08) - 订单优化
+
+**订单新建优化：**
+- 商品数量调整：+/- 按钮一次增减5件
+- 支持直接输入数量（必须是5的倍数）
+- 点击数量进入编辑模式，输入框初始为空
+- 下单时验证所有商品数量，不足5的倍数无法提交
+- 商品名称前显示缩略图（与商品页一致）
+
+**管理员订单页面优化：**
+- 分销商筛选标签尺寸缩小（100x30）
+- 商品数量统计卡片：本周/累计改为左右并排显示
+
+**报表功能增强：**
+- 销售报表新增：商品销售额排行榜
+- 销售报表新增：商品动销率排行榜（销售数量/库存）
+- 动销率低于0.5的商品标红显示
+
+**订单导出：**
+- 每笔订单支持导出Excel送货单
+- 格式：商品名称、送货数量、单价、查收（留空）
+- 首行显示送货日期
 
 ### v2.1 (2026-03-06) - UI优化
 
@@ -231,3 +257,4 @@ npx expo start
 
 **数据库迁移：**
 - `migrate-v2.3-barcode.sql`：添加 barcode 字段和索引
+- `migrate-v2.4-atomic-order-workflows.sql`：新增事务化 RPC（下单与出库原子执行）
