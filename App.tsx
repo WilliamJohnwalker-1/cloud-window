@@ -18,8 +18,6 @@ import { useAppStore } from './src/store/useAppStore';
 import { Colors, Shadow } from './src/theme';
 import { supabase } from './src/lib/supabase';
 
-const Tab = createBottomTabNavigator();
-
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const IconComponent = {
     Products: Package,
@@ -42,6 +40,9 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 function MainTabs() {
+  // ✅ FIX: Move navigator creation INSIDE component (prevents Android crash)
+  const Tab = createBottomTabNavigator();
+
   const fetchAllData = useAppStore((state) => state.fetchAllData);
   const storedUser = useAppStore((state) => state.user);
 
