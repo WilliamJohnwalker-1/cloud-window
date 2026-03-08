@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,10 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download } from 'lucide-react-native';
+import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download, ChevronDown } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -58,6 +59,11 @@ export default function OrdersScreen() {
   const [searchText, setSearchText] = useState('');
   const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
+  const [statsExpanded, setStatsExpanded] = useState(true);
+
+  const animatedHeight = useRef(new Animated.Value(120)).current;
+  const animatedChevron = useRef(new Animated.Value(180)).current;
+  const animatedOpacity = useRef(new Animated.Value(1)).current;
 
   const isAdmin = user?.role === 'admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin';
@@ -68,10 +74,39 @@ export default function OrdersScreen() {
     fetchDistributors();
   }, []);
 
+  useEffect(() => {
+    animatedHeight.setValue(120);
+    animatedChevron.setValue(180);
+    animatedOpacity.setValue(1);
+  }, []);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([fetchOrders(), fetchProducts(), fetchDistributors()]);
     setRefreshing(false);
+  };
+
+  const toggleStatsExpanded = () => {
+    const nextValue = !statsExpanded;
+    setStatsExpanded(nextValue);
+
+    Animated.parallel([
+      Animated.timing(animatedHeight, {
+        toValue: nextValue ? 120 : 40,
+        duration: 300,
+        useNativeDriver: false,
+      }),
+      Animated.timing(animatedChevron, {
+        toValue: nextValue ? 180 : 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(animatedOpacity, {
+        toValue: nextValue ? 1 : 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   const availableProducts = useMemo(() => {
@@ -622,27 +657,36 @@ export default function OrdersScreen() {
       </View>
 
       {isAdmin && (
-        <View style={styles.statsCard}>
-          <Text style={styles.statsTitle}>商品数量统计（同商品自动累加）</Text>
-          <View style={styles.statsRow}>
-            <View style={styles.statsColumn}>
-              <Text style={styles.statsSubTitle}>本月</Text>
-              {monthlyTopRows.map((row, idx) => (
-                <Text key={`m-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
-                  {row ? `${row.name}: ${row.quantity}` : '—'}
-                </Text>
-              ))}
+        <Animated.View style={[styles.statsCard, { height: animatedHeight }]}>
+          <TouchableOpacity onPress={toggleStatsExpanded} activeOpacity={0.85}>
+            <View style={styles.statsHeader}>
+              <Text style={styles.statsTitle}>商品数量统计（同商品自动累加）</Text>
+              <Animated.View style={{ transform: [{ rotate: animatedChevron.interpolate({ inputRange: [0, 180], outputRange: ['0deg', '180deg'] }) }] }}>
+                <ChevronDown size={16} color={Colors.textSecondary} />
+              </Animated.View>
             </View>
-            <View style={styles.statsColumn}>
-              <Text style={styles.statsSubTitle}>累计</Text>
-              {cumulativeTopRows.map((row, idx) => (
-                <Text key={`c-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
-                  {row ? `${row.name}: ${row.quantity}` : '—'}
-                </Text>
-              ))}
+          </TouchableOpacity>
+          <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
+            <View style={styles.statsRow}>
+              <View style={styles.statsColumn}>
+                <Text style={styles.statsSubTitle}>本月</Text>
+                {monthlyTopRows.map((row, idx) => (
+                  <Text key={`m-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                    {row ? `${row.name}: ${row.quantity}` : '—'}
+                  </Text>
+                ))}
+              </View>
+              <View style={styles.statsColumn}>
+                <Text style={styles.statsSubTitle}>累计</Text>
+                {cumulativeTopRows.map((row, idx) => (
+                  <Text key={`c-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                    {row ? `${row.name}: ${row.quantity}` : '—'}
+                  </Text>
+                ))}
+              </View>
             </View>
-          </View>
-        </View>
+          </Animated.View>
+        </Animated.View>
       )}
 
       <View style={styles.searchContainer}>
@@ -854,8 +898,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     marginBottom: 8,
     padding: 12,
-    minHeight: 120,
+    minHeight: 40,
     ...Shadow.card,
+  },
+  statsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   statsTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   statsSubTitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },

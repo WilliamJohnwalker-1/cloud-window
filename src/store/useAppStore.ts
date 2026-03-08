@@ -19,6 +19,95 @@ interface CartCreateItem {
   quantity: number;
 }
 
+interface ProfileRow {
+  id: string;
+  email: string;
+  full_name?: string;
+  role: Profile['role'];
+  city_id?: string | null;
+  cities?: { name: string } | null;
+  store_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string;
+  quantity: number;
+  retail_price?: number | string | null;
+  discount_price?: number | string | null;
+  unit_cost?: number | string | null;
+  one_time_cost?: number | string | null;
+  products?: {
+    name?: string;
+    city_id?: string;
+    cities?: { name: string } | null;
+  } | null;
+}
+
+interface OrderRow {
+  id: string;
+  distributor_id: string;
+  profiles?: { email?: string; store_name?: string | null } | null;
+  city_id?: string;
+  cities?: { name: string } | null;
+  status?: Order['status'];
+  total_retail_amount?: number | string | null;
+  total_discount_amount?: number | string | null;
+  created_at: string;
+  order_items?: OrderItemRow[];
+}
+
+interface ProductRow {
+  id: string;
+  name: string;
+  price?: number | string | null;
+  cost?: number | string | null;
+  one_time_cost?: number | string | null;
+  discount_price?: number | string | null;
+  city_id: string;
+  image_url?: string | null;
+  barcode?: string | null;
+  created_at: string;
+  updated_at: string;
+  cities?: { name: string } | null;
+  inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
+}
+
+interface DistributorProductPriceRow {
+  product_id: string;
+  discount_price: number | string;
+}
+
+interface RpcErrorLike {
+  code?: string;
+  message?: string;
+}
+
+const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string => {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${userId}-${Date.now()}-${randomPart}`;
+};
+
+const shouldFallbackToLegacyFlow = (
+  error: RpcErrorLike | null,
+  rpcName: 'create_batch_order_atomic' | 'outbound_stock_atomic',
+): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  const missingByCode = error.code === '42883' || error.code === 'PGRST202';
+
+  if (missingByCode) return true;
+
+  if (rpcName === 'create_batch_order_atomic') {
+    return message.includes('could not find the function public.create_batch_order_atomic');
+  }
+
+  return message.includes('could not find the function public.outbound_stock_atomic');
+};
+
 interface AppState {
   user: Profile | null;
   cities: City[];
@@ -69,7 +158,11 @@ interface AppState {
     discountPrice: number,
   ) => Promise<{ error: Error | null }>;
 
-  updateInventory: (productId: string, quantity: number) => Promise<{ error: Error | null }>;
+  updateInventory: (
+    productId: string,
+    quantity: number,
+    options?: { skipRefresh?: boolean },
+  ) => Promise<{ error: Error | null }>;
   updateInventorySettings: (
     productId: string,
     quantity: number,
@@ -79,11 +172,14 @@ interface AppState {
   inboundStock: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
   outboundStock: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
 
+  backfillBarcodes: () => Promise<{ count: number; error: Error | null }>;
+
   createBatchOrders: (items: CartCreateItem[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
+  uploadProductImage: (uri: string) => Promise<{ publicUrl: string | null; error: Error | null }>;
 }
 
-const mapProfile = (raw: any): Profile => ({
+const mapProfile = (raw: ProfileRow): Profile => ({
   id: raw.id,
   email: raw.email,
   full_name: raw.full_name,
@@ -95,8 +191,8 @@ const mapProfile = (raw: any): Profile => ({
   updated_at: raw.updated_at,
 });
 
-const mapOrder = (raw: any): Order => {
-  const items: OrderItem[] = (raw.order_items || []).map((it: any) => ({
+const mapOrder = (raw: OrderRow): Order => {
+  const items: OrderItem[] = (raw.order_items || []).map((it) => ({
     id: it.id,
     order_id: it.order_id,
     product_id: it.product_id,
@@ -113,7 +209,7 @@ const mapOrder = (raw: any): Order => {
     id: raw.id,
     distributor_id: raw.distributor_id,
     distributor_email: raw.profiles?.email,
-    distributor_store: raw.profiles?.store_name,
+    distributor_store: raw.profiles?.store_name ?? undefined,
     city_id: raw.city_id,
     city_name: raw.cities?.name,
     status: raw.status || 'pending',
@@ -246,25 +342,33 @@ export const useAppStore = create<AppState>()(
             .select('product_id, discount_price')
             .eq('distributor_id', user.id);
 
-          priceMap = new Map((customPrices || []).map((r: any) => [r.product_id, Number(r.discount_price)]));
+          const priceRows = (customPrices || []) as DistributorProductPriceRow[];
+          priceMap = new Map(priceRows.map((row) => [row.product_id, Number(row.discount_price)]));
         }
 
-        const productsWithDetails: ProductWithDetails[] = data
-          .map((p: any) => {
+        const productRows = data as ProductRow[];
+        const productsWithDetails: ProductWithDetails[] = productRows
+          .map((p) => {
             const baseDiscount = Number(p.discount_price || p.price || 0);
             const distributorDiscount = priceMap.get(p.id);
             return {
               ...p,
+              barcode: p.barcode ?? undefined,
+              image_url: p.image_url ?? undefined,
               price: Number(p.price || 0),
               cost: Number(p.cost || 0),
               one_time_cost: Number(p.one_time_cost || 0),
               discount_price: distributorDiscount ?? baseDiscount,
               city_name: p.cities?.name,
-              quantity: p.inventory?.[0]?.quantity,
-              min_quantity: p.inventory?.[0]?.min_quantity,
+              quantity: p.inventory?.[0]?.quantity !== null && p.inventory?.[0]?.quantity !== undefined
+                ? Number(p.inventory[0].quantity)
+                : undefined,
+              min_quantity: p.inventory?.[0]?.min_quantity !== null && p.inventory?.[0]?.min_quantity !== undefined
+                ? Number(p.inventory[0].min_quantity)
+                : undefined,
             };
           })
-          .filter((p: ProductWithDetails) => (user.role === 'distributor' ? p.city_id === user.city_id : true));
+          .filter((p) => (user.role === 'distributor' ? p.city_id === user.city_id : true));
 
         set({ products: productsWithDetails });
       },
@@ -553,14 +657,16 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      updateInventory: async (productId, quantity) => {
+      updateInventory: async (productId, quantity, options) => {
         try {
           const { error } = await supabase
             .from('inventory')
             .update({ quantity, updated_at: new Date().toISOString() })
             .eq('product_id', productId);
           if (error) throw error;
-          await get().fetchProducts();
+          if (!options?.skipRefresh) {
+            await get().fetchProducts();
+          }
           return { error: null };
         } catch (error) {
           return { error: error as Error };
@@ -616,11 +722,30 @@ export const useAppStore = create<AppState>()(
           const currentQty = Number(product.quantity || 0);
           if (currentQty < quantity) throw new Error('库存不足');
 
+          const requestId = createRequestId('outbound', user.id);
+
+          const { error: rpcError } = await supabase.rpc('outbound_stock_atomic', {
+            p_barcode: barcode,
+            p_quantity: quantity,
+            p_request_id: requestId,
+          });
+
+          if (!rpcError) {
+            await Promise.all([get().fetchOrders(), get().fetchProducts()]);
+            return { error: null };
+          }
+
+          if (!shouldFallbackToLegacyFlow(rpcError, 'outbound_stock_atomic')) {
+            throw rpcError;
+          }
+
+          // 出库订单按零售价计算（零售订单）
+          const retailPrice = Number(product.price || 0);
           const orderPayload = {
             distributor_id: user.id,
             city_id: user.city_id ?? product.city_id,
-            total_retail_amount: Number(product.price || 0) * quantity,
-            total_discount_amount: Number(product.discount_price || product.price || 0) * quantity,
+            total_retail_amount: retailPrice * quantity,
+            total_discount_amount: retailPrice * quantity,
           };
 
           const { data: orderData, error: orderError } = await supabase
@@ -636,8 +761,8 @@ export const useAppStore = create<AppState>()(
               order_id: orderData.id,
               product_id: product.id,
               quantity,
-              retail_price: Number(product.price || 0),
-              discount_price: Number(product.discount_price || product.price || 0),
+              retail_price: retailPrice,
+              discount_price: retailPrice,
               unit_cost: Number(product.cost || 0),
               one_time_cost: Number(product.one_time_cost || 0),
             });
@@ -650,6 +775,50 @@ export const useAppStore = create<AppState>()(
           return { error: null };
         } catch (error) {
           return { error: error as Error };
+        }
+      },
+
+      backfillBarcodes: async () => {
+        try {
+          // Find products without barcodes
+          const { data: noBarcodeProducts, error: fetchError } = await supabase
+            .from('products')
+            .select('id')
+            .is('barcode', null);
+          if (fetchError) throw fetchError;
+          if (!noBarcodeProducts || noBarcodeProducts.length === 0) {
+            return { count: 0, error: null };
+          }
+
+          // Get highest existing barcode sequence
+          const { data: latestBarcodeRow } = await supabase
+            .from('products')
+            .select('barcode')
+            .like('barcode', '200%')
+            .order('barcode', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const latestBarcode = latestBarcodeRow?.barcode;
+          let seq = latestBarcode && /^\d{13}$/.test(latestBarcode)
+            ? Number.parseInt(latestBarcode.slice(7, 12), 10)
+            : 0;
+
+          let count = 0;
+          for (const p of noBarcodeProducts) {
+            seq += 1;
+            const barcode = generateEAN13(seq);
+            const { error: updateError } = await supabase
+              .from('products')
+              .update({ barcode })
+              .eq('id', p.id);
+            if (!updateError) count++;
+          }
+
+          await get().fetchProducts();
+          return { count, error: null };
+        } catch (error) {
+          return { count: 0, error: error as Error };
         }
       },
 
@@ -696,6 +865,22 @@ export const useAppStore = create<AppState>()(
               one_time_cost: oneTimeCost,
             };
           });
+
+          const requestId = createRequestId('batch', user.id);
+
+          const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
+            p_items: orderItemsPayload,
+            p_request_id: requestId,
+          });
+
+          if (!rpcError) {
+            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+            return { error: null };
+          }
+
+          if (!shouldFallbackToLegacyFlow(rpcError, 'create_batch_order_atomic')) {
+            throw rpcError;
+          }
 
           const baseOrderPayload = {
             distributor_id: user.id,
@@ -757,7 +942,15 @@ export const useAppStore = create<AppState>()(
                   && (retryCombined.includes('relation "orders"') || retryCombined.includes('table "orders"'));
 
                 if (legacyDashTotalAmountHit) {
-                  const { total_amount: _ignoredTotalAmount, ...legacyDashPayloadBase } = legacyOrderPayload;
+                  const legacyDashPayloadBase = {
+                    distributor_id: legacyOrderPayload.distributor_id,
+                    city_id: legacyOrderPayload.city_id,
+                    total_retail_amount: legacyOrderPayload.total_retail_amount,
+                    total_discount_amount: legacyOrderPayload.total_discount_amount,
+                    product_id: legacyOrderPayload.product_id,
+                    quantity: legacyOrderPayload.quantity,
+                    unit_price: legacyOrderPayload.unit_price,
+                  };
                   orderInsert = await supabase
                     .from('orders')
                     .insert({
@@ -783,7 +976,7 @@ export const useAppStore = create<AppState>()(
             items.map(async (item) => {
               const product = products.find((p) => p.id === item.productId);
               if (!product) return;
-              await get().updateInventory(item.productId, (product.quantity || 0) - item.quantity);
+              await get().updateInventory(item.productId, (product.quantity || 0) - item.quantity, { skipRefresh: true });
             }),
           );
 
@@ -823,25 +1016,70 @@ export const useAppStore = create<AppState>()(
           const { error: deleteError } = await supabase.from('orders').delete().eq('id', orderId);
           if (deleteError) throw deleteError;
 
-          for (const item of items) {
-            const { data: inv, error: invFetchError } = await supabase
+          const restoreMap = new Map<string, number>();
+          items.forEach((item) => {
+            restoreMap.set(item.product_id, (restoreMap.get(item.product_id) || 0) + Number(item.quantity));
+          });
+
+          const restoreProductIds = Array.from(restoreMap.keys());
+          if (restoreProductIds.length > 0) {
+            const { data: inventoryRows, error: invFetchError } = await supabase
               .from('inventory')
-              .select('quantity')
-              .eq('product_id', item.product_id)
-              .single();
+              .select('product_id, quantity')
+              .in('product_id', restoreProductIds);
             if (invFetchError) throw invFetchError;
 
-            const { error: invUpdateError } = await supabase
-              .from('inventory')
-              .update({ quantity: Number(inv?.quantity || 0) + Number(item.quantity), updated_at: new Date().toISOString() })
-              .eq('product_id', item.product_id);
-            if (invUpdateError) throw invUpdateError;
+            const currentInventoryMap = new Map(
+              (inventoryRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]),
+            );
+
+            for (const [productId, restoreQty] of restoreMap) {
+              const { error: invUpdateError } = await supabase
+                .from('inventory')
+                .update({
+                  quantity: (currentInventoryMap.get(productId) || 0) + restoreQty,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('product_id', productId);
+              if (invUpdateError) throw invUpdateError;
+            }
           }
 
           await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };
+        }
+      },
+
+      uploadProductImage: async (uri) => {
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (!session?.user?.id) {
+            throw new Error('登录状态已失效，请重新登录后再上传图片');
+          }
+
+          const fileName = `${session.user.id}/products/${Date.now()}.jpg`;
+          const response = await fetch(uri);
+          const imageBlob = await response.blob();
+
+          const { error } = await supabase.storage
+            .from('product-images')
+            .upload(fileName, imageBlob, {
+              contentType: 'image/jpeg',
+            });
+
+          if (error) throw error;
+
+          const { data: urlData } = supabase.storage
+            .from('product-images')
+            .getPublicUrl(fileName);
+
+          return { publicUrl: urlData?.publicUrl || null, error: null };
+        } catch (error) {
+          return { publicUrl: null, error: error as Error };
         }
       },
     }),

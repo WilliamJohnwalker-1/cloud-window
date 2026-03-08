@@ -14,6 +14,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Minus, Plus, ChevronsDown, ChevronsUp, Search, Pencil, PackageOpen } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import { useShallow } from 'zustand/react/shallow';
+
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius } from '../theme';
 import type { ProductWithDetails } from '../types';
@@ -28,9 +30,20 @@ export default function InventoryScreen() {
     updateInventorySettings,
     findProductByBarcode,
     inboundStock,
-    isLoading,
     user,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      products: state.products,
+      cities: state.cities,
+      fetchProducts: state.fetchProducts,
+      fetchCities: state.fetchCities,
+      updateInventory: state.updateInventory,
+      updateInventorySettings: state.updateInventorySettings,
+      findProductByBarcode: state.findProductByBarcode,
+      inboundStock: state.inboundStock,
+      user: state.user,
+    })),
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'low' | 'normal'>('all');
   const [filterCityId, setFilterCityId] = useState<string | null>(null);

@@ -16,13 +16,30 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import { Barcode } from 'expo-barcode-generator';
+import Svg, { Rect } from 'react-native-svg';
 import { ImageIcon, AlertTriangle, Camera, Search, Package, MapPin } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import { useShallow } from 'zustand/react/shallow';
+
 import { useAppStore } from '../store/useAppStore';
-import { supabase } from '../lib/supabase';
 import { Colors, Shadow, Radius } from '../theme';
+import { encodeEAN13Bars } from '../utils/barcode';
 import type { ProductWithDetails } from '../types';
+
+function BarcodeSvg({ value, height = 50, barWidth = 1.5 }: { value: string; height?: number; barWidth?: number }) {
+  const { bars, totalWidth } = encodeEAN13Bars(value, barWidth);
+  if (bars.length === 0) return <Text style={{ color: Colors.textTertiary, fontSize: 12 }}>{value}</Text>;
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Svg width={totalWidth} height={height}>
+        {bars.map((bar, i) => (
+          <Rect key={i} x={bar.x} y={0} width={bar.w} height={height} fill="#2D2D3F" />
+        ))}
+      </Svg>
+      <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 3, letterSpacing: 2, fontVariant: ['tabular-nums'] }}>{value}</Text>
+    </View>
+  );
+}
 
 export default function ProductsScreen() {
   const {
@@ -36,9 +53,26 @@ export default function ProductsScreen() {
     updateProduct,
     deleteProduct,
     setDistributorProductDiscount,
-    isLoading,
+    backfillBarcodes,
+    uploadProductImage,
     user,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      products: state.products,
+      cities: state.cities,
+      distributors: state.distributors,
+      fetchProducts: state.fetchProducts,
+      fetchCities: state.fetchCities,
+      fetchDistributors: state.fetchDistributors,
+      addProduct: state.addProduct,
+      updateProduct: state.updateProduct,
+      deleteProduct: state.deleteProduct,
+      setDistributorProductDiscount: state.setDistributorProductDiscount,
+      backfillBarcodes: state.backfillBarcodes,
+      uploadProductImage: state.uploadProductImage,
+      user: state.user,
+    })),
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithDetails | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -247,34 +281,12 @@ export default function ProductsScreen() {
   const uploadImage = async (uri: string) => {
     setUploading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user?.id) {
-        throw new Error('登录状态已失效，请重新登录后再上传图片');
-      }
-
-      const fileName = `${session.user.id}/products/${Date.now()}.jpg`;
-
-      const response = await fetch(uri);
-      const imageBlob = await response.blob();
-
-      const { data, error } = await supabase.storage
-        .from('product-images')
-        .upload(fileName, imageBlob, {
-          contentType: 'image/jpeg',
-        });
-
+      const { publicUrl, error } = await uploadProductImage(uri);
       if (error) throw error;
-
-      const { data: urlData } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(fileName);
-
-      if (urlData?.publicUrl) {
-        setImageUrl(urlData.publicUrl);
-      }
-    } catch (error: any) {
+      if (publicUrl) setImageUrl(publicUrl);
+    } catch (error: unknown) {
       console.error('Upload error:', error);
-      const message = error?.message || '无法上传图片';
+      const message = error instanceof Error ? error.message : '无法上传图片';
       if (message.includes('row-level security')) {
         Toast.show({ type: 'error', text1: '上传失败', text2: '存储权限不足（RLS）。请重新登录后重试，或联系管理员执行 storage policy 脚本。' });
       } else {
@@ -305,6 +317,9 @@ export default function ProductsScreen() {
           {!isDistributor ? <Text style={styles.cost}>单个成本: {item.cost}元</Text> : null}
         </View>
         <Text style={styles.discountText}>折扣价: {item.discount_price}元</Text>
+        {isAdminOrManager && item.barcode && (
+          <Text style={styles.barcodeText}>条码: {item.barcode}</Text>
+        )}
         {!isDistributor && (
           <View style={styles.stockRow}>
             <View style={styles.stockBadge}>
@@ -331,6 +346,20 @@ export default function ProductsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>商品管理</Text>
+        {isAdminOrManager && products.some((p) => !p.barcode) && (
+          <TouchableOpacity
+            onPress={async () => {
+              const { count, error } = await backfillBarcodes();
+              if (error) Toast.show({ type: 'error', text1: '生成失败', text2: error.message });
+              else Toast.show({ type: 'success', text1: '条码生成完毕', text2: `已为 ${count} 个商品生成条码` });
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.addButton, { backgroundColor: Colors.blueSoft }]}>
+              <Text style={[styles.addButtonText, { color: Colors.blue }]}>生成条码</Text>
+            </View>
+          </TouchableOpacity>
+        )}
         {isAdminOrManager && (
           <TouchableOpacity onPress={openAddModal} activeOpacity={0.85}>
             <LinearGradient
@@ -535,10 +564,7 @@ export default function ProductsScreen() {
               {editingProduct?.barcode ? (
                 <View style={styles.barcodeSection}>
                   <Text style={styles.sectionLabel}>商品条码</Text>
-                  <Barcode
-                    value={editingProduct.barcode}
-                    options={{ format: 'EAN13', height: 60, width: 1.5, displayValue: true }}
-                  />
+                  <BarcodeSvg value={editingProduct.barcode} height={60} barWidth={1.5} />
                 </View>
               ) : null}
 
@@ -757,6 +783,13 @@ const styles = StyleSheet.create({
   cost: {
     fontSize: 11,
     color: Colors.textTertiary,
+  },
+  barcodeText: {
+    fontSize: 10,
+    color: Colors.textTertiary,
+    marginTop: 2,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.5,
   },
   discountText: {
     fontSize: 12,

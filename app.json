@@ -2,7 +2,7 @@
   "expo": {
     "name": "inventory-app",
     "slug": "inventory-app",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -26,10 +26,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "supabaseUrl": "https://eeqkisidhopqhmkvgirk.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlcWtpc2lkaG9wcWhta3ZnaXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTM5NjYsImV4cCI6MjA4ODI2OTk2Nn0.4S-A71S3eGdd4mRu_fzI3UTr8GjEL2Hf8sSEsjHF-q8"
-    },
+    "extra": {},
     "plugins": [
       "expo-sharing"
     ]

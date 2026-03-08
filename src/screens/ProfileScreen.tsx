@@ -13,8 +13,10 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2 } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
+import { useShallow } from 'zustand/react/shallow';
+
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Shadow, Radius } from '../theme';
+import { Colors, Radius } from '../theme';
 import type { Notification } from '../types';
 
 export default function ProfileScreen() {
@@ -37,7 +39,28 @@ export default function ProfileScreen() {
     acceptOrder,
     markNotificationRead,
     markAllNotificationsRead,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      user: state.user,
+      signOut: state.signOut,
+      setOfflineMode: state.setOfflineMode,
+      isOfflineMode: state.isOfflineMode,
+      cities: state.cities,
+      distributors: state.distributors,
+      notifications: state.notifications,
+      orders: state.orders,
+      fetchCities: state.fetchCities,
+      fetchDistributors: state.fetchDistributors,
+      fetchNotifications: state.fetchNotifications,
+      addCity: state.addCity,
+      deleteCity: state.deleteCity,
+      updateDistributorProfile: state.updateDistributorProfile,
+      updateOwnStoreName: state.updateOwnStoreName,
+      acceptOrder: state.acceptOrder,
+      markNotificationRead: state.markNotificationRead,
+      markAllNotificationsRead: state.markAllNotificationsRead,
+    })),
+  );
 
   const [cityModalVisible, setCityModalVisible] = useState(false);
   const [distributorModalVisible, setDistributorModalVisible] = useState(false);

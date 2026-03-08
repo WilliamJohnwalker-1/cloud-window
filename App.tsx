@@ -3,6 +3,10 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, ActivityIndicator, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
+import type { ToastConfig } from 'react-native-toast-message';
+import { BarChart2, Package, ShoppingCart, TrendingUp, User } from 'lucide-react-native';
+import { useShallow } from 'zustand/react/shallow';
 
 import LoginScreen from './src/screens/LoginScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
@@ -11,10 +15,16 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { useAppStore } from './src/store/useAppStore';
-import { Colors, Shadow, Radius } from './src/theme';
+import { Colors, Shadow } from './src/theme';
 import { supabase } from './src/lib/supabase';
-import { Package, BarChart2, ShoppingCart, TrendingUp, User } from 'lucide-react-native';
-import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
+import { UIManager, Platform } from 'react-native';
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android') {
+  if (UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
 
 const Tab = createBottomTabNavigator();
 
@@ -40,8 +50,8 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 function MainTabs() {
-  const { fetchAllData } = useAppStore();
-  const { user: storedUser } = useAppStore();
+  const fetchAllData = useAppStore((state) => state.fetchAllData);
+  const storedUser = useAppStore((state) => state.user);
 
   useEffect(() => {
     if (storedUser) {
@@ -91,39 +101,34 @@ function MainTabs() {
   );
 }
 
-const toastConfig = {
-  success: (props: any) => (
-    <BaseToast
-      {...props}
-      style={{ borderLeftColor: Colors.success, borderRadius: 12, borderLeftWidth: 4 }}
-      contentContainerStyle={{ paddingHorizontal: 15 }}
-      text1Style={{ fontSize: 15, fontWeight: '600', color: Colors.textPrimary }}
-      text2Style={{ fontSize: 13, color: Colors.textSecondary }}
-    />
+const toastConfig: ToastConfig = {
+  success: ({ props }) => (
+    <BaseToast {...props} style={{ borderLeftColor: Colors.success, borderLeftWidth: 6, backgroundColor: Colors.surface }} />
   ),
-  error: (props: any) => (
-    <ErrorToast
-      {...props}
-      style={{ borderLeftColor: Colors.danger, borderRadius: 12, borderLeftWidth: 4 }}
-      contentContainerStyle={{ paddingHorizontal: 15 }}
-      text1Style={{ fontSize: 15, fontWeight: '600', color: Colors.textPrimary }}
-      text2Style={{ fontSize: 13, color: Colors.textSecondary }}
-    />
+  error: ({ props }) => (
+    <ErrorToast {...props} style={{ borderLeftColor: Colors.danger, borderLeftWidth: 6, backgroundColor: Colors.surface }} />
   ),
-  info: (props: any) => (
-    <BaseToast
-      {...props}
-      style={{ borderLeftColor: Colors.blue, borderRadius: 12, borderLeftWidth: 4 }}
-      contentContainerStyle={{ paddingHorizontal: 15 }}
-      text1Style={{ fontSize: 15, fontWeight: '600', color: Colors.textPrimary }}
-      text2Style={{ fontSize: 13, color: Colors.textSecondary }}
-    />
-  ),
+};
+
+const toastAnimationConfig = {
+  //
+  // Automatically configure Toast message animations with a subtle spring bounce
+  // for entrance and a smooth fade for exit, creating a playful yet professional feel.
+  // This draws attention to the message without being jarring.
+  //
+  velocity: 1000, // Speed of the bounce
+  tension: 68,     // Tension for bounciness (higher = more bounce)
+  friction: 12,    // Friction to slow down (higher = slower)
 };
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const { user, setUser } = useAppStore();
+  const { user, setUser } = useAppStore(
+    useShallow((state) => ({
+      user: state.user,
+      setUser: state.setUser,
+    })),
+  );
 
   useEffect(() => {
     const initApp = async () => {
@@ -147,8 +152,8 @@ export default function App() {
         console.error('Error loading stored user:', error);
         try {
           await AsyncStorage.removeItem('inventory-app-storage');
-        } catch (e) {
-          // ignore
+        } catch (storageError) {
+          console.warn('Failed clearing local storage after init error:', storageError);
         }
       } finally {
         setIsLoading(false);

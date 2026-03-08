@@ -12,12 +12,12 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import { useShallow } from 'zustand/react/shallow';
+import { BarChart3, TrendingUp, Download, AlertTriangle } from 'lucide-react-native';
+import { BarChart, PieChart } from 'react-native-gifted-charts';
+import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius } from '../theme';
-import { BarChart3, TrendingUp, Download } from 'lucide-react-native';
-import { BarChart, PieChart } from 'react-native-gifted-charts';
-import Toast from 'react-native-toast-message';
 
 type ReportType = 'sales' | 'inventory' | 'profit';
 
@@ -405,14 +405,17 @@ export default function ReportsScreen() {
         <Text style={styles.cardSubtitle}>动销率 = 销售数量 / 当前库存，低于0.5标红</Text>
         {salesData.topProductsVelocity.length > 0 ? (
           salesData.topProductsVelocity.map((item, index) => (
-            <View key={item.name} style={styles.velocityItem}>
+            <View key={item.name} style={[styles.velocityItem, item.isUnhealthy && styles.velocityUnhealthyBg]}>
               <View style={styles.velocityRank}>
                 <Text style={styles.velocityRankText}>{index + 1}</Text>
               </View>
               <View style={styles.velocityInfo}>
-                <Text style={[styles.velocityName, item.isUnhealthy && styles.velocityUnhealthy]}>
-                  {item.name}
-                </Text>
+                <View style={styles.velocityNameRow}>
+                  {item.isUnhealthy && <AlertTriangle size={14} color={Colors.danger} style={styles.alertIcon} />}
+                  <Text style={[styles.velocityName, item.isUnhealthy && styles.velocityUnhealthy]}>
+                    {item.name}
+                  </Text>
+                </View>
                 <Text style={styles.velocityMeta}>
                   销量{item.quantity} / 库存{item.inventory} = 动销率{item.velocity.toFixed(2)}
                 </Text>
@@ -646,7 +649,10 @@ const styles = StyleSheet.create({
   velocityRank: { width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.pink, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   velocityRankText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   velocityInfo: { flex: 1 },
+  velocityNameRow: { flexDirection: 'row', alignItems: 'center' },
   velocityName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   velocityUnhealthy: { color: Colors.danger },
+  velocityUnhealthyBg: { backgroundColor: 'rgba(248, 113, 113, 0.05)' },
+  alertIcon: { marginRight: 6 },
   velocityMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 });

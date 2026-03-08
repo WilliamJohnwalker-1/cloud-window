@@ -12,11 +12,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useAppStore } from '../store/useAppStore';
-import { supabase } from '../lib/supabase';
-import { Colors, Shadow, Radius } from '../theme';
+import { useShallow } from 'zustand/react/shallow';
 
-const logoAvatar = require('../../assets/ui/login-avatar.png');
+import { useAppStore } from '../store/useAppStore';
+import { Colors, Gradients, Shadow, Radius } from '../theme';
+import logoAvatar from '../../assets/ui/login-avatar.png';
 
 export default function LoginScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -25,7 +25,15 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [selectedCityId, setSelectedCityId] = useState('');
   const [storeName, setStoreName] = useState('');
-  const { signIn, signUp, fetchCities, cities, isLoading } = useAppStore();
+  const { signIn, signUp, fetchCities, cities, isLoading } = useAppStore(
+    useShallow((state) => ({
+      signIn: state.signIn,
+      signUp: state.signUp,
+      fetchCities: state.fetchCities,
+      cities: state.cities,
+      isLoading: state.isLoading,
+    })),
+  );
 
   React.useEffect(() => {
     fetchCities();
@@ -61,20 +69,15 @@ export default function LoginScreen() {
       if (error) {
         alert(error.message);
       } else {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          // App.tsx listens to user/session state and will render main tabs automatically.
-        } else {
-          alert('注册成功！请检查邮箱验证或直接登录。');
-          setIsLogin(true);
-        }
+        alert('注册成功！请检查邮箱验证或直接登录。');
+        setIsLogin(true);
       }
     }
   };
 
   return (
     <LinearGradient
-      colors={['#FF6B9D', '#C77DFF', '#5B8DEF']}
+      colors={[Colors.gradientStart, Colors.gradientMid, Colors.gradientEnd]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.gradient}
@@ -158,7 +161,7 @@ export default function LoginScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#FF6B9D', '#5B8DEF']}
+                colors={Gradients.primary}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.button}
