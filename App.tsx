@@ -17,14 +17,6 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import { useAppStore } from './src/store/useAppStore';
 import { Colors, Shadow } from './src/theme';
 import { supabase } from './src/lib/supabase';
-import { UIManager, Platform } from 'react-native';
-
-// Enable LayoutAnimation on Android
-if (Platform.OS === 'android') {
-  if (UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-  }
-}
 
 const Tab = createBottomTabNavigator();
 
