@@ -16,7 +16,9 @@ import ReportsScreen from './src/screens/ReportsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { useAppStore } from './src/store/useAppStore';
 import { Colors, Shadow } from './src/theme';
-import { supabase } from './src/lib/supabase';
+import { supabase, supabaseConfigError } from './src/lib/supabase';
+
+const Tab = createBottomTabNavigator();
 
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
   const IconComponent = {
@@ -40,9 +42,6 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 function MainTabs() {
-  // ✅ FIX: Move navigator creation INSIDE component (prevents Android crash)
-  const Tab = createBottomTabNavigator();
-
   const fetchAllData = useAppStore((state) => state.fetchAllData);
   const storedUser = useAppStore((state) => state.user);
 
@@ -50,7 +49,7 @@ function MainTabs() {
     if (storedUser) {
       fetchAllData();
     }
-  }, [storedUser]);
+  }, [fetchAllData, storedUser]);
 
   return (
     <Tab.Navigator
@@ -154,13 +153,22 @@ export default function App() {
     };
 
     initApp();
-  }, []);
+  }, [setUser]);
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={Colors.pink} />
         <Text style={styles.loadingText}>加载中...</Text>
+      </View>
+    );
+  }
+
+  if (supabaseConfigError) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.configErrorTitle}>配置错误</Text>
+        <Text style={styles.configErrorText}>{supabaseConfigError}</Text>
       </View>
     );
   }
@@ -186,6 +194,19 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: Colors.textSecondary,
     fontSize: 15,
+  },
+  configErrorTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.danger,
+  },
+  configErrorText: {
+    marginTop: 12,
+    paddingHorizontal: 24,
+    color: Colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   tabBar: {
     backgroundColor: Colors.surface,
