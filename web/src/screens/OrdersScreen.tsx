@@ -7,8 +7,10 @@ type OrderFilter = 'all' | 'pending' | 'accepted';
 
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders } = useAppStore();
+  const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
 
@@ -44,6 +46,11 @@ export const OrdersScreen: React.FC = () => {
   const totalDiscountAmount = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity, 0);
   }, [cartItems]);
+
+  const detailOrder = useMemo(() => {
+    if (!detailOrderId) return null;
+    return orders.find((item) => item.id === detailOrderId) || null;
+  }, [detailOrderId, orders]);
 
   const exportCsv = (): void => {
     const header = '订单号,状态,城市,分销商,总额,创建时间';
@@ -124,7 +131,7 @@ export const OrdersScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {user?.role === 'distributor' && (
+          {canCreateOrder && (
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
@@ -213,16 +220,20 @@ export const OrdersScreen: React.FC = () => {
 
               <div className="flex items-center space-x-4">
                 <p className="text-sm text-white/40">共 {order.items.length} 种商品</p>
-                <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-accent group-hover:border-accent transition-all">
+                <button
+                  type="button"
+                  onClick={() => setDetailOrderId(order.id)}
+                  className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-accent group-hover:border-accent transition-all"
+                >
                   <ChevronRight size={18} className="text-white group-hover:scale-110 transition-transform" />
-                </div>
+                </button>
               </div>
             </div>
           </motion.div>
         ))}
       </div>
 
-      {showCreateModal && user?.role === 'distributor' && (
+      {showCreateModal && canCreateOrder && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
             <div className="flex items-center justify-between">
@@ -299,6 +310,56 @@ export const OrdersScreen: React.FC = () => {
                   确认下单
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailOrder && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">订单明细 #{detailOrder.id.slice(0, 8)}</h3>
+              <button type="button" onClick={() => setDetailOrderId(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">状态：</span>{detailOrder.status}</div>
+              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
+              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
+              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
+            </div>
+
+            <div className="border border-white/10 rounded-2xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-white/[0.03]">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-white/50">商品</th>
+                    <th className="text-right px-4 py-3 text-white/50">数量</th>
+                    <th className="text-right px-4 py-3 text-white/50">零售价</th>
+                    <th className="text-right px-4 py-3 text-white/50">折扣价</th>
+                    <th className="text-right px-4 py-3 text-white/50">小计</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailOrder.items.map((item) => (
+                    <tr key={item.id} className="border-t border-white/5">
+                      <td className="px-4 py-3">{item.product_name || item.product_id}</td>
+                      <td className="px-4 py-3 text-right">{item.quantity}</td>
+                      <td className="px-4 py-3 text-right">¥{item.retail_price}</td>
+                      <td className="px-4 py-3 text-right">¥{item.discount_price}</td>
+                      <td className="px-4 py-3 text-right">¥{(item.discount_price * item.quantity).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end gap-6 text-sm">
+              <p><span className="text-white/50">零售总额：</span>¥{detailOrder.total_retail_amount.toFixed(2)}</p>
+              <p><span className="text-white/50">折扣总额：</span><span className="text-accent font-bold">¥{detailOrder.total_discount_amount.toFixed(2)}</span></p>
             </div>
           </div>
         </div>

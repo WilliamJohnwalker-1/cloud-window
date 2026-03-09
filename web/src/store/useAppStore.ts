@@ -124,6 +124,7 @@ interface AppState {
   fetchAllData: () => Promise<void>;
 
   addProduct: (payload: ProductCreateInput) => Promise<{ error: Error | null }>;
+  updateProduct: (productId: string, payload: ProductCreateInput) => Promise<{ error: Error | null }>;
   updateInventoryByProduct: (
     productId: string,
     nextQty: number,
@@ -393,6 +394,30 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      updateProduct: async (productId, payload) => {
+        try {
+          const { error } = await supabase
+            .from('products')
+            .update({
+              name: payload.name,
+              price: Number(payload.price),
+              cost: Number(payload.cost),
+              one_time_cost: Number(payload.one_time_cost || 0),
+              discount_price: Number(payload.discount_price),
+              city_id: payload.city_id,
+              image_url: payload.image_url ?? null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', productId);
+          if (error) throw error;
+
+          await get().fetchProducts();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
       updateInventoryByProduct: async (productId, nextQty, options) => {
         try {
           if (nextQty < 0) throw new Error('库存不能为负数');
@@ -543,10 +568,13 @@ export const useAppStore = create<AppState>()(
           for (const item of items) {
             const product = products.find((p) => p.id === item.productId);
             if (!product) continue;
-            await get().updateInventoryByProduct(product.id, Number(product.quantity || 0) - item.quantity, {
-              action: 'manual_adjust',
-              note: `下单扣减 ${item.quantity}`,
-            });
+
+            const nextQty = Number(product.quantity || 0) - item.quantity;
+            const { error: inventoryError } = await supabase
+              .from('inventory')
+              .update({ quantity: nextQty, updated_at: new Date().toISOString() })
+              .eq('product_id', product.id);
+            if (inventoryError) throw inventoryError;
           }
 
           const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
