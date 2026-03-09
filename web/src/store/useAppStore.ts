@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase } from '../lib/supabase';
+import { generateEAN13 } from '../utils/barcode';
 import type {
   City,
   InventoryLog,
@@ -347,7 +348,7 @@ export const useAppStore = create<AppState>()(
 
       addProduct: async (payload) => {
         try {
-          const { error } = await supabase.from('products').insert({
+          const { data: createdProduct, error: insertError } = await supabase.from('products').insert({
             name: payload.name,
             price: Number(payload.price),
             cost: Number(payload.cost),
@@ -355,8 +356,36 @@ export const useAppStore = create<AppState>()(
             discount_price: Number(payload.discount_price),
             city_id: payload.city_id,
             image_url: payload.image_url ?? null,
+          }).select('id').single();
+          if (insertError) throw insertError;
+
+          const { data: latestBarcodeRow } = await supabase
+            .from('products')
+            .select('barcode')
+            .like('barcode', '200%')
+            .order('barcode', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const latestBarcode = latestBarcodeRow?.barcode;
+          const latestSequence = latestBarcode && /^\d{13}$/.test(latestBarcode)
+            ? Number.parseInt(latestBarcode.slice(7, 12), 10)
+            : 0;
+          const nextSequence = Number.isFinite(latestSequence) ? latestSequence + 1 : 1;
+          const barcode = generateEAN13(nextSequence);
+
+          const { error: updateBarcodeError } = await supabase
+            .from('products')
+            .update({ barcode })
+            .eq('id', createdProduct.id);
+          if (updateBarcodeError) throw updateBarcodeError;
+
+          await supabase.from('inventory').insert({
+            product_id: createdProduct.id,
+            quantity: 0,
+            min_quantity: 10,
           });
-          if (error) throw error;
+
           await get().fetchProducts();
           return { error: null };
         } catch (error) {

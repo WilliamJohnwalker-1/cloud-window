@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Filter, Package, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { BarcodePreview } from '../components/BarcodePreview';
 import { useAppStore } from '../store/useAppStore';
 
 export const ProductsScreen: React.FC = () => {
@@ -125,6 +126,7 @@ export const ProductsScreen: React.FC = () => {
                     <span className="text-xs font-mono text-accent font-bold">{product.barcode || '无条码'}</span>
                   </div>
                 </div>
+                <BarcodePreview code={product.barcode} />
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
