@@ -12,13 +12,11 @@ import {
   TextInput,
   Image,
   Animated,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download, ChevronDown } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
-import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius } from '../theme';
@@ -72,13 +70,13 @@ export default function OrdersScreen() {
     fetchOrders();
     fetchProducts();
     fetchDistributors();
-  }, []);
+  }, [fetchDistributors, fetchOrders, fetchProducts]);
 
   useEffect(() => {
     animatedHeight.setValue(120);
     animatedChevron.setValue(180);
     animatedOpacity.setValue(1);
-  }, []);
+  }, [animatedChevron, animatedHeight, animatedOpacity]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -179,12 +177,12 @@ export default function OrdersScreen() {
   }, [orders, isAdmin, selectedDistributorId]);
 
   const monthlyTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => monthlyProductStats[idx] ?? null),
+    () => Array.from({ length: 5 }, (_, idx) => ({ key: `m-${idx + 1}`, row: monthlyProductStats[idx] ?? null })),
     [monthlyProductStats],
   );
 
   const cumulativeTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => cumulativeProductStats[idx] ?? null),
+    () => Array.from({ length: 5 }, (_, idx) => ({ key: `c-${idx + 1}`, row: cumulativeProductStats[idx] ?? null })),
     [cumulativeProductStats],
   );
 
@@ -395,6 +393,7 @@ export default function OrdersScreen() {
         '',
       ]);
       const sheetData = [headers, ...dataRows];
+      const XLSX = await import('xlsx');
       const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
       const colWidths = headers.map((h, colIdx) => {
@@ -419,6 +418,25 @@ export default function OrdersScreen() {
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '送货单');
+
+      if (Platform.OS === 'web') {
+        const arrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+        const blob = new Blob([arrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      const FileSystem = await import('expo-file-system/legacy');
+      const Sharing = await import('expo-sharing');
       const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
       const uri = `${FileSystem.cacheDirectory}delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`;
       await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
@@ -670,16 +688,16 @@ export default function OrdersScreen() {
             <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
                 <Text style={styles.statsSubTitle}>本月</Text>
-                {monthlyTopRows.map((row, idx) => (
-                  <Text key={`m-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                {monthlyTopRows.map(({ key, row }) => (
+                  <Text key={key} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
                     {row ? `${row.name}: ${row.quantity}` : '—'}
                   </Text>
                 ))}
               </View>
               <View style={styles.statsColumn}>
                 <Text style={styles.statsSubTitle}>累计</Text>
-                {cumulativeTopRows.map((row, idx) => (
-                  <Text key={`c-${idx}`} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                {cumulativeTopRows.map(({ key, row }) => (
+                  <Text key={key} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
                     {row ? `${row.name}: ${row.quantity}` : '—'}
                   </Text>
                 ))}
