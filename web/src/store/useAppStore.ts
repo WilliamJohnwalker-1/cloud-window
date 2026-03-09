@@ -79,6 +79,29 @@ interface InventoryLogRow {
   products?: { name?: string } | null;
 }
 
+interface CartCreateItem {
+  productId: string;
+  quantity: number;
+}
+
+interface RpcErrorLike {
+  code?: string;
+  message?: string;
+}
+
+const createRequestId = (userId: string): string => {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `batch-${userId}-${Date.now()}-${randomPart}`;
+};
+
+const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  const missingByCode = error.code === '42883' || error.code === 'PGRST202';
+  if (missingByCode) return true;
+  return message.includes('could not find the function public.create_batch_order_atomic');
+};
+
 interface AppState {
   user: Profile | null;
   cities: City[];
@@ -106,9 +129,11 @@ interface AppState {
     options?: { action?: InventoryLog['action']; note?: string },
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
+  createBatchOrders: (items: CartCreateItem[]) => Promise<{ error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   updateOwnProfile: (payload: ProfileUpdateInput) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
+  markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
 }
 
@@ -409,6 +434,110 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      createBatchOrders: async (items) => {
+        const { user, products } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (items.length === 0) return { error: new Error('购物车为空') };
+
+        try {
+          if (user.role === 'distributor') {
+            const outOfCity = items.find((item) => {
+              const product = products.find((p) => p.id === item.productId);
+              return product && product.city_id !== user.city_id;
+            });
+            if (outOfCity) return { error: new Error('分销商只能下所属城市商品') };
+          }
+
+          let totalRetail = 0;
+          let totalDiscount = 0;
+          let orderCityId: string | undefined;
+
+          const orderItemsPayload = items.map((item) => {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) throw new Error('商品不存在');
+            if (item.quantity <= 0 || item.quantity % 5 !== 0) throw new Error(`${product.name} 数量必须是5的倍数`);
+
+            const available = Number(product.quantity || 0);
+            if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
+
+            const retailPrice = Number(product.price || 0);
+            const discountPrice = Number(product.discount_price || product.price || 0);
+            const unitCost = Number(product.cost || 0);
+            const oneTimeCost = Number(product.one_time_cost || 0);
+
+            totalRetail += retailPrice * item.quantity;
+            totalDiscount += discountPrice * item.quantity;
+            orderCityId = product.city_id;
+
+            return {
+              product_id: product.id,
+              quantity: item.quantity,
+              retail_price: retailPrice,
+              discount_price: discountPrice,
+              unit_cost: unitCost,
+              one_time_cost: oneTimeCost,
+            };
+          });
+
+          const requestId = createRequestId(user.id);
+          const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
+            p_items: orderItemsPayload,
+            p_request_id: requestId,
+          });
+
+          if (!rpcError) {
+            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+            return { error: null };
+          }
+
+          if (!shouldFallbackToLegacyFlow(rpcError as RpcErrorLike)) {
+            throw rpcError;
+          }
+
+          const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .insert({
+              distributor_id: user.id,
+              city_id: user.city_id ?? orderCityId,
+              total_retail_amount: totalRetail,
+              total_discount_amount: totalDiscount,
+            })
+            .select('id')
+            .single();
+          if (orderError) throw orderError;
+
+          const { error: itemError } = await supabase
+            .from('order_items')
+            .insert(orderItemsPayload.map((item) => ({ ...item, order_id: orderData.id })));
+          if (itemError) throw itemError;
+
+          for (const item of items) {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) continue;
+            await get().updateInventoryByProduct(product.id, Number(product.quantity || 0) - item.quantity, {
+              action: 'manual_adjust',
+              note: `下单扣减 ${item.quantity}`,
+            });
+          }
+
+          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+          if (admins && admins.length > 0) {
+            const notifications = admins.map((admin: { id: string }) => ({
+              user_id: admin.id,
+              type: 'new_order' as const,
+              order_id: orderData.id,
+              message: `新订单 #${orderData.id.slice(0, 8)} 来自 ${user.store_name || user.email}`,
+            }));
+            await supabase.from('notifications').insert(notifications);
+          }
+
+          await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
       acceptOrder: async (orderId) => {
         try {
           const { error } = await supabase.from('orders').update({ status: 'accepted' }).eq('id', orderId);
@@ -450,6 +579,11 @@ export const useAppStore = create<AppState>()(
 
       updateOwnStoreName: async (storeName) => {
         return get().updateOwnProfile({ store_name: storeName });
+      },
+
+      markNotificationRead: async (notificationId) => {
+        await supabase.from('notifications').update({ is_read: true }).eq('id', notificationId);
+        await get().fetchNotifications();
       },
 
       markAllNotificationsRead: async () => {

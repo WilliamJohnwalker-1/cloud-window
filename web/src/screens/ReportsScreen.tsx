@@ -114,7 +114,7 @@ export const ReportsScreen: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">销售趋势（真实订单）</h3>
+            <h3 className="text-xl font-bold">销售趋势</h3>
             <button type="button" onClick={exportSalesCsv} className="text-white/40 hover:text-white transition-colors">
               <Download size={20} />
             </button>
@@ -140,7 +140,7 @@ export const ReportsScreen: React.FC = () => {
 
         <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">城市销售占比（真实订单）</h3>
+            <h3 className="text-xl font-bold">城市销售占比</h3>
           </div>
           <div className="h-[300px] flex items-center">
             <ResponsiveContainer width="100%" height="100%">
@@ -159,7 +159,7 @@ export const ReportsScreen: React.FC = () => {
 
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">商品销售额排行（真实订单）</h3>
+          <h3 className="text-xl font-bold">商品销售额排行</h3>
           <button type="button" onClick={exportProductCsv} className="text-white/40 hover:text-white transition-colors">
             <Download size={20} />
           </button>
