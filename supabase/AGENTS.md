@@ -12,6 +12,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v2.2-unit-cost-snapshot.sql`: Order item cost snapshot.
 - `migrate-v2.3-barcode.sql`: Barcode field.
 - `migrate-v2.4-atomic-order-workflows.sql`: Transactional RPC for order/outbound workflows.
+- `migrate-v2.5-inventory-logs.sql`: Inventory movement logging table + RLS.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -22,7 +23,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 3. `migrate-v2.2-unit-cost-snapshot.sql`
 4. `migrate-v2.3-barcode.sql`
 5. `migrate-v2.4-atomic-order-workflows.sql`
-6. `storage-policies.sql`
+6. `migrate-v2.5-inventory-logs.sql`
+7. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -30,7 +32,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 3. `migrate-v2.2-unit-cost-snapshot.sql`
 4. `migrate-v2.3-barcode.sql`
 5. `migrate-v2.4-atomic-order-workflows.sql`
-6. `storage-policies.sql`
+6. `migrate-v2.5-inventory-logs.sql`
+7. `storage-policies.sql`
 
 ## TABLES
 

@@ -1,6 +1,6 @@
 # 云窗文创 · 供销管理系统
 
-基于 **Expo + React Native + TypeScript + Supabase** 的移动端供销管理系统（v2）。
+基于 **Expo + React Native + TypeScript + Supabase** 的供销管理系统（移动端 + Web 端）。
 
 > 品牌文案已更新为：**云窗文创 / 供销管理系统**。
 
@@ -66,6 +66,7 @@
 ## 技术栈
 
 - 前端：Expo ~55、React Native 0.83、TypeScript
+- Web 前端：Vite + React + TypeScript + Tailwind + Zustand
 - 状态管理：Zustand + AsyncStorage
 - 后端：Supabase（PostgreSQL / Auth / Storage）
 - 导出：`xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`
@@ -100,7 +101,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
-6. 执行 `supabase/storage-policies.sql`
+6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
+7. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -109,13 +111,22 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 3. 执行 `supabase/migrate-v2.2-unit-cost-snapshot.sql`
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
-6. 执行 `supabase/storage-policies.sql`
+6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
+7. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
 ```bash
 npx expo start
 ```
+
+### 5. 启动 Web 端（v1.1.0）
+
+```bash
+npm run web:v2
+```
+
+> Web 端目录：`web/`（与移动端代码完全分离）
 
 ## 目录结构
 
@@ -182,11 +193,24 @@ npx expo start
 
 ## 后续规划
 
+- [ ] 直营店 Web 收款正式接入：微信 Native 支付 + 支付宝当面付（含签名、回调验签、幂等、对账）
+- [ ] Cloudflare Worker 支付生产配置（商户密钥、回调地址白名单、监控告警）
 - [ ] 通知链路自动化测试（store 层）
 - [ ] 推送通知接入（FCM/APNs）
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.1.0 (2026-03-10) - 管理台功能打通
+
+- Web 与后端正式打通：商品新增、库存增减、扫码/条码入库、订单接单、个人资料编辑
+- 新增库存变动日志（`inventory_logs`）及对应迁移 `migrate-v2.5-inventory-logs.sql`
+- 报表改为真实订单数据计算（非 mock），支持销售趋势/商品排行 CSV 导出
+
+### Web v1.0.0 (2026-03-10) - Web 首次上线
+
+- 完成 Web 控制台部署上线（左侧导航 + 科技感 UI 基础框架）
+- 建立独立 Web 工程目录 `web/`，与移动端解耦
 
 ### v2.2 (2026-03-08) - 订单优化
 

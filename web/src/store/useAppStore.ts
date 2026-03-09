@@ -1,0 +1,469 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { supabase } from '../lib/supabase';
+import type {
+  City,
+  InventoryLog,
+  Notification,
+  Order,
+  OrderItem,
+  ProductCreateInput,
+  ProfileUpdateInput,
+  ProductWithDetails,
+  Profile,
+} from '../types';
+
+interface ProfileRow {
+  id: string;
+  email: string;
+  full_name?: string;
+  role: Profile['role'];
+  city_id?: string | null;
+  cities?: { name: string } | null;
+  store_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ProductRow {
+  id: string;
+  name: string;
+  price?: number | string | null;
+  cost?: number | string | null;
+  one_time_cost?: number | string | null;
+  discount_price?: number | string | null;
+  barcode?: string | null;
+  image_url?: string | null;
+  city_id: string;
+  created_at: string;
+  updated_at: string;
+  cities?: { name: string } | null;
+  inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
+}
+
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string;
+  quantity: number;
+  retail_price?: number | string | null;
+  discount_price?: number | string | null;
+  unit_cost?: number | string | null;
+  one_time_cost?: number | string | null;
+  products?: { name?: string; cities?: { name: string } | null } | null;
+}
+
+interface OrderRow {
+  id: string;
+  distributor_id: string;
+  profiles?: { email?: string; store_name?: string | null } | null;
+  city_id?: string | null;
+  cities?: { name: string } | null;
+  status: Order['status'];
+  total_retail_amount?: number | string | null;
+  total_discount_amount?: number | string | null;
+  created_at: string;
+  order_items?: OrderItemRow[];
+}
+
+interface InventoryLogRow {
+  id: string;
+  product_id: string;
+  operator_id: string;
+  action: InventoryLog['action'];
+  delta_quantity: number;
+  before_quantity: number;
+  after_quantity: number;
+  note?: string | null;
+  created_at: string;
+  products?: { name?: string } | null;
+}
+
+interface AppState {
+  user: Profile | null;
+  cities: City[];
+  products: ProductWithDetails[];
+  orders: Order[];
+  notifications: Notification[];
+  inventoryLogs: InventoryLog[];
+  isLoading: boolean;
+
+  setLoading: (loading: boolean) => void;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signOut: () => Promise<void>;
+
+  fetchCities: () => Promise<void>;
+  fetchProducts: () => Promise<void>;
+  fetchOrders: () => Promise<void>;
+  fetchNotifications: () => Promise<void>;
+  fetchInventoryLogs: () => Promise<void>;
+  fetchAllData: () => Promise<void>;
+
+  addProduct: (payload: ProductCreateInput) => Promise<{ error: Error | null }>;
+  updateInventoryByProduct: (
+    productId: string,
+    nextQty: number,
+    options?: { action?: InventoryLog['action']; note?: string },
+  ) => Promise<{ error: Error | null }>;
+  inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
+  acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
+  updateOwnProfile: (payload: ProfileUpdateInput) => Promise<{ error: Error | null }>;
+  updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
+  markAllNotificationsRead: () => Promise<void>;
+}
+
+const mapProfile = (row: ProfileRow): Profile => ({
+  id: row.id,
+  email: row.email,
+  full_name: row.full_name,
+  role: row.role,
+  city_id: row.city_id,
+  city_name: row.cities?.name,
+  store_name: row.store_name,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+});
+
+const mapProducts = (rows: ProductRow[]): ProductWithDetails[] => {
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    price: Number(row.price || 0),
+    cost: Number(row.cost || 0),
+    one_time_cost: Number(row.one_time_cost || 0),
+    discount_price: Number(row.discount_price || row.price || 0),
+    barcode: row.barcode ?? undefined,
+    image_url: row.image_url ?? undefined,
+    city_id: row.city_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    city_name: row.cities?.name,
+    quantity: row.inventory?.[0]?.quantity !== undefined && row.inventory?.[0]?.quantity !== null
+      ? Number(row.inventory[0].quantity)
+      : undefined,
+    min_quantity: row.inventory?.[0]?.min_quantity !== undefined && row.inventory?.[0]?.min_quantity !== null
+      ? Number(row.inventory[0].min_quantity)
+      : undefined,
+  }));
+};
+
+const mapOrder = (row: OrderRow): Order => {
+  const items: OrderItem[] = (row.order_items || []).map((item) => ({
+    id: item.id,
+    order_id: item.order_id,
+    product_id: item.product_id,
+    product_name: item.products?.name,
+    city_name: item.products?.cities?.name,
+    quantity: Number(item.quantity || 0),
+    retail_price: Number(item.retail_price || 0),
+    discount_price: Number(item.discount_price || 0),
+    unit_cost: Number(item.unit_cost || 0),
+    one_time_cost: Number(item.one_time_cost || 0),
+  }));
+
+  return {
+    id: row.id,
+    distributor_id: row.distributor_id,
+    distributor_email: row.profiles?.email,
+    distributor_store: row.profiles?.store_name ?? undefined,
+    city_id: row.city_id ?? undefined,
+    city_name: row.cities?.name,
+    status: row.status,
+    total_retail_amount: Number(row.total_retail_amount || 0),
+    total_discount_amount: Number(row.total_discount_amount || 0),
+    created_at: row.created_at,
+    items,
+  };
+};
+
+const mapInventoryLog = (row: InventoryLogRow): InventoryLog => ({
+  id: row.id,
+  product_id: row.product_id,
+  product_name: row.products?.name,
+  operator_id: row.operator_id,
+  action: row.action,
+  delta_quantity: Number(row.delta_quantity || 0),
+  before_quantity: Number(row.before_quantity || 0),
+  after_quantity: Number(row.after_quantity || 0),
+  note: row.note ?? undefined,
+  created_at: row.created_at,
+});
+
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      user: null,
+      cities: [],
+      products: [],
+      orders: [],
+      notifications: [],
+      inventoryLogs: [],
+      isLoading: false,
+
+      setLoading: (isLoading) => set({ isLoading }),
+
+      signIn: async (email, password) => {
+        set({ isLoading: true });
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+
+          if (data.user) {
+            const { data: profile, error: profileError } = await supabase
+              .from('profiles')
+              .select('*, cities(name)')
+              .eq('id', data.user.id)
+              .single();
+            if (profileError) throw profileError;
+            set({ user: mapProfile(profile as ProfileRow) });
+          }
+
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      signOut: async () => {
+        await supabase.auth.signOut();
+        set({ user: null, cities: [], products: [], orders: [], notifications: [], inventoryLogs: [] });
+      },
+
+      fetchCities: async () => {
+        const { data, error } = await supabase.from('cities').select('*').order('name');
+        if (!error && data) set({ cities: data as City[] });
+      },
+
+      fetchProducts: async () => {
+        const { user } = get();
+        if (!user) return;
+        const { data, error } = await supabase
+          .from('products')
+          .select('*, cities(name), inventory(quantity, min_quantity)')
+          .order('name');
+        if (error || !data) return;
+
+        const all = mapProducts(data as ProductRow[]);
+        set({
+          products: user.role === 'distributor'
+            ? all.filter((p) => p.city_id === user.city_id)
+            : all,
+        });
+      },
+
+      fetchOrders: async () => {
+        const { user } = get();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from('orders')
+          .select(`
+            *,
+            cities(name),
+            profiles:distributor_id(email,store_name),
+            order_items(
+              *,
+              products(name, cities(name))
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .limit(300);
+        if (error || !data) return;
+
+        const mapped = (data as OrderRow[])
+          .map(mapOrder)
+          .filter((order) => (user.role === 'distributor' ? order.distributor_id === user.id : true));
+        set({ orders: mapped });
+      },
+
+      fetchNotifications: async () => {
+        const { user } = get();
+        if (!user) return;
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (!error && data) set({ notifications: data as Notification[] });
+      },
+
+      fetchInventoryLogs: async () => {
+        const { user } = get();
+        if (!user || user.role === 'distributor') {
+          set({ inventoryLogs: [] });
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('inventory_logs')
+          .select('*, products(name)')
+          .order('created_at', { ascending: false })
+          .limit(200);
+
+        if (!error && data) {
+          set({ inventoryLogs: (data as InventoryLogRow[]).map(mapInventoryLog) });
+        }
+      },
+
+      fetchAllData: async () => {
+        set({ isLoading: true });
+        await Promise.all([
+          get().fetchCities(),
+          get().fetchProducts(),
+          get().fetchOrders(),
+          get().fetchNotifications(),
+          get().fetchInventoryLogs(),
+        ]);
+        set({ isLoading: false });
+      },
+
+      addProduct: async (payload) => {
+        try {
+          const { error } = await supabase.from('products').insert({
+            name: payload.name,
+            price: Number(payload.price),
+            cost: Number(payload.cost),
+            one_time_cost: Number(payload.one_time_cost || 0),
+            discount_price: Number(payload.discount_price),
+            city_id: payload.city_id,
+            image_url: payload.image_url ?? null,
+          });
+          if (error) throw error;
+          await get().fetchProducts();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateInventoryByProduct: async (productId, nextQty, options) => {
+        try {
+          if (nextQty < 0) throw new Error('库存不能为负数');
+          const { user, products } = get();
+          if (!user) throw new Error('未登录');
+
+          const currentProduct = products.find((item) => item.id === productId);
+          const beforeQty = Number(currentProduct?.quantity || 0);
+
+          const { data: existing } = await supabase
+            .from('inventory')
+            .select('id')
+            .eq('product_id', productId)
+            .maybeSingle();
+
+          if (existing?.id) {
+            const { error } = await supabase
+              .from('inventory')
+              .update({ quantity: nextQty, updated_at: new Date().toISOString() })
+              .eq('product_id', productId);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase
+              .from('inventory')
+              .insert({ product_id: productId, quantity: nextQty, min_quantity: 10 });
+            if (error) throw error;
+          }
+
+          const delta = nextQty - beforeQty;
+          if (delta !== 0) {
+            const { error: logError } = await supabase.from('inventory_logs').insert({
+              product_id: productId,
+              operator_id: user.id,
+              action: options?.action || 'manual_adjust',
+              delta_quantity: delta,
+              before_quantity: beforeQty,
+              after_quantity: nextQty,
+              note: options?.note ?? null,
+            });
+            if (logError) throw logError;
+          }
+
+          await Promise.all([get().fetchProducts(), get().fetchInventoryLogs()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      inboundStockByBarcode: async (barcode, quantity) => {
+        try {
+          const normalized = barcode.trim();
+          if (!normalized) throw new Error('条码不能为空');
+          if (quantity <= 0) throw new Error('入库数量必须大于 0');
+
+          const product = get().products.find((p) => p.barcode === normalized);
+          if (!product) throw new Error('未找到对应条码商品');
+
+          const currentQty = Number(product.quantity || 0);
+          const result = await get().updateInventoryByProduct(product.id, currentQty + quantity, {
+            action: 'inbound',
+            note: `条码入库 ${normalized}`,
+          });
+          if (result.error) throw result.error;
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      acceptOrder: async (orderId) => {
+        try {
+          const { error } = await supabase.from('orders').update({ status: 'accepted' }).eq('id', orderId);
+          if (error) throw error;
+          await Promise.all([get().fetchOrders(), get().fetchNotifications()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateOwnProfile: async (payload) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+
+          const updatePayload: Record<string, string> = {
+            updated_at: new Date().toISOString(),
+          };
+          if (payload.full_name !== undefined) updatePayload.full_name = payload.full_name.trim();
+          if (payload.store_name !== undefined) updatePayload.store_name = payload.store_name.trim();
+
+          const { error } = await supabase.from('profiles').update(updatePayload).eq('id', user.id);
+          if (error) throw error;
+
+          set({
+            user: {
+              ...user,
+              full_name: payload.full_name !== undefined ? payload.full_name.trim() : user.full_name,
+              store_name: payload.store_name !== undefined ? payload.store_name.trim() : user.store_name,
+              updated_at: updatePayload.updated_at,
+            },
+          });
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateOwnStoreName: async (storeName) => {
+        return get().updateOwnProfile({ store_name: storeName });
+      },
+
+      markAllNotificationsRead: async () => {
+        const { user, notifications } = get();
+        if (!user) return;
+        const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
+        if (unreadIds.length === 0) return;
+        await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
+        await get().fetchNotifications();
+      },
+    }),
+    {
+      name: 'inventory-web-storage',
+      partialize: (state) => ({ user: state.user }),
+    },
+  ),
+);
