@@ -4,7 +4,9 @@ main = "workers/payment.js"
 compatibility_date = "2024-01-01"
 
 [env.production]
-vars = { }
+# IMPORTANT:
+# Do NOT set `vars = {}` here. Keeping it empty in config may override
+# dashboard-defined plain-text vars during deploy workflows.
 
 [[env.production.r2_buckets]]
 binding = "MOBILE_APK_BUCKET"
@@ -16,8 +18,7 @@ bucket_name = "cloud-window-apk-prod"
 # database_name = "inventory-payments"
 # database_id = "your-database-id"
 
-[vars]
-# These should be set via Cloudflare Dashboard or secrets
+# Variables should be set via Cloudflare Dashboard or secrets
 # PAYMENT_MOCK = "true"
 # WECHAT_MCH_ID = ""
 # WECHAT_API_KEY = ""
