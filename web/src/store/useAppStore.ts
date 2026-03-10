@@ -108,6 +108,14 @@ const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
   return message.includes('could not find the function public.create_batch_order_atomic');
 };
 
+const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  return error.code === '42883'
+    || error.code === 'PGRST202'
+    || message.includes('could not find the function');
+};
+
 interface AppState {
   user: Profile | null;
   cities: City[];
@@ -118,6 +126,7 @@ interface AppState {
   isLoading: boolean;
 
   setLoading: (loading: boolean) => void;
+  ensureActiveSession: () => Promise<Error | null>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 
@@ -254,6 +263,21 @@ export const useAppStore = create<AppState>()(
 
       setLoading: (isLoading) => set({ isLoading }),
 
+      ensureActiveSession: async () => {
+        const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
+        if (checkError) {
+          if (isMissingRpcFunction(checkError)) return null;
+          return checkError as Error;
+        }
+
+        if (!checkResult) {
+          await get().signOut();
+          return new Error('账号已在其他设备登录，请重新登录');
+        }
+
+        return null;
+      },
+
       signIn: async (email, password) => {
         set({ isLoading: true });
         try {
@@ -272,6 +296,12 @@ export const useAppStore = create<AppState>()(
               .single();
             if (profileError) throw profileError;
             set({ user: mapProfile(profile as ProfileRow) });
+
+            const { error: activateError } = await supabase.rpc('activate_current_session');
+            if (activateError && !isMissingRpcFunction(activateError)) {
+              await get().signOut();
+              throw activateError;
+            }
           }
 
           return { error: null };
@@ -283,8 +313,11 @@ export const useAppStore = create<AppState>()(
       },
 
       signOut: async () => {
-        await supabase.auth.signOut();
-        set({ user: null, cities: [], products: [], orders: [], notifications: [], inventoryLogs: [] });
+        try {
+          await supabase.auth.signOut();
+        } finally {
+          set({ user: null, cities: [], products: [], orders: [], notifications: [], inventoryLogs: [] });
+        }
       },
 
       fetchCities: async () => {
@@ -486,6 +519,11 @@ export const useAppStore = create<AppState>()(
 
       fetchAllData: async () => {
         set({ isLoading: true });
+        const sessionError = await get().ensureActiveSession();
+        if (sessionError) {
+          set({ isLoading: false });
+          return;
+        }
         await Promise.all([
           get().fetchCities(),
           get().fetchProducts(),

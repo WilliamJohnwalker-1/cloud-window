@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { Text, View, ActivityIndicator, StyleSheet, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import type { ToastConfig } from 'react-native-toast-message';
@@ -16,6 +16,7 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { useAppStore } from './src/store/useAppStore';
+import AppConfirmModal from './src/components/AppConfirmModal';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
 
@@ -101,11 +102,21 @@ function MainTabs() {
 }
 
 const toastConfig: ToastConfig = {
-  success: ({ props }) => (
-    <BaseToast {...props} style={{ borderLeftColor: Colors.success, borderLeftWidth: 6, backgroundColor: Colors.surface }} />
+  success: ({ ...props }) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: Colors.success, borderLeftWidth: 6, backgroundColor: Colors.surface }}
+      text1Style={{ color: Colors.textPrimary, fontSize: 15, fontWeight: '700' }}
+      text2Style={{ color: Colors.textSecondary, fontSize: 13 }}
+    />
   ),
-  error: ({ props }) => (
-    <ErrorToast {...props} style={{ borderLeftColor: Colors.danger, borderLeftWidth: 6, backgroundColor: Colors.surface }} />
+  error: ({ ...props }) => (
+    <ErrorToast
+      {...props}
+      style={{ borderLeftColor: Colors.danger, borderLeftWidth: 6, backgroundColor: Colors.surface }}
+      text1Style={{ color: Colors.textPrimary, fontSize: 15, fontWeight: '700' }}
+      text2Style={{ color: Colors.textSecondary, fontSize: 13 }}
+    />
   ),
 };
 
@@ -122,6 +133,7 @@ const toastAnimationConfig = {
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
+  const [launchUpdateVisible, setLaunchUpdateVisible] = useState(false);
   const { user, setUser, isDarkMode } = useAppStore(
     useShallow((state) => ({
       user: state.user,
@@ -130,6 +142,7 @@ export default function App() {
     })),
   );
   const theme = isDarkMode ? DarkColors : LightColors;
+  const ensureActiveSession = useAppStore((state) => state.ensureActiveSession);
 
   useEffect(() => {
     const initApp = async () => {
@@ -137,6 +150,13 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (!session) {
+          setUser(null);
+          await AsyncStorage.removeItem('inventory-app-storage');
+          return;
+        }
+
+        const sessionError = await ensureActiveSession();
+        if (sessionError) {
           setUser(null);
           await AsyncStorage.removeItem('inventory-app-storage');
           return;
@@ -162,7 +182,7 @@ export default function App() {
     };
 
     initApp();
-  }, [setUser]);
+  }, [setUser, ensureActiveSession]);
 
   useEffect(() => {
     const checkUpdatesOnLaunch = async (): Promise<void> => {
@@ -173,15 +193,7 @@ export default function App() {
         if (!update.isAvailable) return;
 
         await Updates.fetchUpdateAsync();
-        Alert.alert('发现新版本', '更新已下载，是否立即重启应用完成更新？', [
-          { text: '稍后', style: 'cancel' },
-          {
-            text: '立即更新',
-            onPress: async () => {
-              await Updates.reloadAsync();
-            },
-          },
-        ]);
+        setLaunchUpdateVisible(true);
       } catch (error) {
         console.warn('Failed checking OTA updates on launch:', error);
       }
@@ -191,6 +203,50 @@ export default function App() {
       void checkUpdatesOnLaunch();
     }
   }, [isLoading]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      if (!user) return;
+      const checkSession = async () => {
+        const sessionError = await ensureActiveSession();
+        if (sessionError && sessionError.message.includes('其他设备')) {
+          Toast.show({ type: 'error', text1: '登录状态失效', text2: sessionError.message });
+        }
+      };
+      void checkSession();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [ensureActiveSession, user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const timer = setInterval(() => {
+      void ensureActiveSession();
+    }, 15000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [ensureActiveSession, user]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [setUser]);
 
   if (isLoading) {
     return (
@@ -216,6 +272,19 @@ export default function App() {
       <NavigationContainer>
         {user ? <MainTabs /> : <LoginScreen />}
       </NavigationContainer>
+      <AppConfirmModal
+        visible={launchUpdateVisible}
+        isDarkMode={isDarkMode}
+        title="发现新版本"
+        message="更新已下载，是否立即重启应用完成更新？"
+        confirmText="立即更新"
+        cancelText="稍后"
+        onCancel={() => setLaunchUpdateVisible(false)}
+        onConfirm={() => {
+          setLaunchUpdateVisible(false);
+          void Updates.reloadAsync();
+        }}
+      />
       <Toast config={toastConfig} />
     </>
   );

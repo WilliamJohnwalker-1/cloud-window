@@ -22,6 +22,8 @@ function App() {
   const {
     user,
     fetchAllData,
+    ensureActiveSession,
+    signOut,
     isLoading,
     markAllNotificationsRead,
     markNotificationRead,
@@ -39,9 +41,42 @@ function App() {
 
   useEffect(() => {
     if (user) {
-      fetchAllData();
+      void fetchAllData();
     }
   }, [fetchAllData, user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const validateSession = async () => {
+      const sessionError = await ensureActiveSession();
+      if (sessionError) {
+        await signOut();
+      }
+    };
+
+    const onFocus = () => {
+      void validateSession();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void validateSession();
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void validateSession();
+    }, 10000);
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [ensureActiveSession, signOut, user]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent): void => {
