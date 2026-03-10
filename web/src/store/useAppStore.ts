@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseConfigError } from '../lib/supabase';
 import { generateEAN13 } from '../utils/barcode';
 import type {
   City,
@@ -257,6 +257,10 @@ export const useAppStore = create<AppState>()(
       signIn: async (email, password) => {
         set({ isLoading: true });
         try {
+          if (supabaseConfigError) {
+            throw new Error(supabaseConfigError);
+          }
+
           const { data, error } = await supabase.auth.signInWithPassword({ email, password });
           if (error) throw error;
 
