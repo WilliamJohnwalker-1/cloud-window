@@ -2,30 +2,30 @@
   "expo": {
     "name": "云窗文创",
     "slug": "inventory-app",
-    "version": "2.1.4",
+    "version": "2.1.5",
     "orientation": "portrait",
-    "icon": "assets/ui/login-avatar.png",
+    "icon": "./assets/ui/login-avatar.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/ui/login-avatar.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FF6B9D"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "icon": "./assets/ui/login-avatar.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#FF6B9D",
+        "foregroundImage": "./assets/ui/login-avatar.png"
       },
+      "icon": "./assets/ui/login-avatar.png",
       "predictiveBackGestureEnabled": false,
       "package": "com.williamjohnwalker.inventoryapp"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/ui/login-avatar.png"
     },
     "runtimeVersion": {
       "policy": "appVersion"

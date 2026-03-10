@@ -6,6 +6,11 @@
 
 供销管理系统 v2 — 多角色供应链管理（管理员/分销商/库存管理员）。支持城市维度商品、订单流程、通知接单、报表导出、条码入库/出库。
 
+## CURRENT MOBILE VERSION
+
+- 当前移动端版本：`v2.1.5`（2026-03-10）
+- 本次重点：头像选择体验优化（动物/水果/蔬菜分类）、Toast 可读性修复、搜索框稳定性与布局微调、订单统计展开区自适应
+
 ## COMMANDS
 
 ```bash
@@ -197,10 +202,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.6-order-item-rls-hardening.sql -> 8. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.6-order-item-rls-hardening.sql -> 8. migrate-v2.7-session-avatar.sql -> 9. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-8 same as above
+1. migrate-v2.sql -> 2-9 same as above
 
 ## GOTCHAS
 

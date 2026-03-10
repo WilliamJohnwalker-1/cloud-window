@@ -104,7 +104,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
-8. 执行 `supabase/storage-policies.sql`
+8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
+9. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -115,7 +116,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
-8. 执行 `supabase/storage-policies.sql`
+8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
+9. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -222,6 +224,13 @@ eas update --channel production --message "mobile ota: 描述本次改动"
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.5 (2026-03-10) - 头像与搜索体验优化
+
+- 头像库调整为动物 / 水果 / 蔬菜分类样式，减少网络依赖并提升可识别度
+- 修复“更换头像”后的反馈弹层可读性问题，统一 Toast 文本样式
+- 搜索框交互稳定性与布局微调：修复 placeholder 上下抖动，优化商品页搜索框与城市筛选区间距
+- 订单页商品数量统计展开区改为自适应内容，避免文本溢出到搜索区域
 
 ### Mobile v2.1.4 (2026-03-10) - 应用内更新（OTA）接入
 
