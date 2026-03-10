@@ -254,6 +254,7 @@ npm run push:both
 - 优化登录校验耗时：会话校验增加节流与并发去重，减少重复 RPC
 - 应用内“检查更新”支持二进制更新提示，自动引导到 APK 下载入口
 - 补齐 Cloudflare R2 分发链路：Worker 支持 `/mobile/download/latest.apk` 回源下载
+- **已知问题（待修复）**：`cloud-window.williamjohnnen.workers.dev` 在部分网络环境下仍存在 443 连通性失败，导致 APK 下载链路未完全打通
 
 ### Mobile v2.1.5 (2026-03-10) - 头像/搜索体验与发布链路合并更新
 

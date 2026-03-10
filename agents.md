@@ -228,3 +228,32 @@ Before committing:
   1. `eas build --platform android --profile production`
   2. `npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window`
   3. `npm run push:both`
+
+## APK DOWNLOAD INCIDENT PLAYBOOK
+
+When user says "修复 APK 下载问题" or similar, prioritize these solutions in order:
+
+1. **Cloudflare custom domain for Worker/R2** (preferred)
+   - Keep Worker + R2 logic unchanged
+   - Move download endpoint from `*.workers.dev` to custom domain route
+   - Update client API base URL to custom domain
+
+2. **GitHub Releases as APK mirror**
+   - Upload APK as release asset
+   - Worker only returns release download URL in manifest
+
+3. **Dual-source download fallback**
+   - Primary: Worker/R2 route
+   - Secondary: alternate CDN/object storage URL
+   - Client auto-fallback on connectivity failure
+
+4. **Domestic CDN/object storage fallback (if CN network issues)**
+   - OSS/COS/Qiniu as backup source
+
+5. **Store-based distribution path (long-term)**
+   - In-app version check + jump to store page
+
+Execution rules:
+- Diagnose network reachability (`/health`, `/mobile/latest.json`, `/mobile/download/latest.apk`) first
+- Prefer minimum-change path (domain/routing) before replacing storage architecture
+- Document root cause and final selected path in README release notes
