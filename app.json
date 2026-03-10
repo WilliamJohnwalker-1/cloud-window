@@ -2,7 +2,7 @@
   "expo": {
     "name": "云窗文创",
     "slug": "inventory-app",
-    "version": "2.1.3",
+    "version": "2.1.4",
     "orientation": "portrait",
     "icon": "assets/ui/login-avatar.png",
     "userInterfaceStyle": "light",
@@ -27,13 +27,22 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e50b22c1-bcd0-4ed4-b5df-630bf406f124",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "extra": {
       "eas": {
         "projectId": "e50b22c1-bcd0-4ed4-b5df-630bf406f124"
       }
     },
     "plugins": [
-      "expo-sharing"
+      "expo-sharing",
+      "expo-updates"
     ]
   }
 }

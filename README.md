@@ -70,6 +70,7 @@
 - 状态管理：Zustand + AsyncStorage
 - 后端：Supabase（PostgreSQL / Auth / Storage）
 - 导出：`xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`
+- OTA 更新：`expo-updates` + EAS Update
 - UI组件：Lucide React Native（矢量图标）、react-native-gifted-charts（图表）、react-native-toast-message（提示）
 - 设计系统：粉蓝年轻化主题（src/theme.ts）
 
@@ -129,6 +130,14 @@ npm run web:v2
 ```
 
 > Web 端目录：`web/`（与移动端代码完全分离）
+
+### 6. 移动端 OTA 发布（应用内更新）
+
+```bash
+eas update --channel production --message "mobile ota: 描述本次改动"
+```
+
+> 说明：仅前端逻辑/UI改动可 OTA，下沉到原生层的改动仍需重新打包 APK。
 
 ## 目录结构
 
@@ -202,6 +211,12 @@ npm run web:v2
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.4 (2026-03-10) - 应用内更新（OTA）接入
+
+- 接入 `expo-updates`，支持应用启动自动检查更新
+- 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
+- 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
 
 ### Web v1.2.3 (2026-03-10) - 订单与导出链路调整
 
