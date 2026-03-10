@@ -131,6 +131,17 @@ npm run web:v2
 
 > Web 端目录：`web/`（与移动端代码完全分离）
 
+#### Web 环境变量（Cloudflare/本地）
+
+Web 登录依赖以下变量（推荐使用 `VITE_` 前缀）：
+
+```env
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+> 兼容 `EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY`，但部署时建议统一使用 `VITE_*`。
+
 ### 6. 移动端 OTA 发布（应用内更新）
 
 ```bash
