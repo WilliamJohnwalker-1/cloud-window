@@ -3,6 +3,7 @@ import { Bell, ChevronRight, LogOut, Mail, MapPin, Palette, Settings, Shield, St
 import type { LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import webPackage from '../../package.json';
 
 interface SectionItem {
   label: string;
@@ -61,7 +62,7 @@ export const ProfileScreen: React.FC = () => {
           <p className="text-white/40 mt-1">{user.email}</p>
           <div className="flex items-center space-x-2 mt-4">
             <span className="px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[10px] font-black uppercase tracking-widest">{user.role}</span>
-            <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/40 text-[10px] font-black uppercase tracking-widest">v2.1.2 Production</span>
+            <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/40 text-[10px] font-black uppercase tracking-widest">v{webPackage.version} Web</span>
           </div>
         </div>
       </motion.div>

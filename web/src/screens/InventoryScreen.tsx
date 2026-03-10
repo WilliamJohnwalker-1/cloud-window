@@ -1,11 +1,13 @@
 import React from 'react';
-import { AlertTriangle, History, Minus, Plus, RefreshCcw, ScanLine } from 'lucide-react';
+import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 export const InventoryScreen: React.FC = () => {
   const { products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
+  const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
+  const [editingQuantityText, setEditingQuantityText] = React.useState('');
 
   const lowStockCount = products.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity || 10)).length;
 
@@ -96,6 +98,8 @@ export const InventoryScreen: React.FC = () => {
                       <button
                         type="button"
                         onClick={async () => {
+                          const confirmed = window.confirm(`确认将 ${product.name} 库存减少 5 吗？`);
+                          if (!confirmed) return;
                           const { error } = await updateInventoryByProduct(product.id, Math.max(0, currentQty - 5), {
                             action: 'quick_reduce',
                             note: '库存页快捷 -5',
@@ -109,6 +113,8 @@ export const InventoryScreen: React.FC = () => {
                       <button
                         type="button"
                         onClick={async () => {
+                          const confirmed = window.confirm(`确认将 ${product.name} 库存增加 5 吗？`);
+                          if (!confirmed) return;
                           const { error } = await updateInventoryByProduct(product.id, currentQty + 5, {
                             action: 'quick_add',
                             note: '库存页快捷 +5',
@@ -119,26 +125,60 @@ export const InventoryScreen: React.FC = () => {
                       >
                         <Plus size={16} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const raw = window.prompt('输入目标库存数量', String(currentQty));
-                          if (!raw) return;
-                          const qty = Number(raw);
-                          if (!Number.isFinite(qty)) {
-                            window.alert('请输入有效数字');
-                            return;
-                          }
-                          const { error } = await updateInventoryByProduct(product.id, qty, {
-                            action: 'manual_adjust',
-                            note: '库存页手动设置',
-                          });
-                          if (error) window.alert(`设置库存失败：${error.message}`);
-                        }}
-                        className="p-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
-                      >
-                        <RefreshCcw size={16} />
-                      </button>
+                      {editingProductId === product.id ? (
+                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1 border border-white/10">
+                          <input
+                            value={editingQuantityText}
+                            onChange={(event) => setEditingQuantityText(event.target.value.replace(/[^0-9]/g, ''))}
+                            className="w-20 bg-transparent outline-none text-sm"
+                            placeholder="数量"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const qty = Number(editingQuantityText);
+                              if (!Number.isFinite(qty)) {
+                                window.alert('请输入有效数字');
+                                return;
+                              }
+                              const { error } = await updateInventoryByProduct(product.id, qty, {
+                                action: 'manual_adjust',
+                                note: '库存页行内编辑',
+                              });
+                              if (error) {
+                                window.alert(`设置库存失败：${error.message}`);
+                                return;
+                              }
+                              setEditingProductId(null);
+                              setEditingQuantityText('');
+                            }}
+                            className="p-1 rounded bg-green-500/20 text-green-300"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingProductId(null);
+                              setEditingQuantityText('');
+                            }}
+                            className="p-1 rounded bg-red-500/20 text-red-300"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProductId(product.id);
+                            setEditingQuantityText(String(currentQty));
+                          }}
+                          className="p-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </motion.tr>

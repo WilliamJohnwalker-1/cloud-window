@@ -9,14 +9,16 @@ import {
   TextInput,
   FlatList,
   ScrollView,
+  Switch,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2 } from 'lucide-react-native';
+import Constants from 'expo-constants';
+import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Radius } from '../theme';
+import { Colors, LightColors, DarkColors, Radius } from '../theme';
 import type { Notification } from '../types';
 
 export default function ProfileScreen() {
@@ -25,6 +27,8 @@ export default function ProfileScreen() {
     signOut,
     setOfflineMode,
     isOfflineMode,
+    isDarkMode,
+    setDarkMode,
     cities,
     distributors,
     notifications,
@@ -45,6 +49,8 @@ export default function ProfileScreen() {
       signOut: state.signOut,
       setOfflineMode: state.setOfflineMode,
       isOfflineMode: state.isOfflineMode,
+      isDarkMode: state.isDarkMode,
+      setDarkMode: state.setDarkMode,
       cities: state.cities,
       distributors: state.distributors,
       notifications: state.notifications,
@@ -66,6 +72,7 @@ export default function ProfileScreen() {
   const [distributorModalVisible, setDistributorModalVisible] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
+  const [aboutModalVisible, setAboutModalVisible] = useState(false);
   const [newCityName, setNewCityName] = useState('');
   const [editingDistributorId, setEditingDistributorId] = useState<string | null>(null);
   const [editCityId, setEditCityId] = useState('');
@@ -73,6 +80,8 @@ export default function ProfileScreen() {
   const [ownStoreName, setOwnStoreName] = useState(user?.store_name || '');
   const [savingOwnStore, setSavingOwnStore] = useState(false);
 
+  const theme = isDarkMode ? DarkColors : LightColors;
+  const appVersion = Constants.expoConfig?.version || '未知版本';
   const isAdmin = user?.role === 'admin';
   const isDistributor = user?.role === 'distributor';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
@@ -81,7 +90,7 @@ export default function ProfileScreen() {
     fetchCities();
     if (isAdmin) fetchDistributors();
     fetchNotifications();
-  }, []);
+  }, [isAdmin, fetchCities, fetchDistributors, fetchNotifications]);
 
   useEffect(() => {
     setOwnStoreName(user?.store_name || '');
@@ -206,7 +215,14 @@ export default function ProfileScreen() {
       label: `通知${unreadCount > 0 ? ` (${unreadCount})` : ''}`,
       onPress: () => { fetchNotifications(); setNotificationModalVisible(true); markAllNotificationsRead(); },
     },
-    { IconComponent: Info, label: '关于', onPress: () => {} },
+    {
+      IconComponent: isDarkMode ? Sun : Moon,
+      label: '深色模式',
+      isSwitch: true,
+      value: isDarkMode,
+      onValueChange: (val: boolean) => setDarkMode(val),
+    },
+    { IconComponent: Info, label: '关于', onPress: () => setAboutModalVisible(true) },
   ];
 
   const renderNotification = ({ item }: { item: Notification }) => {
@@ -215,34 +231,34 @@ export default function ProfileScreen() {
     const alreadyAccepted = orderObj?.status === 'accepted';
 
     return (
-      <View style={[styles.notifRow, !item.is_read && styles.notifUnread]}>
-        <View style={styles.notifIcon}>
+      <View style={[styles.notifRow, !item.is_read && { backgroundColor: isDarkMode ? theme.blueBg : theme.pinkBg }, { borderBottomColor: theme.divider }]}>
+        <View style={[styles.notifIcon, { backgroundColor: theme.surfaceSecondary }]}>
           {isNewOrder ? (
-            <PackagePlus size={18} color={Colors.pink} />
+            <PackagePlus size={18} color={theme.pink} />
           ) : (
-            <CheckCircle2 size={18} color={Colors.success} />
+            <CheckCircle2 size={18} color={theme.success} />
           )}
         </View>
         <View style={styles.notifContent}>
-          <Text style={styles.notifMessage}>{item.message}</Text>
-          <Text style={styles.notifTime}>{new Date(item.created_at).toLocaleString('zh-CN')}</Text>
+          <Text style={[styles.notifMessage, { color: theme.textPrimary }]}>{item.message}</Text>
+          <Text style={[styles.notifTime, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleString('zh-CN')}</Text>
         </View>
         {isNewOrder && isAdmin && !alreadyAccepted && item.order_id && (
           <TouchableOpacity
-            style={styles.acceptBtn}
+            style={[styles.acceptBtn, { backgroundColor: theme.success }]}
             onPress={() => handleAcceptOrder(item.order_id!, item.id)}
           >
             <Text style={styles.acceptBtnText}>接单</Text>
           </TouchableOpacity>
         )}
         {isNewOrder && alreadyAccepted && (
-          <View style={styles.acceptedBadge}>
-            <Text style={styles.acceptedBadgeText}>已接单</Text>
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}>
+            <Text style={[styles.acceptedBadgeText, { color: theme.success }]}>已接单</Text>
           </View>
         )}
         {!isNewOrder && (
-          <View style={styles.acceptedBadge}>
-            <Text style={styles.acceptedBadgeText}>已接单</Text>
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}>
+            <Text style={[styles.acceptedBadgeText, { color: theme.success }]}>已接单</Text>
           </View>
         )}
       </View>
@@ -250,9 +266,9 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.scrollContent}>
       <LinearGradient
-        colors={['#FF6B9D', '#C77DFF', '#5B8DEF']}
+        colors={[theme.pink, theme.gradientMid, theme.blue]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.profileCardGradient}
@@ -271,70 +287,118 @@ export default function ProfileScreen() {
         </View>
       </LinearGradient>
 
-      <View style={styles.menu}>
-        {menuItems.map((item, index) => (
+      <View style={[styles.menu, { backgroundColor: theme.surface }]}>
+        {menuItems.map((item) => (
           <TouchableOpacity
-            key={index}
-            style={[styles.menuItem, index === menuItems.length - 1 && styles.menuItemLast]}
+            key={item.label}
+            style={[
+              styles.menuItem, 
+              item === menuItems[menuItems.length - 1] && styles.menuItemLast,
+              { borderBottomColor: theme.divider }
+            ]}
             onPress={item.onPress}
-            activeOpacity={0.7}
+            activeOpacity={item.isSwitch ? 1 : 0.7}
+            disabled={item.isSwitch}
           >
             <View style={styles.menuIcon}>
-              <item.IconComponent size={22} color={Colors.blue} strokeWidth={2} />
+              <item.IconComponent size={22} color={theme.blue} strokeWidth={2} />
             </View>
-            <Text style={styles.menuText}>{item.label}</Text>
-            {item.IconComponent === Bell && unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-              </View>
+            <Text style={[styles.menuText, { color: theme.textPrimary }]}>{item.label}</Text>
+            {item.isSwitch ? (
+              <Switch
+                value={item.value}
+                onValueChange={item.onValueChange}
+                trackColor={{ false: theme.border, true: theme.pinkLight }}
+                thumbColor={item.value ? theme.pink : theme.textTertiary}
+              />
+            ) : (
+              <>
+                {item.IconComponent === Bell && unreadCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  </View>
+                )}
+                <Text style={[styles.menuArrow, { color: theme.textTertiary }]}>›</Text>
+              </>
             )}
-            <Text style={styles.menuArrow}>›</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut} activeOpacity={0.85}>
+      <TouchableOpacity style={[styles.logoutButton, { backgroundColor: theme.surface }]} onPress={handleSignOut} activeOpacity={0.85}>
         <Text style={styles.logoutText}>退出登录</Text>
       </TouchableOpacity>
 
-      <Text style={styles.version}>版本 2.0.0</Text>
+      <Text style={[styles.version, { color: theme.textTertiary }]}>版本 {appVersion}</Text>
+
+      {/* About Modal */}
+      <Modal visible={aboutModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>关于</Text>
+              <TouchableOpacity onPress={() => setAboutModalVisible(false)}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.aboutContent}>
+              <LinearGradient
+                colors={[theme.pink, theme.blue]}
+                style={styles.logoGradient}
+              >
+                <Info size={40} color="#fff" />
+              </LinearGradient>
+              <Text style={[styles.aboutAppTitle, { color: theme.textPrimary }]}>云窗文创 · 供销管理系统</Text>
+              <Text style={[styles.aboutVersion, { color: theme.textSecondary }]}>Version {appVersion}</Text>
+              <View style={[styles.devBox, { backgroundColor: theme.surfaceSecondary }]}>
+                <Text style={[styles.devText, { color: theme.textPrimary }]}>
+                  开发者：辣椒与葱花&&土豆和地瓜
+                </Text>
+              </View>
+              <Text style={[styles.aboutCopyright, { color: theme.textTertiary }]}>
+                © 2026 云窗文创 版权所有
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Personal Info Modal */}
       <Modal visible={profileModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>个人信息</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>个人信息</Text>
               <TouchableOpacity onPress={() => setProfileModalVisible(false)}>
                 <Text style={styles.closeButton}>关闭</Text>
               </TouchableOpacity>
             </View>
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>邮箱</Text>
-              <Text style={styles.infoValue}>{user?.email}</Text>
+            <View style={[styles.infoRow, { borderBottomColor: theme.divider }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>邮箱</Text>
+              <Text style={[styles.infoValue, { color: theme.textPrimary }]}>{user?.email}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>角色</Text>
-              <Text style={styles.infoValue}>{getRoleName(user?.role || '')}</Text>
+            <View style={[styles.infoRow, { borderBottomColor: theme.divider }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>角色</Text>
+              <Text style={[styles.infoValue, { color: theme.textPrimary }]}>{getRoleName(user?.role || '')}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>归属城市</Text>
-              <Text style={styles.infoValue}>{user?.city_name || '未设置'}</Text>
+            <View style={[styles.infoRow, { borderBottomColor: theme.divider }]}>
+              <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>归属城市</Text>
+              <Text style={[styles.infoValue, { color: theme.textPrimary }]}>{user?.city_name || '未设置'}</Text>
             </View>
 
             {isDistributor && (
               <>
-                <Text style={styles.editSectionLabel}>修改店面名称</Text>
+                <Text style={[styles.editSectionLabel, { color: theme.textPrimary }]}>修改店面名称</Text>
                 <TextInput
-                  style={styles.storeNameInput}
+                  style={[styles.storeNameInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                   value={ownStoreName}
                   onChangeText={setOwnStoreName}
                   placeholder="输入新店面名称"
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
                 <TouchableOpacity
-                  style={[styles.saveOwnBtn, savingOwnStore && styles.disabledBtn]}
+                  style={[styles.saveOwnBtn, savingOwnStore && styles.disabledBtn, { backgroundColor: theme.pink }]}
                   onPress={handleSaveOwnStore}
                   disabled={savingOwnStore}
                 >
@@ -344,9 +408,9 @@ export default function ProfileScreen() {
             )}
 
             {!isDistributor && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>店面</Text>
-                <Text style={styles.infoValue}>{user?.store_name || '-'}</Text>
+              <View style={[styles.infoRow, { borderBottomColor: theme.divider }]}>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>店面</Text>
+                <Text style={[styles.infoValue, { color: theme.textPrimary }]}>{user?.store_name || '-'}</Text>
               </View>
             )}
           </View>
@@ -356,9 +420,9 @@ export default function ProfileScreen() {
       {/* Notifications Modal */}
       <Modal visible={notificationModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>通知</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>通知</Text>
               <TouchableOpacity onPress={() => setNotificationModalVisible(false)}>
                 <Text style={styles.closeButton}>关闭</Text>
               </TouchableOpacity>
@@ -368,7 +432,7 @@ export default function ProfileScreen() {
               data={notifications}
               keyExtractor={(item) => item.id}
               renderItem={renderNotification}
-              ListEmptyComponent={<Text style={styles.emptyCityText}>暂无通知</Text>}
+              ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无通知</Text>}
               style={styles.cityList}
             />
           </View>
@@ -378,24 +442,24 @@ export default function ProfileScreen() {
       {/* City Management Modal */}
       <Modal visible={cityModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>城市管理</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>城市管理</Text>
               <TouchableOpacity onPress={() => setCityModalVisible(false)}>
                 <Text style={styles.closeButton}>关闭</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.addCityRow}>
               <TextInput
-                style={styles.cityInput}
+                style={[styles.cityInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 placeholder="输入新城市名称"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
                 value={newCityName}
                 onChangeText={setNewCityName}
               />
               <TouchableOpacity onPress={handleAddCity} activeOpacity={0.85}>
                 <LinearGradient
-                  colors={['#FF6B9D', '#5B8DEF']}
+                  colors={[theme.pink, theme.blue]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.addCityButton}
@@ -408,14 +472,14 @@ export default function ProfileScreen() {
               data={cities}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
-                <View style={styles.cityRow}>
-                  <Text style={styles.cityName}>{item.name}</Text>
+                <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}>
+                  <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.name}</Text>
                   <TouchableOpacity onPress={() => handleDeleteCity(item.id, item.name)}>
                     <Text style={styles.deleteCityText}>删除</Text>
                   </TouchableOpacity>
                 </View>
               )}
-              ListEmptyComponent={<Text style={styles.emptyCityText}>暂无城市</Text>}
+              ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无城市</Text>}
               style={styles.cityList}
             />
           </View>
@@ -425,41 +489,49 @@ export default function ProfileScreen() {
       {/* Distributor Management Modal */}
       <Modal visible={distributorModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>分销商管理</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>分销商管理</Text>
               <TouchableOpacity onPress={() => setDistributorModalVisible(false)}>
                 <Text style={styles.closeButton}>关闭</Text>
               </TouchableOpacity>
             </View>
 
             {editingDistributorId ? (
-              <View style={styles.editorBox}>
-                <Text style={styles.editorTitle}>修改归属城市</Text>
-                <Text style={styles.editorHint}>选择城市（店面可留空保持不变）</Text>
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}>
+                <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>修改归属城市</Text>
+                <Text style={[styles.editorHint, { color: theme.textTertiary }]}>选择城市（店面可留空保持不变）</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
                   {cities.map((city) => (
                     <TouchableOpacity
                       key={city.id}
-                      style={[styles.cityChip, editCityId === city.id && styles.cityChipActive]}
+                      style={[
+                        styles.cityChip, 
+                        { backgroundColor: theme.surface },
+                        editCityId === city.id && { backgroundColor: theme.pink }
+                      ]}
                       onPress={() => setEditCityId(city.id)}
                     >
-                      <Text style={[styles.cityChipText, editCityId === city.id && styles.cityChipTextActive]}>{city.name}</Text>
+                      <Text style={[
+                        styles.cityChipText, 
+                        { color: theme.textSecondary },
+                        editCityId === city.id && { color: '#fff', fontWeight: '600' }
+                      ]}>{city.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
                 <TextInput
-                  style={styles.cityInput}
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary }]}
                   placeholder="店面（留空则不修改）"
                   value={editStoreName}
                   onChangeText={setEditStoreName}
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
                 <View style={styles.editActions}>
-                  <TouchableOpacity style={styles.smallBtn} onPress={() => setEditingDistributorId(null)}>
-                    <Text style={styles.smallBtnText}>取消</Text>
+                  <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={() => setEditingDistributorId(null)}>
+                    <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary]} onPress={handleSaveDistributor}>
+                  <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveDistributor}>
                     <Text style={styles.smallBtnPrimaryText}>保存</Text>
                   </TouchableOpacity>
                 </View>
@@ -471,19 +543,19 @@ export default function ProfileScreen() {
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.cityRow}
+                  style={[styles.cityRow, { borderBottomColor: theme.divider }]}
                   onPress={() => openEditDistributor(item.id, item.city_id, item.store_name)}
                 >
                   <View>
-                    <Text style={styles.cityName}>{item.email}</Text>
-                    <Text style={styles.distributorSubText}>
+                    <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.email}</Text>
+                    <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>
                       {item.city_name || '未设置城市'} · {item.store_name || '未设置店面'}
                     </Text>
                   </View>
                   <Text style={styles.closeButton}>编辑</Text>
                 </TouchableOpacity>
               )}
-              ListEmptyComponent={<Text style={styles.emptyCityText}>暂无分销商</Text>}
+              ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无分销商</Text>}
               style={styles.cityList}
             />
           </View>
@@ -705,4 +777,39 @@ const styles = StyleSheet.create({
   smallBtnPrimary: { backgroundColor: Colors.pink },
   smallBtnText: { color: Colors.textSecondary, fontSize: 12 },
   smallBtnPrimaryText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  // --- about ---
+  aboutContent: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  logoGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  aboutAppTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  aboutVersion: {
+    fontSize: 14,
+    marginBottom: 24,
+  },
+  devBox: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    marginBottom: 30,
+  },
+  devText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  aboutCopyright: {
+    fontSize: 12,
+  },
 });

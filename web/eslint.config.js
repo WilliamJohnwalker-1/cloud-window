@@ -15,6 +15,9 @@ export default [
         URL: 'readonly',
         Blob: 'readonly',
         console: 'readonly',
+        Node: 'readonly',
+        MouseEvent: 'readonly',
+        HTMLDivElement: 'readonly',
       },
     },
     rules: {

@@ -1,13 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { Filter, Package, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { BarcodePreview } from '../components/BarcodePreview';
 import { useAppStore } from '../store/useAppStore';
 
 export const ProductsScreen: React.FC = () => {
-  const { cities, products, addProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
+  const { user, cities, products, addProduct, updateProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [showCreate, setShowCreate] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -51,35 +54,93 @@ export const ProductsScreen: React.FC = () => {
     setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
   };
 
+  const openCreateModal = (): void => {
+    setEditingProductId(null);
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
+    setShowCreate(true);
+  };
+
+  const openEditModal = (productId: string): void => {
+    const product = products.find((item) => item.id === productId);
+    if (!product) return;
+
+    setEditingProductId(product.id);
+    setForm({
+      name: product.name,
+      price: String(product.price),
+      cost: String(product.cost),
+      one_time_cost: String(product.one_time_cost || 0),
+      discount_price: String(product.discount_price),
+      city_id: product.city_id,
+    });
+    setShowCreate(true);
+  };
+
+  const handleSaveProduct = async (): Promise<void> => {
+    if (editingProductId) {
+      const payload = {
+        name: form.name.trim(),
+        price: Number(form.price),
+        cost: Number(form.cost),
+        one_time_cost: Number(form.one_time_cost || 0),
+        discount_price: Number(form.discount_price || form.price),
+        city_id: form.city_id,
+      };
+
+      if (!payload.name || !payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
+        window.alert('请完整填写商品名称、城市、零售价、成本价');
+        return;
+      }
+
+      const { error } = await updateProduct(editingProductId, payload);
+      if (error) {
+        window.alert(`更新失败：${error.message}`);
+        return;
+      }
+      setShowCreate(false);
+      setEditingProductId(null);
+      return;
+    }
+
+    await handleCreateProduct();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 flex items-center space-x-2 text-sm">
-            <Filter size={16} className="text-white/40" />
-            <select
-              value={cityFilter}
-              onChange={(event) => setCityFilter(event.target.value)}
-              className="bg-transparent text-white outline-none"
-            >
-              <option value="all" className="bg-black">全部城市</option>
-              {cities.map((city) => (
-                <option key={city.id} value={city.id} className="bg-black">
-                  {city.name}
-                </option>
-              ))}
-            </select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
+            <Filter size={16} />
           </div>
+          <button
+            type="button"
+            onClick={() => setCityFilter('all')}
+            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+          >
+            全部城市
+          </button>
+          {cities.map((city) => (
+            <button
+              type="button"
+              key={city.id}
+              onClick={() => setCityFilter(city.id)}
+              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+            >
+              {city.name}
+            </button>
+          ))}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
-        >
-          <Plus size={20} />
-          <span>添加新商品</span>
-        </button>
+        {isAdminOrManager && (
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
+          >
+            <Plus size={20} />
+            <span>添加新商品</span>
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -90,6 +151,10 @@ export const ProductsScreen: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.03 }}
             className="group bg-white/5 border border-white/10 rounded-3xl overflow-hidden hover:border-accent/50 transition-all duration-300 flex flex-col"
+            onClick={() => {
+              if (!isAdminOrManager) return;
+              openEditModal(product.id);
+            }}
           >
             <div className="aspect-square relative overflow-hidden bg-white/5">
               {product.image_url ? (
@@ -111,7 +176,13 @@ export const ProductsScreen: React.FC = () => {
             <div className="p-6 flex-1 flex flex-col">
               <div className="mb-4">
                 <h3 className="text-lg font-bold group-hover:text-accent transition-colors truncate">{product.name}</h3>
-                <p className="text-xs text-white/40 mt-1 font-mono">{product.barcode || '无条码'}</p>
+                <div className="flex items-center space-x-2 mt-1.5">
+                  <div className="bg-white/10 border border-white/10 rounded px-2 py-0.5 flex items-center space-x-1.5">
+                    <span className="text-[9px] font-black text-white/30 uppercase tracking-tighter">Barcode</span>
+                    <span className="text-xs font-mono text-accent font-bold">{product.barcode || '无条码'}</span>
+                  </div>
+                </div>
+                <BarcodePreview code={product.barcode} />
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
@@ -132,17 +203,23 @@ export const ProductsScreen: React.FC = () => {
                   <span className="text-[10px] text-white/40 uppercase font-bold tracking-tighter">分销折扣价</span>
                   <span className="text-sm font-bold text-white/80">¥{product.discount_price}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const next = Number(product.quantity || 0) + 5;
-                    const { error } = await updateInventoryByProduct(product.id, next);
-                    if (error) window.alert(`补货失败：${error.message}`);
-                  }}
-                  className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors"
-                >
-                  <Plus size={20} />
-                </button>
+                {isAdminOrManager && (
+                  <button
+                    type="button"
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      const next = Number(product.quantity || 0) + 5;
+                      const { error } = await updateInventoryByProduct(product.id, next, {
+                        action: 'quick_add',
+                        note: '商品页快捷补货 +5',
+                      });
+                      if (error) window.alert(`补货失败：${error.message}`);
+                    }}
+                    className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                  >
+                    <Plus size={20} />
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -157,10 +234,10 @@ export const ProductsScreen: React.FC = () => {
         </div>
       )}
 
-      {showCreate && (
+      {showCreate && isAdminOrManager && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
-            <h3 className="text-xl font-bold">新增商品</h3>
+            <h3 className="text-xl font-bold">{editingProductId ? '编辑商品' : '新增商品'}</h3>
             <div className="grid grid-cols-2 gap-3">
               <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="商品名" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.price} onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))} placeholder="零售价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
@@ -176,7 +253,7 @@ export const ProductsScreen: React.FC = () => {
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
-              <button type="button" onClick={handleCreateProduct} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+              <button type="button" onClick={handleSaveProduct} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
             </div>
           </div>
         </div>
