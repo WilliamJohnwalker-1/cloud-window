@@ -105,7 +105,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
 8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
-9. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/migrate-v2.8-payment-events.sql`
+10. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -117,7 +118,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
 8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
-9. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/migrate-v2.8-payment-events.sql`
+10. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -140,17 +142,27 @@ Web 登录依赖以下变量（推荐使用 `VITE_` 前缀）：
 ```env
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+VITE_PAYMENT_API_URL=...
 ```
 
 > 兼容 `EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY`，但部署时建议统一使用 `VITE_*`。
+> 支付配置详见：`docs/alipay-api-setup.md`、`docs/payment-production-checklist.md`。
 
 ### 6. 移动端 OTA 发布（应用内更新）
 
 ```bash
-eas update --channel production --message "mobile ota: 描述本次改动"
+npm run ota:check-native
+eas update --environment production --channel production --message "mobile ota: 描述本次改动"
 ```
 
-> 说明：仅前端逻辑/UI改动可 OTA，下沉到原生层的改动仍需重新打包 APK。
+或使用一键命令（自动执行原生改动检查 + 发布 OTA）：
+
+```bash
+npm run ota:publish -- --msg "mobile ota: 描述本次改动"
+```
+
+> 说明：当前 `runtimeVersion` 使用 `appVersion` 策略，前端改动通过 OTA 下发；
+> 一旦涉及版本号提升或原生改动，需重新打包 APK/IPA，并由“我的页面 -> 检查更新”引导下载新安装包。
 
 ## 目录结构
 

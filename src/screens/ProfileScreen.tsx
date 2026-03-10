@@ -10,6 +10,8 @@ import {
   FlatList,
   ScrollView,
   Switch,
+  Image,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
@@ -19,12 +21,15 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
+import AppConfirmModal from '../components/AppConfirmModal';
+import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius } from '../theme';
 import type { Notification } from '../types';
 
 export default function ProfileScreen() {
   const {
     user,
+    setUser,
     signOut,
     setOfflineMode,
     isOfflineMode,
@@ -41,12 +46,14 @@ export default function ProfileScreen() {
     deleteCity,
     updateDistributorProfile,
     updateOwnStoreName,
+    updateOwnAvatar,
     acceptOrder,
     markNotificationRead,
     markAllNotificationsRead,
   } = useAppStore(
     useShallow((state) => ({
       user: state.user,
+      setUser: state.setUser,
       signOut: state.signOut,
       setOfflineMode: state.setOfflineMode,
       isOfflineMode: state.isOfflineMode,
@@ -63,6 +70,7 @@ export default function ProfileScreen() {
       deleteCity: state.deleteCity,
       updateDistributorProfile: state.updateDistributorProfile,
       updateOwnStoreName: state.updateOwnStoreName,
+      updateOwnAvatar: state.updateOwnAvatar,
       acceptOrder: state.acceptOrder,
       markNotificationRead: state.markNotificationRead,
       markAllNotificationsRead: state.markAllNotificationsRead,
@@ -81,12 +89,81 @@ export default function ProfileScreen() {
   const [ownStoreName, setOwnStoreName] = useState(user?.store_name || '');
   const [savingOwnStore, setSavingOwnStore] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [updateConfirmVisible, setUpdateConfirmVisible] = useState(false);
+  const [binaryUpdateConfirmVisible, setBinaryUpdateConfirmVisible] = useState(false);
+  const [binaryUpdateUrl, setBinaryUpdateUrl] = useState('');
+  const [binaryUpdateVersion, setBinaryUpdateVersion] = useState('');
+  const [avatarModalVisible, setAvatarModalVisible] = useState(false);
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
   const isAdmin = user?.role === 'admin';
   const isDistributor = user?.role === 'distributor';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  const compareVersion = (current: string, target: string): number => {
+    const normalize = (value: string): number[] => value
+      .split('-')[0]
+      .split('.')
+      .map((item) => Number.parseInt(item, 10))
+      .map((item) => (Number.isFinite(item) ? item : 0));
+
+    const a = normalize(current);
+    const b = normalize(target);
+    const maxLen = Math.max(a.length, b.length);
+
+    for (let i = 0; i < maxLen; i += 1) {
+      const left = a[i] || 0;
+      const right = b[i] || 0;
+      if (left > right) return 1;
+      if (left < right) return -1;
+    }
+
+    return 0;
+  };
+
+  const resolveBinaryUpdateInfo = async (): Promise<{ latestVersion: string; androidApkUrl: string } | null> => {
+    const binaryExtra = Constants.expoConfig?.extra?.binaryUpdate as {
+      manifestUrl?: string;
+      androidApkUrl?: string;
+      androidApkVersion?: string;
+    } | undefined;
+
+    const manifestUrl = binaryExtra?.manifestUrl?.trim();
+    const paymentApiBaseUrl = process.env.EXPO_PUBLIC_PAYMENT_API_URL?.trim();
+    const effectiveManifestUrl = manifestUrl
+      || (paymentApiBaseUrl ? `${paymentApiBaseUrl.replace(/\/$/, '')}/mobile/latest.json` : '');
+    const fallbackApkUrl = binaryExtra?.androidApkUrl?.trim();
+    const fallbackApkVersion = binaryExtra?.androidApkVersion?.trim();
+
+    if (effectiveManifestUrl) {
+      const response = await fetch(effectiveManifestUrl);
+      if (!response.ok) {
+        throw new Error(`二进制更新清单请求失败（${response.status}）`);
+      }
+
+      const data = await response.json() as {
+        latestVersion?: string;
+        androidApkUrl?: string;
+      };
+
+      const latestVersion = data.latestVersion?.trim();
+      const androidApkUrl = data.androidApkUrl?.trim();
+      if (latestVersion && androidApkUrl) {
+        return { latestVersion, androidApkUrl };
+      }
+    }
+
+    if (fallbackApkUrl && fallbackApkVersion) {
+      return {
+        latestVersion: fallbackApkVersion,
+        androidApkUrl: fallbackApkUrl,
+      };
+    }
+
+    return null;
+  };
 
   useEffect(() => {
     fetchCities();
@@ -178,16 +255,7 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('确认退出', '确定要退出登录吗？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '退出',
-        style: 'destructive',
-        onPress: async () => {
-          await signOut();
-        },
-      },
-    ]);
+    setLogoutConfirmVisible(true);
   };
 
   const handleCheckUpdate = async () => {
@@ -198,6 +266,18 @@ export default function ProfileScreen() {
 
     setCheckingUpdate(true);
     try {
+      const binaryUpdateInfo = await resolveBinaryUpdateInfo();
+      const needBinaryUpdate = binaryUpdateInfo
+        ? compareVersion(appVersion, binaryUpdateInfo.latestVersion) < 0
+        : false;
+
+      if (needBinaryUpdate && binaryUpdateInfo) {
+        setBinaryUpdateUrl(binaryUpdateInfo.androidApkUrl);
+        setBinaryUpdateVersion(binaryUpdateInfo.latestVersion);
+        setBinaryUpdateConfirmVisible(true);
+        return;
+      }
+
       const update = await Updates.checkForUpdateAsync();
       if (!update.isAvailable) {
         Toast.show({ type: 'success', text1: '已是最新版本', text2: '当前无需更新' });
@@ -205,15 +285,7 @@ export default function ProfileScreen() {
       }
 
       await Updates.fetchUpdateAsync();
-      Alert.alert('发现新版本', '更新已下载，是否立即重启应用？', [
-        { text: '稍后', style: 'cancel' },
-        {
-          text: '立即更新',
-          onPress: async () => {
-            await Updates.reloadAsync();
-          },
-        },
-      ]);
+      setUpdateConfirmVisible(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : '检查更新失败';
       Toast.show({ type: 'error', text1: '更新失败', text2: message });
@@ -230,6 +302,32 @@ export default function ProfileScreen() {
       default: return role;
     }
   };
+
+  const handleSelectAvatar = async (avatarUrl: string) => {
+    if (!user) return;
+
+    const previousAvatar = user.avatar_url;
+    setAvatarModalVisible(false);
+    setUser({ ...user, avatar_url: avatarUrl });
+
+    const { error } = await updateOwnAvatar(avatarUrl);
+    if (error) {
+      setUser({ ...user, avatar_url: previousAvatar });
+      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      return;
+    }
+  };
+
+  const parseEmojiAvatar = (value?: string): { emoji: string; bgColor: string } | null => {
+    if (!value || !value.startsWith('emoji|')) return null;
+    const parts = value.split('|');
+    if (parts.length < 3) return null;
+    const emoji = parts[1];
+    const bgColor = parts[2];
+    return { emoji, bgColor };
+  };
+
+  const selectedEmojiAvatar = parseEmojiAvatar(user?.avatar_url);
 
   const menuItems = [
     { IconComponent: User, label: '个人信息', onPress: () => setProfileModalVisible(true) },
@@ -313,12 +411,21 @@ export default function ProfileScreen() {
         style={styles.profileCardGradient}
       >
         <View style={styles.avatarRing}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-            </Text>
+          <View style={[styles.avatar, selectedEmojiAvatar && { backgroundColor: selectedEmojiAvatar.bgColor }]}> 
+            {selectedEmojiAvatar ? (
+              <Text style={styles.avatarEmojiText}>{selectedEmojiAvatar.emoji}</Text>
+            ) : user?.avatar_url ? (
+              <Image source={{ uri: user.avatar_url }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>
+                {user?.full_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+              </Text>
+            )}
           </View>
         </View>
+        <TouchableOpacity style={styles.avatarActionButton} onPress={() => setAvatarModalVisible(true)}>
+          <Text style={styles.avatarActionText}>更换头像</Text>
+        </TouchableOpacity>
         <Text style={styles.emailWhite}>{user?.email}</Text>
         {user?.city_name ? <Text style={styles.subInfoWhite}>{user.city_name}{user?.store_name ? ` · ${user.store_name}` : ''}</Text> : null}
         <View style={styles.roleBadgeWhite}>
@@ -401,6 +508,81 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={avatarModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalOverlayTouch} activeOpacity={1} onPress={() => setAvatarModalVisible(false)} />
+          <View style={[styles.avatarModalContent, { backgroundColor: theme.surface }]}> 
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>选择头像</Text>
+              <TouchableOpacity onPress={() => setAvatarModalVisible(false)}>
+                <Text style={[styles.closeButton, { color: theme.pink }]}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.avatarModalHint, { color: theme.textSecondary }]}>动物 · 水果 · 蔬菜</Text>
+            <FlatList
+              data={avatarLibrary}
+              keyExtractor={(item) => item.id}
+              numColumns={4}
+              contentContainerStyle={styles.avatarGrid}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.avatarOption}
+                  onPress={() => handleSelectAvatar(item.value)}
+                >
+                  <View style={[styles.avatarOptionImage, { backgroundColor: item.bgColor, borderColor: theme.border }]}> 
+                    <Text style={styles.avatarOptionEmoji}>{item.emoji}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <AppConfirmModal
+        visible={logoutConfirmVisible}
+        isDarkMode={isDarkMode}
+        title="确认退出"
+        message="确定要退出登录吗？"
+        confirmText="退出"
+        cancelText="取消"
+        danger
+        onCancel={() => setLogoutConfirmVisible(false)}
+        onConfirm={() => {
+          setLogoutConfirmVisible(false);
+          void signOut();
+        }}
+      />
+
+      <AppConfirmModal
+        visible={updateConfirmVisible}
+        isDarkMode={isDarkMode}
+        title="发现新版本"
+        message="更新已下载，是否立即重启应用？"
+        confirmText="立即更新"
+        cancelText="稍后"
+        onCancel={() => setUpdateConfirmVisible(false)}
+        onConfirm={() => {
+          setUpdateConfirmVisible(false);
+          void Updates.reloadAsync();
+        }}
+      />
+
+      <AppConfirmModal
+        visible={binaryUpdateConfirmVisible}
+        isDarkMode={isDarkMode}
+        title="发现安装包更新"
+        message={`检测到新安装包 v${binaryUpdateVersion}，是否前往下载 APK？`}
+        confirmText="去下载"
+        cancelText="稍后"
+        onCancel={() => setBinaryUpdateConfirmVisible(false)}
+        onConfirm={() => {
+          setBinaryUpdateConfirmVisible(false);
+          if (!binaryUpdateUrl) return;
+          void Linking.openURL(binaryUpdateUrl);
+        }}
+      />
 
       {/* Personal Info Modal */}
       <Modal visible={profileModalVisible} animationType="slide" transparent>
@@ -630,7 +812,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 40,
+  },
   avatarText: { fontSize: 32, color: '#fff', fontWeight: '800' },
+  avatarEmojiText: { fontSize: 38 },
+  avatarActionButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: Radius.xl,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  avatarActionText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   emailWhite: { fontSize: 16, color: '#fff', marginBottom: 6, fontWeight: '600' },
   subInfoWhite: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginBottom: 8 },
   roleBadgeWhite: {
@@ -676,7 +876,7 @@ const styles = StyleSheet.create({
   },
   logoutText: { fontSize: 16, color: Colors.danger, fontWeight: '600' },
   version: { textAlign: 'center', color: Colors.textTertiary, marginTop: 20, fontSize: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(45,45,63,0.4)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(18,18,26,0.52)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 28,
@@ -691,7 +891,21 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: { fontSize: 22, fontWeight: '700', color: Colors.textPrimary },
-  closeButton: { fontSize: 16, color: Colors.pink, fontWeight: '500' },
+  closeButton: { fontSize: 16, fontWeight: '500' },
+  modalOverlayTouch: { ...StyleSheet.absoluteFillObject },
+  avatarModalContent: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 14,
+    maxHeight: '74%',
+  },
+  avatarModalHint: {
+    fontSize: 12,
+    marginBottom: 10,
+  },
   // --- personal info ---
   infoRow: {
     flexDirection: 'row',
@@ -817,6 +1031,24 @@ const styles = StyleSheet.create({
   smallBtnText: { color: Colors.textSecondary, fontSize: 12 },
   smallBtnPrimaryText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   // --- about ---
+  avatarGrid: {
+    paddingTop: 4,
+    paddingBottom: 12,
+  },
+  avatarOption: {
+    flex: 1,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avatarOptionImage: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarOptionEmoji: { fontSize: 30 },
   aboutContent: {
     alignItems: 'center',
     paddingVertical: 30,

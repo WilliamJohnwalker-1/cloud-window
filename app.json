@@ -2,7 +2,7 @@
   "expo": {
     "name": "云窗文创",
     "slug": "inventory-app",
-    "version": "2.1.5",
+    "version": "2.1.6",
     "orientation": "portrait",
     "icon": "./assets/ui/login-avatar.png",
     "userInterfaceStyle": "light",
@@ -36,6 +36,11 @@
       "fallbackToCacheTimeout": 0
     },
     "extra": {
+      "binaryUpdate": {
+        "manifestUrl": "",
+        "androidApkUrl": "",
+        "androidApkVersion": ""
+      },
       "eas": {
         "projectId": "e50b22c1-bcd0-4ed4-b5df-630bf406f124"
       }
