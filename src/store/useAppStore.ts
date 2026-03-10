@@ -23,6 +23,8 @@ interface ProfileRow {
   id: string;
   email: string;
   full_name?: string;
+  avatar_url?: string | null;
+  active_session_id?: string | null;
   role: Profile['role'];
   city_id?: string | null;
   cities?: { name: string } | null;
@@ -108,6 +110,14 @@ const shouldFallbackToLegacyFlow = (
   return message.includes('could not find the function public.outbound_stock_atomic');
 };
 
+const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  return error.code === '42883'
+    || error.code === 'PGRST202'
+    || message.includes('could not find the function');
+};
+
 interface AppState {
   user: Profile | null;
   cities: City[];
@@ -118,10 +128,13 @@ interface AppState {
   notifications: Notification[];
   isLoading: boolean;
   isOfflineMode: boolean;
+  isDarkMode: boolean;
 
   setUser: (user: Profile | null) => void;
   setLoading: (loading: boolean) => void;
   setOfflineMode: (offline: boolean) => void;
+  setDarkMode: (darkMode: boolean) => void;
+  ensureActiveSession: () => Promise<Error | null>;
 
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (
@@ -144,6 +157,7 @@ interface AppState {
   deleteCity: (id: string) => Promise<{ error: Error | null }>;
   updateDistributorProfile: (id: string, cityId: string, storeName?: string) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
+  updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
   fetchNotifications: () => Promise<void>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   markNotificationRead: (notificationId: string) => Promise<void>;
@@ -183,6 +197,7 @@ const mapProfile = (raw: ProfileRow): Profile => ({
   id: raw.id,
   email: raw.email,
   full_name: raw.full_name,
+  avatar_url: raw.avatar_url ?? undefined,
   role: raw.role,
   city_id: raw.city_id,
   city_name: raw.cities?.name,
@@ -232,10 +247,27 @@ export const useAppStore = create<AppState>()(
       notifications: [],
       isLoading: false,
       isOfflineMode: false,
+      isDarkMode: false,
 
       setUser: (user) => set({ user }),
       setLoading: (isLoading) => set({ isLoading }),
       setOfflineMode: (isOfflineMode) => set({ isOfflineMode }),
+      setDarkMode: (isDarkMode) => set({ isDarkMode }),
+
+      ensureActiveSession: async () => {
+        const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
+        if (checkError) {
+          if (isMissingRpcFunction(checkError)) return null;
+          return checkError as Error;
+        }
+
+        if (!checkResult) {
+          await get().signOut();
+          return new Error('账号已在其他设备登录，请重新登录');
+        }
+
+        return null;
+      },
 
       signIn: async (email: string, password: string) => {
         set({ isLoading: true });
@@ -252,6 +284,12 @@ export const useAppStore = create<AppState>()(
 
             if (profileError) throw profileError;
             set({ user: mapProfile(profile) });
+
+            const { error: activateError } = await supabase.rpc('activate_current_session');
+            if (activateError && !isMissingRpcFunction(activateError)) {
+              await get().signOut();
+              throw activateError;
+            }
           }
 
           return { error: null };
@@ -297,6 +335,12 @@ export const useAppStore = create<AppState>()(
               .single();
 
             if (profile) set({ user: mapProfile(profile) });
+
+            const { error: activateError } = await supabase.rpc('activate_current_session');
+            if (activateError && !isMissingRpcFunction(activateError)) {
+              await get().signOut();
+              throw activateError;
+            }
           }
 
           return { error: null };
@@ -308,16 +352,19 @@ export const useAppStore = create<AppState>()(
       },
 
       signOut: async () => {
-        await supabase.auth.signOut();
-        set({
-          user: null,
-          cities: [],
-          products: [],
-          inventory: [],
-          orders: [],
-          distributors: [],
-          notifications: [],
-        });
+        try {
+          await supabase.auth.signOut();
+        } finally {
+          set({
+            user: null,
+            cities: [],
+            products: [],
+            inventory: [],
+            orders: [],
+            distributors: [],
+            notifications: [],
+          });
+        }
       },
 
       fetchCities: async () => {
@@ -427,6 +474,11 @@ export const useAppStore = create<AppState>()(
 
       fetchAllData: async () => {
         set({ isLoading: true });
+        const sessionError = await get().ensureActiveSession();
+        if (sessionError) {
+          set({ isLoading: false });
+          return;
+        }
         await Promise.all([
           get().fetchCities(),
           get().fetchProducts(),
@@ -498,6 +550,24 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      updateOwnAvatar: async (avatarUrl: string) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        const sessionError = await get().ensureActiveSession();
+        if (sessionError) return { error: sessionError };
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+            .eq('id', user.id);
+          if (error) throw error;
+          set({ user: { ...user, avatar_url: avatarUrl } });
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
       fetchNotifications: async () => {
         const { user } = get();
         if (!user) return;
@@ -513,6 +583,8 @@ export const useAppStore = create<AppState>()(
       acceptOrder: async (orderId: string) => {
         const { user } = get();
         if (!user) return { error: new Error('未登录') };
+        const sessionError = await get().ensureActiveSession();
+        if (sessionError) return { error: sessionError };
         try {
           const { error: updateError } = await supabase
             .from('orders')
@@ -826,6 +898,8 @@ export const useAppStore = create<AppState>()(
         const { user, products } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
+        const sessionError = await get().ensureActiveSession();
+        if (sessionError) return { error: sessionError };
 
         try {
           if (user.role === 'distributor') {
@@ -1089,6 +1163,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         user: state.user,
         isOfflineMode: state.isOfflineMode,
+        isDarkMode: state.isDarkMode,
       }),
     },
   ),
