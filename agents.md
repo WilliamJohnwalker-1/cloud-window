@@ -12,6 +12,7 @@
 # Development
 npx expo start              # Start Metro bundler
 npx expo start --clear       # Clear cache and start
+npm run web:v2               # Start Vite web app (new Web UI)
 
 # Type checking
 npx tsc --noEmit             # TypeScript check (REQUIRED before commits)
@@ -19,6 +20,9 @@ npx tsc --noEmit             # TypeScript check (REQUIRED before commits)
 # Platform-specific
 npx expo start --android     # Android
 npx expo start --ios         # iOS
+npm run build --prefix web   # Build Vite web app
+eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
+eas build --platform android --profile production             # Build production APK
 
 # Dependencies
 npm install                  # Install dependencies
@@ -179,15 +183,24 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
   - 支持直接输入数量，输入时自动清空输入框
   - 确认下单时会验证，不满足5的倍数则提示具体商品
 
+## WEB PAYMENT STATUS (TODO)
+
+- 当前 Web 出库已支持“生成收款码 -> 确认收款 -> 出库扣减”的流程骨架。
+- **尚未完成生产支付接入**（必须继续推进）：
+  - 微信 Native 支付正式签名与回调验签
+  - 支付宝当面付正式签名与回调验签
+  - 支付回调幂等、防重放、金额校验与对账
+  - Cloudflare Worker 生产密钥管理与监控告警
+
 ## DATABASE MIGRATIONS
 
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.6-order-item-rls-hardening.sql -> 8. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-6 same as above
+1. migrate-v2.sql -> 2-8 same as above
 
 ## GOTCHAS
 
@@ -202,3 +215,4 @@ Before committing:
 - [ ] npx tsc --noEmit passes
 - [ ] npx expo start loads without errors
 - [ ] Manual test: Distributor login -> Create order -> Admin accept
+- [ ] Web manual test: barcode outbound flow + payment mock flow

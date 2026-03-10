@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text, View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import type { ToastConfig } from 'react-native-toast-message';
 import { BarChart2, Package, ShoppingCart, TrendingUp, User } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
+import * as Updates from 'expo-updates';
 
 import LoginScreen from './src/screens/LoginScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
@@ -15,12 +16,15 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { useAppStore } from './src/store/useAppStore';
-import { Colors, Shadow } from './src/theme';
+import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
 
 const Tab = createBottomTabNavigator();
 
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
+
   const IconComponent = {
     Products: Package,
     Inventory: BarChart2,
@@ -33,10 +37,10 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     <View style={styles.tabIconContainer}>
       <IconComponent 
         size={24} 
-        color={focused ? Colors.pink : Colors.tabInactive} 
+        color={focused ? theme.pink : theme.tabInactive} 
         strokeWidth={focused ? 2.5 : 2} 
       />
-      {focused && <View style={styles.tabIndicator} />}
+      {focused && <View style={[styles.tabIndicator, { backgroundColor: theme.pink }]} />}
     </View>
   );
 }
@@ -44,6 +48,8 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 function MainTabs() {
   const fetchAllData = useAppStore((state) => state.fetchAllData);
   const storedUser = useAppStore((state) => state.user);
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   useEffect(() => {
     if (storedUser) {
@@ -55,15 +61,16 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused }) => <TabIcon name={route.name} focused={focused} />,
-        tabBarActiveTintColor: Colors.pink,
-        tabBarInactiveTintColor: Colors.tabInactive,
-        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: theme.pink,
+        tabBarInactiveTintColor: theme.tabInactive,
+        tabBarStyle: [styles.tabBar, { backgroundColor: theme.surface }],
         tabBarLabelStyle: styles.tabBarLabel,
-        headerStyle: styles.header,
-        headerTitleStyle: styles.headerTitle,
+        headerStyle: [styles.header, { backgroundColor: theme.surface }],
+        headerTitleStyle: [styles.headerTitle, { color: theme.textPrimary }],
         headerShadowVisible: false,
       })}
     >
+
       <Tab.Screen 
         name="Products" 
         component={ProductsScreen}
@@ -115,12 +122,14 @@ const toastAnimationConfig = {
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const { user, setUser } = useAppStore(
+  const { user, setUser, isDarkMode } = useAppStore(
     useShallow((state) => ({
       user: state.user,
       setUser: state.setUser,
+      isDarkMode: state.isDarkMode,
     })),
   );
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   useEffect(() => {
     const initApp = async () => {
@@ -133,9 +142,9 @@ export default function App() {
           return;
         }
 
-        const storedUser = await AsyncStorage.getItem('inventory-app-storage');
-        if (storedUser) {
-          const parsed = JSON.parse(storedUser);
+        const storedData = await AsyncStorage.getItem('inventory-app-storage');
+        if (storedData) {
+          const parsed = JSON.parse(storedData);
           if (parsed && parsed.state && parsed.state.user) {
             setUser(parsed.state.user);
           }
@@ -155,23 +164,52 @@ export default function App() {
     initApp();
   }, [setUser]);
 
+  useEffect(() => {
+    const checkUpdatesOnLaunch = async (): Promise<void> => {
+      if (__DEV__) return;
+
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (!update.isAvailable) return;
+
+        await Updates.fetchUpdateAsync();
+        Alert.alert('发现新版本', '更新已下载，是否立即重启应用完成更新？', [
+          { text: '稍后', style: 'cancel' },
+          {
+            text: '立即更新',
+            onPress: async () => {
+              await Updates.reloadAsync();
+            },
+          },
+        ]);
+      } catch (error) {
+        console.warn('Failed checking OTA updates on launch:', error);
+      }
+    };
+
+    if (!isLoading) {
+      void checkUpdatesOnLaunch();
+    }
+  }, [isLoading]);
+
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.pink} />
-        <Text style={styles.loadingText}>加载中...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color={theme.pink} />
+        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>加载中...</Text>
       </View>
     );
   }
 
   if (supabaseConfigError) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.configErrorTitle}>配置错误</Text>
-        <Text style={styles.configErrorText}>{supabaseConfigError}</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+        <Text style={[styles.configErrorTitle, { color: theme.danger }]}>配置错误</Text>
+        <Text style={[styles.configErrorText, { color: theme.textSecondary }]}>{supabaseConfigError}</Text>
       </View>
     );
   }
+
 
   return (
     <>

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
@@ -79,6 +80,7 @@ export default function ProfileScreen() {
   const [editStoreName, setEditStoreName] = useState('');
   const [ownStoreName, setOwnStoreName] = useState(user?.store_name || '');
   const [savingOwnStore, setSavingOwnStore] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
@@ -188,6 +190,38 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const handleCheckUpdate = async () => {
+    if (__DEV__) {
+      Toast.show({ type: 'info', text1: '开发模式', text2: '开发模式下不执行 OTA 更新检查' });
+      return;
+    }
+
+    setCheckingUpdate(true);
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (!update.isAvailable) {
+        Toast.show({ type: 'success', text1: '已是最新版本', text2: '当前无需更新' });
+        return;
+      }
+
+      await Updates.fetchUpdateAsync();
+      Alert.alert('发现新版本', '更新已下载，是否立即重启应用？', [
+        { text: '稍后', style: 'cancel' },
+        {
+          text: '立即更新',
+          onPress: async () => {
+            await Updates.reloadAsync();
+          },
+        },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '检查更新失败';
+      Toast.show({ type: 'error', text1: '更新失败', text2: message });
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   const getRoleName = (role: string) => {
     switch (role) {
       case 'admin': return '管理员';
@@ -214,6 +248,11 @@ export default function ProfileScreen() {
       IconComponent: Bell,
       label: `通知${unreadCount > 0 ? ` (${unreadCount})` : ''}`,
       onPress: () => { fetchNotifications(); setNotificationModalVisible(true); markAllNotificationsRead(); },
+    },
+    {
+      IconComponent: PackagePlus,
+      label: checkingUpdate ? '检查更新中...' : '检查更新',
+      onPress: handleCheckUpdate,
     },
     {
       IconComponent: isDarkMode ? Sun : Moon,
