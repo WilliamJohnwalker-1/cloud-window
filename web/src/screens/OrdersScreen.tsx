@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
@@ -6,11 +6,14 @@ import { useAppStore } from '../store/useAppStore';
 type OrderFilter = 'all' | 'pending' | 'accepted';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
+  const [detailOrderData, setDetailOrderData] = useState<(typeof orders)[number] | null>(null);
+  const [detailCache, setDetailCache] = useState<Record<string, (typeof orders)[number]>>({});
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
 
@@ -47,24 +50,77 @@ export const OrdersScreen: React.FC = () => {
     return cartItems.reduce((sum, item) => sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity, 0);
   }, [cartItems]);
 
-  const detailOrder = useMemo(() => {
-    if (!detailOrderId) return null;
-    return orders.find((item) => item.id === detailOrderId) || null;
-  }, [detailOrderId, orders]);
+  const detailOrder = detailOrderData;
 
-  const exportCsv = (): void => {
-    const header = '订单号,状态,城市,分销商,总额,创建时间';
-    const lines = filteredOrders.map((order) => {
-      const distributor = order.distributor_store || order.distributor_email || '';
-      return [order.id, order.status, order.city_name || '', distributor, String(order.total_discount_amount), order.created_at].join(',');
+  const productNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach((product) => {
+      map.set(product.id, product.name);
     });
-    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    return map;
+  }, [products]);
+
+  const resolveItemName = (productId: string, productName?: string): string => {
+    return productName || productNameMap.get(productId) || productId;
+  };
+
+  const getResolvedOrder = (orderId: string): (typeof orders)[number] | null => {
+    return detailCache[orderId] || orders.find((item) => item.id === orderId) || null;
+  };
+
+  useEffect(() => {
+    const candidates = filteredOrders.filter((order) => (order.items?.length || 0) === 0).slice(0, 12);
+    if (candidates.length === 0) return;
+
+    void Promise.all(candidates.map(async (order) => {
+      const detail = await fetchOrderDetail(order.id);
+      if (detail) {
+        setDetailCache((prev) => ({ ...prev, [order.id]: detail }));
+      }
+    }));
+  }, [fetchOrderDetail, filteredOrders]);
+
+  const openOrderDetail = async (orderId: string): Promise<void> => {
+    setDetailOrderId(orderId);
+    setLoadingDetail(true);
+    const localOrder = getResolvedOrder(orderId);
+    setDetailOrderData(localOrder);
+
+    const latest = await fetchOrderDetail(orderId);
+    if (latest) {
+      setDetailCache((prev) => ({ ...prev, [orderId]: latest }));
+      setDetailOrderData(latest);
+    }
+    setLoadingDetail(false);
+  };
+
+  const closeOrderDetail = (): void => {
+    setDetailOrderId(null);
+    setDetailOrderData(null);
+    setLoadingDetail(false);
+  };
+
+  const exportOrdersXlsx = async (): Promise<void> => {
+    const XLSX = await import('xlsx');
+    const rows = filteredOrders.map((order) => {
+      const resolvedOrder = getResolvedOrder(order.id) || order;
+      const pieces = resolvedOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      return {
+        订单号: order.id,
+        状态: order.status,
+        城市: order.city_name || '',
+        分销商: order.distributor_store || order.distributor_email || '',
+        商品种类: resolvedOrder.items.length,
+        商品总件数: pieces,
+        订单总额: Number(order.total_discount_amount || 0),
+        创建时间: order.created_at,
+      };
+    });
+
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, '订单列表');
+    XLSX.writeFile(workbook, `orders-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const setCartQuantity = (productId: string, quantity: number): void => {
@@ -143,7 +199,9 @@ export const OrdersScreen: React.FC = () => {
           )}
           <button
             type="button"
-            onClick={exportCsv}
+            onClick={() => {
+              void exportOrdersXlsx();
+            }}
             className="bg-white/5 border border-white/10 px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 hover:bg-white/10 transition-all"
           >
             <Download size={18} />
@@ -154,6 +212,11 @@ export const OrdersScreen: React.FC = () => {
 
       <div className="space-y-4">
         {filteredOrders.map((order, index) => (
+          (() => {
+            const resolvedOrder = getResolvedOrder(order.id) || order;
+            const itemKinds = resolvedOrder.items.length;
+            const totalPieces = resolvedOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+            return (
           <motion.div
             key={order.id}
             initial={{ opacity: 0, y: 10 }}
@@ -205,24 +268,26 @@ export const OrdersScreen: React.FC = () => {
             </div>
 
             <div className="bg-white/[0.02] rounded-2xl p-4 flex items-center justify-between">
-              <div className="flex -space-x-3 overflow-hidden">
-                {order.items.slice(0, 5).map((item) => (
+                <div className="flex -space-x-3 overflow-hidden">
+                {resolvedOrder.items.slice(0, 5).map((item) => (
                   <div key={item.id} className="w-10 h-10 rounded-full border-2 border-background bg-white/10 flex items-center justify-center text-[10px] font-bold overflow-hidden">
-                    {item.product_name?.[0]}
+                    {resolveItemName(item.product_id, item.product_name)[0]}
                   </div>
                 ))}
-                {order.items.length > 5 && (
+                {resolvedOrder.items.length > 5 && (
                   <div className="w-10 h-10 rounded-full border-2 border-background bg-white/5 flex items-center justify-center text-[10px] font-bold text-white/40">
-                    +{order.items.length - 5}
+                    +{resolvedOrder.items.length - 5}
                   </div>
                 )}
               </div>
 
               <div className="flex items-center space-x-4">
-                <p className="text-sm text-white/40">共 {order.items.length} 种商品</p>
+                <p className="text-sm text-white/40">共 {totalPieces} 件商品 / {itemKinds} 种</p>
                 <button
                   type="button"
-                  onClick={() => setDetailOrderId(order.id)}
+                  onClick={() => {
+                    void openOrderDetail(order.id);
+                  }}
                   className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-accent group-hover:border-accent transition-all"
                 >
                   <ChevronRight size={18} className="text-white group-hover:scale-110 transition-transform" />
@@ -230,6 +295,8 @@ export const OrdersScreen: React.FC = () => {
               </div>
             </div>
           </motion.div>
+            );
+          })()
         ))}
       </div>
 
@@ -257,7 +324,14 @@ export const OrdersScreen: React.FC = () => {
                   return (
                     <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <div>
+                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+                          {product.image_url ? (
+                            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[10px] text-white/40">图</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
                           <p className="font-semibold">{product.name}</p>
                           <p className="text-xs text-white/40">{product.city_name} · 条码 {product.barcode || '无'}</p>
                         </div>
@@ -320,7 +394,7 @@ export const OrdersScreen: React.FC = () => {
           <div className="w-full max-w-3xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold">订单明细 #{detailOrder.id.slice(0, 8)}</h3>
-              <button type="button" onClick={() => setDetailOrderId(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+              <button type="button" onClick={closeOrderDetail} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
                 <X size={16} />
               </button>
             </div>
@@ -333,6 +407,7 @@ export const OrdersScreen: React.FC = () => {
             </div>
 
             <div className="border border-white/10 rounded-2xl overflow-hidden">
+              {loadingDetail && <p className="px-4 py-3 text-sm text-white/50">正在加载订单详情...</p>}
               <table className="w-full text-sm">
                 <thead className="bg-white/[0.03]">
                   <tr>
@@ -346,13 +421,18 @@ export const OrdersScreen: React.FC = () => {
                 <tbody>
                   {detailOrder.items.map((item) => (
                     <tr key={item.id} className="border-t border-white/5">
-                      <td className="px-4 py-3">{item.product_name || item.product_id}</td>
+                      <td className="px-4 py-3">{resolveItemName(item.product_id, item.product_name)}</td>
                       <td className="px-4 py-3 text-right">{item.quantity}</td>
                       <td className="px-4 py-3 text-right">¥{item.retail_price}</td>
                       <td className="px-4 py-3 text-right">¥{item.discount_price}</td>
                       <td className="px-4 py-3 text-right">¥{(item.discount_price * item.quantity).toFixed(2)}</td>
                     </tr>
                   ))}
+                  {detailOrder.items.length === 0 && !loadingDetail && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-white/50">暂无商品明细，请刷新后重试</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -51,18 +51,23 @@ interface OrderItemRow {
   discount_price?: number | string | null;
   unit_cost?: number | string | null;
   one_time_cost?: number | string | null;
+  product?: { name?: string; cities?: { name: string } | null } | null;
   products?: { name?: string; cities?: { name: string } | null } | null;
 }
 
 interface OrderRow {
   id: string;
   distributor_id: string;
-  profiles?: { email?: string; store_name?: string | null } | null;
+  profiles?: { email?: string; store_name?: string | null } | Array<{ email?: string; store_name?: string | null }> | null;
   city_id?: string | null;
-  cities?: { name: string } | null;
+  cities?: { name: string } | Array<{ name: string }> | null;
   status: Order['status'];
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
+  product_id?: string | null;
+  quantity?: number | string | null;
+  unit_price?: number | string | null;
+  total_amount?: number | string | null;
   created_at: string;
   order_items?: OrderItemRow[];
 }
@@ -121,6 +126,7 @@ interface AppState {
   fetchOrders: () => Promise<void>;
   fetchNotifications: () => Promise<void>;
   fetchInventoryLogs: () => Promise<void>;
+  fetchOrderDetail: (orderId: string) => Promise<Order | null>;
   fetchAllData: () => Promise<void>;
 
   addProduct: (payload: ProductCreateInput) => Promise<{ error: Error | null }>;
@@ -138,6 +144,19 @@ interface AppState {
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
 }
+
+const orderSelect = `
+  *,
+  cities(name),
+  profiles:distributor_id(email,store_name),
+  order_items(
+    *,
+    products(
+      name,
+      cities(name)
+    )
+  )
+`;
 
 const mapProfile = (row: ProfileRow): Profile => ({
   id: row.id,
@@ -175,31 +194,37 @@ const mapProducts = (rows: ProductRow[]): ProductWithDetails[] => {
 };
 
 const mapOrder = (row: OrderRow): Order => {
-  const items: OrderItem[] = (row.order_items || []).map((item) => ({
+  const itemsFromRelation: OrderItem[] = (row.order_items || []).map((item) => {
+    const productInfo = item.products || item.product;
+    return {
     id: item.id,
     order_id: item.order_id,
     product_id: item.product_id,
-    product_name: item.products?.name,
-    city_name: item.products?.cities?.name,
+    product_name: productInfo?.name,
+    city_name: productInfo?.cities?.name,
     quantity: Number(item.quantity || 0),
     retail_price: Number(item.retail_price || 0),
     discount_price: Number(item.discount_price || 0),
     unit_cost: Number(item.unit_cost || 0),
     one_time_cost: Number(item.one_time_cost || 0),
-  }));
+  };
+  });
+
+  const profileData = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  const cityData = Array.isArray(row.cities) ? row.cities[0] : row.cities;
 
   return {
     id: row.id,
     distributor_id: row.distributor_id,
-    distributor_email: row.profiles?.email,
-    distributor_store: row.profiles?.store_name ?? undefined,
+    distributor_email: profileData?.email,
+    distributor_store: profileData?.store_name ?? undefined,
     city_id: row.city_id ?? undefined,
-    city_name: row.cities?.name,
+    city_name: cityData?.name,
     status: row.status,
     total_retail_amount: Number(row.total_retail_amount || 0),
     total_discount_amount: Number(row.total_discount_amount || 0),
     created_at: row.created_at,
-    items,
+    items: itemsFromRelation,
   };
 };
 
@@ -286,15 +311,7 @@ export const useAppStore = create<AppState>()(
 
         const { data, error } = await supabase
           .from('orders')
-          .select(`
-            *,
-            cities(name),
-            profiles:distributor_id(email,store_name),
-            order_items(
-              *,
-              products(name, cities(name))
-            )
-          `)
+          .select(orderSelect)
           .order('created_at', { ascending: false })
           .limit(300);
         if (error || !data) return;
@@ -333,6 +350,134 @@ export const useAppStore = create<AppState>()(
         if (!error && data) {
           set({ inventoryLogs: (data as InventoryLogRow[]).map(mapInventoryLog) });
         }
+      },
+
+      fetchOrderDetail: async (orderId) => {
+        const { data: orderRow, error: orderError } = await supabase
+          .from('orders')
+          .select('id, distributor_id, city_id, status, total_retail_amount, total_discount_amount, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
+          .eq('id', orderId)
+          .maybeSingle();
+        if (orderError || !orderRow) return null;
+
+        const base = mapOrder(orderRow as OrderRow);
+        const row = orderRow as OrderRow;
+
+        const { data: itemRows, error: itemError } = await supabase
+          .from('order_items')
+          .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost')
+          .eq('order_id', orderId)
+          .order('id', { ascending: true });
+
+        if (!itemError && itemRows && itemRows.length > 0) {
+          const productIds = Array.from(new Set(itemRows.map((row) => row.product_id)));
+          const { data: productRows } = await supabase
+            .from('products')
+            .select('id, name, cities(name)')
+            .in('id', productIds);
+
+          const productMap = new Map<string, { name?: string; city?: string }>();
+          (productRows || []).forEach((product: { id: string; name?: string; cities?: { name: string }[] | { name: string } }) => {
+            const cityName = Array.isArray(product.cities) ? product.cities[0]?.name : product.cities?.name;
+            productMap.set(product.id, { name: product.name, city: cityName });
+          });
+
+          const items: OrderItem[] = itemRows.map((item) => {
+            const product = productMap.get(item.product_id);
+            return {
+              id: item.id,
+              order_id: item.order_id,
+              product_id: item.product_id,
+              product_name: product?.name,
+              city_name: product?.city || base.city_name,
+              quantity: Number(item.quantity || 0),
+              retail_price: Number(item.retail_price || 0),
+              discount_price: Number(item.discount_price || 0),
+              unit_cost: Number(item.unit_cost || 0),
+              one_time_cost: Number(item.one_time_cost || 0),
+            };
+          });
+
+          const legacyQty = Number(row.quantity || 0);
+          const legacyProductId = row.product_id || '';
+          if (legacyProductId && legacyQty > 0) {
+            const legacyRetail = Number(row.unit_price || 0);
+            const legacyDiscountTotal = Number(
+              row.total_amount || row.total_discount_amount || legacyRetail * legacyQty || 0,
+            );
+            const legacyDiscount = legacyQty > 0 ? legacyDiscountTotal / legacyQty : legacyRetail;
+
+            const hasSameLegacyItem = items.some((item) => (
+              item.product_id === legacyProductId
+              && item.quantity === legacyQty
+              && Math.abs(item.discount_price - legacyDiscount) < 0.01
+            ));
+
+            const detailDiscountSum = items.reduce(
+              (sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0),
+              0,
+            );
+            const orderDiscountTotal = Number(row.total_discount_amount || row.total_amount || detailDiscountSum || 0);
+            const discountMismatch = Math.abs(detailDiscountSum - orderDiscountTotal) > 0.01;
+
+            if (!hasSameLegacyItem && discountMismatch) {
+              const legacyProduct = productMap.get(legacyProductId);
+              items.unshift({
+                id: `legacy-${orderId}`,
+                order_id: orderId,
+                product_id: legacyProductId,
+                product_name: legacyProduct?.name,
+                city_name: legacyProduct?.city || base.city_name,
+                quantity: legacyQty,
+                retail_price: legacyRetail,
+                discount_price: legacyDiscount,
+                unit_cost: 0,
+                one_time_cost: 0,
+              });
+            }
+          }
+
+          return {
+            ...base,
+            items,
+          };
+        }
+
+        if (row.product_id && Number(row.quantity || 0) > 0) {
+          const { data: legacyProduct } = await supabase
+            .from('products')
+            .select('name')
+            .eq('id', row.product_id)
+            .maybeSingle();
+
+          const qty = Number(row.quantity || 0);
+          const retailPrice = Number(row.unit_price || 0);
+          const discountTotal = Number(row.total_discount_amount || row.total_amount || retailPrice * qty || 0);
+          const discountPrice = qty > 0 ? discountTotal / qty : retailPrice;
+
+          return {
+            ...base,
+            items: [
+              {
+                id: `legacy-${orderId}`,
+                order_id: orderId,
+                product_id: row.product_id,
+                product_name: legacyProduct?.name,
+                city_name: base.city_name,
+                quantity: qty,
+                retail_price: retailPrice,
+                discount_price: discountPrice,
+                unit_cost: 0,
+                one_time_cost: 0,
+              },
+            ],
+          };
+        }
+
+        return {
+          ...base,
+          items: [],
+        };
       },
 
       fetchAllData: async () => {

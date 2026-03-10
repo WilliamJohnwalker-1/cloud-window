@@ -102,7 +102,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
-7. 执行 `supabase/storage-policies.sql`
+7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
+8. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -112,7 +113,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
-7. 执行 `supabase/storage-policies.sql`
+7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
+8. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -200,6 +202,13 @@ npm run web:v2
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.3 (2026-03-10) - 订单与导出链路调整
+
+- 订单详情读取链路重构为“订单头 + order_items 直查 + 商品补全”模式
+- Web 订单列表导出统一为 XLSX（不再使用 CSV）
+- Cloudflare 部署排查结论已补充：需部署 Vite 的 `web/dist`
+- **已知问题（待修复）**：部分历史订单在订单明细中仍可能出现商品聚合异常，需继续做历史数据兼容处理
 
 ### Web v1.2.2 (2026-03-10) - 交互补齐与体验升级
 
