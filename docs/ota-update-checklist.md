@@ -22,58 +22,52 @@
 
 ## 项目落地规范
 
-1. `app.json` 保持 `updates.url`，并使用 `runtimeVersion.policy=appVersion`（版本升级即切换 runtime）。
-2. 日常前端迭代通过 `eas update --environment production --channel production` 发布。
-3. 发布 OTA 前先执行 `npm run ota:check-native`，若检测到原生敏感改动则必须先发新 APK/IPA。
-4. 应用内“检查更新”先查 OTA；若无 OTA 再读取二进制更新清单（manifest）并提示下载最新 APK。
-
-## 二进制更新清单（manifest）约定
-
-在 `app.json -> expo.extra.binaryUpdate.manifestUrl` 配置一个可公网访问 JSON（推荐指向 Cloudflare Worker 的 `/mobile/latest.json`），例如：
-
-```json
-{
-  "latestVersion": "2.1.6",
-  "androidApkUrl": "https://your-cdn.example.com/inventory-app-2.1.6.apk"
-}
-```
-
-- `latestVersion`：与 `app.json` 的 `expo.version` 对齐
-- `androidApkUrl`：EAS 构建产物（或你自己的分发 CDN）下载地址
-- 每次发新版 APK 后，更新该 JSON 即可让旧版客户端在“检查更新”中自动跳转下载
-
-若使用 Worker 动态返回，更新流程只需改 Worker 变量：
-
-- `MOBILE_LATEST_VERSION`
-- `MOBILE_ANDROID_APK_URL`
-
-补充：若未显式设置 `manifestUrl`，移动端会自动尝试 `EXPO_PUBLIC_PAYMENT_API_URL + /mobile/latest.json`。
-
-如果不使用 manifest，也可在 `app.json -> expo.extra.binaryUpdate` 里直接配置：
-
-- `androidApkUrl`
-- `androidApkVersion`
-
-但推荐 manifest 方式，便于在不重新发包的情况下动态调整下载地址。
+1. `app.json` 保持 `updates.url` 和 `runtimeVersion.policy=appVersion`。
+2. 每次发新 APK 时迭代移动端版本号（如 `2.1.4 -> 2.1.5`）。
+3. 日常前端迭代通过 `eas update` 发布到对应 channel。
+4. 应用内提供“检查更新”入口，用户可主动触发下载并重启。
 
 ## 发布建议流程
 
 ### A. 仅前端改动（OTA）
 
 ```bash
-npm run ota:check-native
-eas update --environment production --channel production --message "mobile ota: xxx"
+eas update --channel production --message "mobile ota: xxx"
 ```
 
 ### B. 含原生改动（新 APK）
 
 ```bash
 eas build --platform android --profile production
+npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 ```
 
 > 构建完成后把 APK 链接发给测试或运营，再配合后续 OTA 迭代。
 
-构建完成后同步更新 manifest（`latestVersion + androidApkUrl`）。
+`release:android:sync` 会自动执行：
+
+1. 根据 buildId 获取 EAS 构建产物地址（若构建未完成会持续等待）
+2. 下载 APK 到 `artifacts/`
+3. 上传到 R2：`cloud-window-apk-prod/inventory-app-<version>.apk`
+4. 回写 Worker secrets：
+   - `MOBILE_LATEST_VERSION`
+   - `MOBILE_ANDROID_APK_KEY`
+
+> 该脚本遵循你当前流程：**不手动 deploy Worker**，由你的 Worker/GitHub 自动同步机制生效。
+
+可选参数：
+
+- `--build-id`：指定 EAS 构建任务 ID（推荐）
+- `--version`：覆盖 app.json 版本号
+- `--bucket`：覆盖 R2 bucket（默认 `cloud-window-apk-prod`）
+- `--worker-name`：目标 Worker 名称（默认 `cloud-window`）
+- `--worker-env`：覆盖 wrangler 环境（默认不传，写入默认 Worker，避免误写到 `*-production`）
+
+## 重要安全约束（避免变量覆盖）
+
+- `wrangler.toml` 中不要配置 `vars = {}` 空对象。
+- 仅使用 `wrangler secret put` 回写 `MOBILE_LATEST_VERSION / MOBILE_ANDROID_APK_KEY`。
+- 若你使用默认 Worker（非环境后缀），执行脚本时不要传 `--worker-env production`。
 
 ## 自检清单
 

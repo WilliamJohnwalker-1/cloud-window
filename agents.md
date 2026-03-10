@@ -6,11 +6,6 @@
 
 供销管理系统 v2 — 多角色供应链管理（管理员/分销商/库存管理员）。支持城市维度商品、订单流程、通知接单、报表导出、条码入库/出库。
 
-## CURRENT MOBILE VERSION
-
-- 当前移动端版本：`v2.1.5`（2026-03-10）
-- 本次重点：头像选择体验优化（动物/水果/蔬菜分类）、Toast 可读性修复、搜索框稳定性与布局微调、订单统计展开区自适应
-
 ## COMMANDS
 
 ```bash
@@ -28,6 +23,8 @@ npx expo start --ios         # iOS
 npm run build --prefix web   # Build Vite web app
 eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
 eas build --platform android --profile production             # Build production APK
+npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets
+npm run push:both            # Push to Gitee and GitHub together
 
 # Dependencies
 npm install                  # Install dependencies
@@ -221,3 +218,13 @@ Before committing:
 - [ ] npx expo start loads without errors
 - [ ] Manual test: Distributor login -> Create order -> Admin accept
 - [ ] Web manual test: barcode outbound flow + payment mock flow
+
+## RELEASE NOTES
+
+- Current mobile baseline: `v2.1.6`
+- v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
+- Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
+- Android build release flow:
+  1. `eas build --platform android --profile production`
+  2. `npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window`
+  3. `npm run push:both`

@@ -105,8 +105,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
 8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
-9. 执行 `supabase/migrate-v2.8-payment-events.sql`
-10. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -118,8 +117,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
 8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
-9. 执行 `supabase/migrate-v2.8-payment-events.sql`
-10. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -142,27 +140,40 @@ Web 登录依赖以下变量（推荐使用 `VITE_` 前缀）：
 ```env
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
-VITE_PAYMENT_API_URL=...
 ```
 
 > 兼容 `EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY`，但部署时建议统一使用 `VITE_*`。
-> 支付配置详见：`docs/alipay-api-setup.md`、`docs/payment-production-checklist.md`。
 
 ### 6. 移动端 OTA 发布（应用内更新）
 
 ```bash
-npm run ota:check-native
-eas update --environment production --channel production --message "mobile ota: 描述本次改动"
+eas update --channel production --message "mobile ota: 描述本次改动"
 ```
 
-或使用一键命令（自动执行原生改动检查 + 发布 OTA）：
+> 说明：仅前端逻辑/UI改动可 OTA，下沉到原生层的改动仍需重新打包 APK。
+
+### 7. Android 新包发布后自动同步（R2 + Worker变量）
 
 ```bash
-npm run ota:publish -- --msg "mobile ota: 描述本次改动"
+# 1) 先执行 EAS 打包
+eas build --platform android --profile production
+
+# 2) 拿到 buildId 后执行同步
+npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 ```
 
-> 说明：当前 `runtimeVersion` 使用 `appVersion` 策略，前端改动通过 OTA 下发；
-> 一旦涉及版本号提升或原生改动，需重新打包 APK/IPA，并由“我的页面 -> 检查更新”引导下载新安装包。
+该命令会自动：下载 APK、上传到 `cloud-window-apk-prod`、并回写 Worker 的
+`MOBILE_LATEST_VERSION` 和 `MOBILE_ANDROID_APK_KEY`。
+
+> 默认写入 **默认 Worker**（不附加 `--env`），避免误写到 `worker-name-production`。
+> 只有你确实使用 Wrangler 环境隔离时，才传 `--worker-env production`。
+> 可通过 `--worker-name <你的Worker名>` 指定回写目标（默认 `cloud-window`）。
+
+双远端同步推送：
+
+```bash
+npm run push:both
+```
 
 ## 目录结构
 
@@ -237,14 +248,23 @@ npm run ota:publish -- --msg "mobile ota: 描述本次改动"
 
 ## 更新日志
 
-### Mobile v2.1.5 (2026-03-10) - 头像与搜索体验优化
+### Mobile v2.1.6 (2026-03-11) - 会话策略与安装包更新链路修复
+
+- 修复单会话保护：重复登录时仅踢下旧设备，保留最新登录设备在线
+- 优化登录校验耗时：会话校验增加节流与并发去重，减少重复 RPC
+- 应用内“检查更新”支持二进制更新提示，自动引导到 APK 下载入口
+- 补齐 Cloudflare R2 分发链路：Worker 支持 `/mobile/download/latest.apk` 回源下载
+
+### Mobile v2.1.5 (2026-03-10) - 头像/搜索体验与发布链路合并更新
 
 - 头像库调整为动物 / 水果 / 蔬菜分类样式，减少网络依赖并提升可识别度
 - 修复“更换头像”后的反馈弹层可读性问题，统一 Toast 文本样式
 - 搜索框交互稳定性与布局微调：修复 placeholder 上下抖动，优化商品页搜索框与城市筛选区间距
 - 订单页商品数量统计展开区改为自适应内容，避免文本溢出到搜索区域
-- 单会话保护提速：移动端改为更快会话校验，并补齐 Web 端会话激活/定时校验，支持跨端挤下线
-- 修复移动端手动退出登录偶发不回登录页的问题（登出失败时也强制清理本地态）
+- 增加 Android 构建后自动同步脚本：EAS 产物下载 -> 上传 R2 -> 回写 Worker 变量
+- 增加双远端同步推送命令：一次推送 Gitee + GitHub
+- 发布脚本改为显式 `--worker-name`，默认写入 `cloud-window`，避免误写 `*-production`
+- 文档补充 Worker/R2 变量安全约束，避免再次覆盖现网配置
 
 ### Mobile v2.1.4 (2026-03-10) - 应用内更新（OTA）接入
 
