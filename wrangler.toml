@@ -6,7 +6,7 @@ compatibility_date = "2024-01-01"
 [env.production]
 vars = { }
 
-[[r2_buckets]]
+[[env.production.r2_buckets]]
 binding = "MOBILE_APK_BUCKET"
 bucket_name = "cloud-window-apk-prod"
 
@@ -25,12 +25,9 @@ bucket_name = "cloud-window-apk-prod"
 # ALIPAY_APP_ID = ""
 # ALIPAY_PRIVATE_KEY = ""
 # ALIPAY_PUBLIC_KEY = ""
-# ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do"
-# ALIPAY_NOTIFY_URL = "https://your-worker-domain/api/payment/alipay/notify"
-# SUPABASE_URL = "https://xxxx.supabase.co"
-# SUPABASE_SERVICE_ROLE_KEY = ""
 # MOBILE_LATEST_VERSION = "2.1.6"
-# MOBILE_ANDROID_APK_URL = "https://your-cdn.example.com/inventory-app-2.1.6.apk"
+# MOBILE_ANDROID_APK_KEY = "inventory-app-2.1.6.apk"
+# MOBILE_ANDROID_APK_URL = "" # Optional: if empty, /mobile/latest.json will use /mobile/download/latest.apk
 
 # Secrets (set via: wrangler secret put)
 # wrangler secret put WECHAT_MCH_ID
@@ -39,5 +36,3 @@ bucket_name = "cloud-window-apk-prod"
 # wrangler secret put ALIPAY_APP_ID
 # wrangler secret put ALIPAY_PRIVATE_KEY
 # wrangler secret put ALIPAY_PUBLIC_KEY
-# wrangler secret put SUPABASE_URL
-# wrangler secret put SUPABASE_SERVICE_ROLE_KEY

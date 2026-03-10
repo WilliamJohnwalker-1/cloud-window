@@ -232,10 +232,12 @@ function json(data, init = {}) {
 function getMobileLatestPayload(env) {
   const latestVersion = String(env.MOBILE_LATEST_VERSION || '').trim();
   const androidApkUrl = String(env.MOBILE_ANDROID_APK_URL || '').trim();
+  const androidApkKey = String(env.MOBILE_ANDROID_APK_KEY || '').trim();
 
   return {
     latestVersion,
     androidApkUrl,
+    androidApkKey,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -255,12 +257,17 @@ export default {
 
     if (url.pathname === '/mobile/latest.json' && request.method === 'GET') {
       const payload = getMobileLatestPayload(env);
-      const hasConfig = Boolean(payload.latestVersion && payload.androidApkUrl);
+      const derivedDownloadUrl = payload.androidApkUrl
+        || (payload.androidApkKey ? `${url.origin}/mobile/download/latest.apk` : '');
+      const hasConfig = Boolean(payload.latestVersion && derivedDownloadUrl);
       return json(
         {
           ok: true,
           configured: hasConfig,
-          ...payload,
+          latestVersion: payload.latestVersion,
+          androidApkUrl: derivedDownloadUrl,
+          androidApkKey: payload.androidApkKey,
+          updatedAt: payload.updatedAt,
         },
         {
           headers: {
@@ -268,6 +275,33 @@ export default {
           },
         },
       );
+    }
+
+    if (url.pathname === '/mobile/download/latest.apk' && request.method === 'GET') {
+      if (!env.MOBILE_APK_BUCKET) {
+        return json({ ok: false, error: 'R2 bucket not configured' }, { status: 500 });
+      }
+
+      const payload = getMobileLatestPayload(env);
+      const objectKey = payload.androidApkKey || 'latest.apk';
+      const object = await env.MOBILE_APK_BUCKET.get(objectKey);
+
+      if (!object) {
+        return json({ ok: false, error: 'APK not found in R2', key: objectKey }, { status: 404 });
+      }
+
+      const fileVersion = payload.latestVersion || 'latest';
+      const fileName = `inventory-app-${fileVersion}.apk`;
+
+      return new Response(object.body, {
+        status: 200,
+        headers: {
+          'Content-Type': object.httpMetadata?.contentType || 'application/vnd.android.package-archive',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+          'Cache-Control': 'public, max-age=300',
+          ETag: object.httpEtag,
+        },
+      });
     }
 
     if (url.pathname === '/api/payment/create' && request.method === 'POST') {
