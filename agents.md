@@ -21,6 +21,8 @@ npx tsc --noEmit             # TypeScript check (REQUIRED before commits)
 npx expo start --android     # Android
 npx expo start --ios         # iOS
 npm run build --prefix web   # Build Vite web app
+npm run cf:deploy            # Cloudflare Worker deploy with --keep-vars
+npm run cf:version           # Cloudflare Worker versions upload command
 eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
 eas build --platform android --profile production             # Build production APK
 npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets (default worker env)

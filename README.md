@@ -174,6 +174,16 @@ npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 npm run push:both
 ```
 
+### 8. Cloudflare Worker 自动部署（保留 Dashboard 变量）
+
+在 Cloudflare Worker Build Configuration 中建议使用：
+
+- Build command: `None`
+- Deploy command: `npm run cf:deploy`
+- Version command: `npm run cf:version`
+
+其中 `cf:deploy` 含 `--keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
+
 ## 目录结构
 
 ```text
