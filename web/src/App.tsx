@@ -4,12 +4,13 @@ import { Sidebar } from './components/Sidebar';
 import { InventoryScreen } from './screens/InventoryScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { OrdersScreen } from './screens/OrdersScreen';
+import { PaymentScreen } from './screens/PaymentScreen';
 import { ProductsScreen } from './screens/ProductsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { ReportsScreen } from './screens/ReportsScreen';
 import { useAppStore } from './store/useAppStore';
 
-type TabKey = 'products' | 'inventory' | 'orders' | 'reports' | 'profile';
+type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'reports' | 'profile';
 
 interface SearchResultItem {
   id: string;
@@ -155,6 +156,8 @@ function App() {
         return <InventoryScreen />;
       case 'orders':
         return <OrdersScreen />;
+      case 'payment':
+        return <PaymentScreen />;
       case 'reports':
         return <ReportsScreen />;
       case 'profile':
@@ -172,6 +175,8 @@ function App() {
         return '库存管理';
       case 'orders':
         return '订单中心';
+      case 'payment':
+        return '扫码收款台';
       case 'reports':
         return '数据报表';
       case 'profile':

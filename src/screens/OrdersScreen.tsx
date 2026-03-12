@@ -66,6 +66,10 @@ export default function OrdersScreen() {
   const isAdmin = user?.role === 'admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin';
 
+  const getOrderKindLabel = (kind: Order['order_kind']): string => {
+    return kind === 'retail' ? '零售订单' : '分销订单';
+  };
+
   useEffect(() => {
     fetchOrders();
     fetchProducts();
@@ -455,7 +459,10 @@ export default function OrdersScreen() {
   const renderOrder = ({ item }: { item: Order }) => (
     <View style={styles.orderCard}>
       <View style={styles.orderHeader}>
-        <Text style={styles.orderId}>订单 #{item.id.slice(0, 8)}</Text>
+        <View>
+          <Text style={styles.orderId}>订单 #{item.id.slice(0, 8)}</Text>
+          <Text style={styles.orderKindTag}>{getOrderKindLabel(item.order_kind)}</Text>
+        </View>
         <Text style={styles.orderDate}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
       </View>
 
@@ -479,7 +486,7 @@ export default function OrdersScreen() {
 
       <View style={styles.orderTotals}>
         <Text style={styles.detailText}>零售总价: {Number(item.total_retail_amount).toFixed(2)}元</Text>
-        <Text style={styles.totalText}>折扣总价: {Number(item.total_discount_amount).toFixed(2)}元</Text>
+        <Text style={styles.totalText}>{item.order_kind === 'retail' ? '收款总价' : '折扣总价'}: {Number(item.total_discount_amount).toFixed(2)}元</Text>
       </View>
 
       <View style={styles.orderActions}>
@@ -736,7 +743,7 @@ export default function OrdersScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>新建订单（合并为单条）</Text>
+              <Text style={styles.modalTitle}>新建分销订单（合并为单条）</Text>
               <TouchableOpacity onPress={() => { clearCart(); setModalVisible(false); }}>
                 <Text style={styles.modalClose}>关闭</Text>
               </TouchableOpacity>
@@ -952,6 +959,7 @@ const styles = StyleSheet.create({
   },
   orderHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   orderId: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  orderKindTag: { marginTop: 4, fontSize: 11, color: Colors.blue, fontWeight: '600' },
   orderDate: { fontSize: 12, color: Colors.textTertiary },
   orderMetaContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   orderMeta: { fontSize: 12, color: Colors.textSecondary },

@@ -56,6 +56,7 @@ interface OrderRow {
   city_id?: string;
   cities?: { name: string } | null;
   status?: Order['status'];
+  order_kind?: Order['order_kind'] | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   created_at: string;
@@ -228,6 +229,7 @@ const mapOrder = (raw: OrderRow): Order => {
     city_id: raw.city_id,
     city_name: raw.cities?.name,
     status: raw.status || 'pending',
+    order_kind: raw.order_kind || 'distribution',
     total_retail_amount: Number(raw.total_retail_amount || 0),
     total_discount_amount: Number(raw.total_discount_amount || 0),
     created_at: raw.created_at,
@@ -816,6 +818,8 @@ export const useAppStore = create<AppState>()(
           const orderPayload = {
             distributor_id: user.id,
             city_id: user.city_id ?? product.city_id,
+            order_kind: 'retail' as const,
+            status: 'accepted' as const,
             total_retail_amount: retailPrice * quantity,
             total_discount_amount: retailPrice * quantity,
           };
@@ -917,6 +921,9 @@ export const useAppStore = create<AppState>()(
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
             if (!product) throw new Error('商品不存在');
+            if (item.quantity <= 0 || item.quantity % 5 !== 0) {
+              throw new Error(`${product.name} 数量必须是5的倍数`);
+            }
 
             const available = product.quantity ?? 0;
             if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
@@ -959,6 +966,7 @@ export const useAppStore = create<AppState>()(
           const baseOrderPayload = {
             distributor_id: user.id,
             city_id: user.city_id ?? orderCityId,
+            order_kind: 'distribution' as const,
             total_retail_amount: totalRetail,
             total_discount_amount: totalDiscount,
           };

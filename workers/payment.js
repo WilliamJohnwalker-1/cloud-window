@@ -161,6 +161,13 @@ function buildPaymentEventKey({ channel, eventType, outTradeNo, notifyId, tradeN
   return [channel, eventType, outTradeNo || '-', notifyId || '-', tradeNo || '-'].join(':');
 }
 
+function getMissingEnv(env, keys) {
+  return keys.filter((key) => {
+    const value = env[key];
+    return value === undefined || value === null || String(value).trim() === '';
+  });
+}
+
 async function supabaseRequest(env, path, init = {}) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error('Missing SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY in worker env');
@@ -196,7 +203,7 @@ async function patchOrderPayment(env, orderId, patch) {
   await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+    body: JSON.stringify(patch),
   });
 }
 
@@ -253,6 +260,24 @@ export default {
 
     if (url.pathname === '/health') {
       return json({ ok: true, mock: isMock, ts: Date.now() });
+    }
+
+    if (url.pathname === '/api/payment/config-check' && request.method === 'GET') {
+      const liveRequired = [
+        'SUPABASE_URL',
+        'SUPABASE_SERVICE_ROLE_KEY',
+        'ALIPAY_APP_ID',
+        'ALIPAY_PRIVATE_KEY',
+        'ALIPAY_PUBLIC_KEY',
+        'ALIPAY_NOTIFY_URL',
+      ];
+      const missing = getMissingEnv(env, liveRequired);
+      return json({
+        ok: true,
+        mock: isMock,
+        liveReady: isMock ? false : missing.length === 0,
+        missing,
+      });
     }
 
     if (url.pathname === '/mobile/latest.json' && request.method === 'GET') {
@@ -356,6 +381,18 @@ export default {
           outTradeNo: orderId,
           transactionId,
         });
+      }
+
+      const missing = getMissingEnv(env, [
+        'SUPABASE_URL',
+        'SUPABASE_SERVICE_ROLE_KEY',
+        'ALIPAY_APP_ID',
+        'ALIPAY_PRIVATE_KEY',
+        'ALIPAY_PUBLIC_KEY',
+        'ALIPAY_NOTIFY_URL',
+      ]);
+      if (missing.length > 0) {
+        return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
       }
 
       const order = await getOrderById(env, orderId);
@@ -526,6 +563,7 @@ export default {
         const notifyId = params.notify_id;
         const tradeStatus = params.trade_status;
         const totalAmount = Number(params.total_amount || 0);
+        const appId = String(params.app_id || '');
 
         if (!sign || !outTradeNo || !env.ALIPAY_PUBLIC_KEY) {
           return new Response('failure', { status: 400 });
@@ -534,6 +572,10 @@ export default {
         const signContent = buildAlipaySignContent(params);
         const verified = await rsa2Verify(signContent, sign, env.ALIPAY_PUBLIC_KEY);
         if (!verified) {
+          return new Response('failure', { status: 400 });
+        }
+
+        if (String(env.ALIPAY_APP_ID || '').trim() && appId !== String(env.ALIPAY_APP_ID).trim()) {
           return new Response('failure', { status: 400 });
         }
 
@@ -562,7 +604,7 @@ export default {
             event_type: 'notify',
             status: 'failed',
             amount: totalAmount,
-            processed: true,
+            processed: false,
             payload: { ...params, reason: 'order_not_found' },
           });
           return new Response('failure', { status: 404 });
@@ -579,7 +621,7 @@ export default {
             event_type: 'notify',
             status: 'failed',
             amount: totalAmount,
-            processed: true,
+            processed: false,
             payload: { ...params, reason: 'amount_mismatch', expectedAmount },
           });
           return new Response('failure', { status: 400 });
