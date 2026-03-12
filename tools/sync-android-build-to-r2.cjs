@@ -43,7 +43,7 @@ const parseArgs = () => {
     buildId: pick('--build-id', env.EAS_BUILD_ID || ''),
     appVersion: pick('--version', env.MOBILE_VERSION || ''),
     bucket: pick('--bucket', env.R2_BUCKET_NAME || 'cloud-window-apk-prod'),
-    workerEnv: pick('--worker-env', env.WORKER_ENV || ''),
+    workerEnv: pick('--worker-env', ''),
     workerName: pick('--worker-name', env.WORKER_NAME || 'cloud-window'),
   };
 };
