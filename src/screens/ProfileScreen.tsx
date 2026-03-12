@@ -318,7 +318,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const parseEmojiAvatar = (value?: string): { emoji: string; bgColor: string } | null => {
+  const parseEmojiAvatar = (value?: string | null): { emoji: string; bgColor: string } | null => {
     if (!value || !value.startsWith('emoji|')) return null;
     const parts = value.split('|');
     if (parts.length < 3) return null;

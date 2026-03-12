@@ -4,6 +4,7 @@ export interface Profile {
   id: string;
   email: string;
   full_name?: string;
+  avatar_url?: string | null;
   role: UserRole;
   city_id?: string | null;
   city_name?: string;
@@ -92,6 +93,10 @@ export interface InventoryReport {
 export type OrderStatus = 'pending' | 'accepted';
 
 export type NotificationType = 'new_order' | 'order_accepted';
+
+export type PaymentMethod = 'wechat' | 'alipay';
+
+export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'timeout';
 
 export interface Notification {
   id: string;

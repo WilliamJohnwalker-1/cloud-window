@@ -131,3 +131,27 @@ export const Gradients = {
   cool: [Colors.gradientMid, Colors.blue] as readonly [string, string],
   subtle: ['#FFE5EE', '#E5EEFF'] as readonly [string, string],
 } as const;
+
+export const LightColors = {
+  ...Colors,
+  background: '#F8F5FF',
+  surface: '#FFFFFF',
+  surfaceSecondary: '#F5F0FF',
+  textPrimary: '#2D2D3F',
+  textSecondary: '#8E8EA0',
+  textTertiary: '#B8B8CC',
+  border: '#EDE8F5',
+  divider: '#F0ECF7',
+} as const;
+
+export const DarkColors = {
+  ...Colors,
+  background: '#1A1A2E',
+  surface: '#252542',
+  surfaceSecondary: '#1E1E38',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#A0A0B8',
+  textTertiary: '#707088',
+  border: '#2D2D4A',
+  divider: '#2D2D4A',
+} as const;

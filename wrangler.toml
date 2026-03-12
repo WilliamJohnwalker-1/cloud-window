@@ -1,5 +1,5 @@
 # Cloudflare Worker for Payment API
-name = "inventory-payment"
+name = "cloud-window"
 main = "workers/payment.js"
 compatibility_date = "2024-01-01"
 
