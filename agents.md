@@ -23,7 +23,7 @@ npx expo start --ios         # iOS
 npm run build --prefix web   # Build Vite web app
 eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
 eas build --platform android --profile production             # Build production APK
-npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets
+npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets (default worker env)
 npm run push:both            # Push to Gitee and GitHub together
 
 # Dependencies

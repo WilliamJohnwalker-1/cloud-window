@@ -166,7 +166,6 @@ npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 `MOBILE_LATEST_VERSION` 和 `MOBILE_ANDROID_APK_KEY`。
 
 > 默认写入 **默认 Worker**（不附加 `--env`），避免误写到 `worker-name-production`。
-> 只有你确实使用 Wrangler 环境隔离时，才传 `--worker-env production`。
 > 可通过 `--worker-name <你的Worker名>` 指定回写目标（默认 `cloud-window`）。
 
 双远端同步推送：
