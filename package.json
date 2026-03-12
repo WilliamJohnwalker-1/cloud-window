@@ -1,6 +1,6 @@
 {
   "name": "inventory-app",
-  "version": "2.1.6",
+  "version": "2.1.4",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -11,6 +11,8 @@
     "web:build": "expo export --platform web",
     "ota:check-native": "node ./tools/check-ota-native-changes.cjs",
     "ota:publish": "node ./tools/publish-ota.cjs",
+    "release:android:sync": "node ./tools/sync-android-build-to-r2.cjs",
+    "push:both": "node ./tools/push-both.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "node ./node_modules/eslint/bin/eslint.js . --ext .ts,.tsx",
     "test": "node ./node_modules/vitest/vitest.mjs run --passWithNoTests",

@@ -7,6 +7,28 @@ const sleep = (ms) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
+const loadDotEnv = () => {
+  try {
+    const file = readFileSync(join(process.cwd(), '.env'), 'utf8');
+    file
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && line.includes('='))
+      .forEach((line) => {
+        const idx = line.indexOf('=');
+        const key = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+        if (key && process.env[key] === undefined) {
+          process.env[key] = value;
+        }
+      });
+  } catch {
+    // ignore missing .env file
+  }
+};
+
+loadDotEnv();
+
 const parseArgs = () => {
   const args = argv.slice(2);
   const pick = (name, fallback = '') => {
@@ -110,6 +132,25 @@ const getLatestBuildForVersion = (appVersion) => {
   return matched;
 };
 
+const getLatestWorkerVersionId = (workerName, envArgs) => {
+  const output = run('npx', ['wrangler', 'versions', 'list', '--name', workerName, '--json', ...envArgs], { capture: true });
+  const versions = extractJson(output);
+  if (!Array.isArray(versions) || versions.length === 0) {
+    throw new Error(`No worker versions found for ${workerName}`);
+  }
+
+  const latest = versions.reduce((acc, item) => {
+    if (!acc) return item;
+    return Number(item.number || 0) > Number(acc.number || 0) ? item : acc;
+  }, null);
+
+  if (!latest?.id) {
+    throw new Error(`Cannot resolve latest version id for ${workerName}`);
+  }
+
+  return String(latest.id);
+};
+
 const waitForFinished = (buildId) => {
   while (true) {
     const build = getBuildById(buildId);
@@ -158,9 +199,13 @@ const main = () => {
   console.log(`☁️ Uploading APK to R2: ${opts.bucket}/${apkKey}`);
   run('npx', ['wrangler', 'r2', 'object', 'put', `${opts.bucket}/${apkKey}`, '--file', artifactFile, '--remote']);
 
-  console.log('🔐 Updating Worker secrets');
-  run('npx', ['wrangler', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
-  run('npx', ['wrangler', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
+  console.log('🔐 Updating Worker secrets (versioned)');
+  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
+  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
+
+  const latestVersionId = getLatestWorkerVersionId(opts.workerName, envArgs);
+  console.log(`🚚 Deploying worker version ${latestVersionId}`);
+  run('npx', ['wrangler', 'versions', 'deploy', '--name', opts.workerName, '--version-id', latestVersionId, '--yes', ...envArgs]);
 
   writeFileSync(
     join(artifactDir, `sync-result-${appVersion}.json`),
@@ -176,7 +221,7 @@ const main = () => {
     }, null, 2),
   );
 
-  console.log('✅ R2 上传与 Worker 变量回写完成（按你的流程不执行 wrangler deploy）');
+  console.log('✅ R2 上传与 Worker 变量回写完成（仅更新 APK 相关变量并已部署）');
 };
 
 try {
