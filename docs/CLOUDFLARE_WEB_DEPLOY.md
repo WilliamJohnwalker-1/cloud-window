@@ -12,27 +12,40 @@ npm run web:build
 
 ## 2) 部署前环境变量
 
-在 Cloudflare Pages（前端）里配置：
+在 Cloudflare Pages（前端）里配置（如当前 Web 站点接入支付时）：
 
-- `EXPO_PUBLIC_PAYMENT_API_URL`：Worker 地址（如 `https://inventory-payment.xxx.workers.dev`）
-- `EXPO_PUBLIC_PAYMENT_MOCK`：`true`（联调）/`false`（生产）
+- `VITE_PAYMENT_API_URL`：Worker 地址（如 `https://inventory-payment.xxx.workers.dev`）
+- `VITE_PAYMENT_MOCK`：`true`（联调）/`false`（生产）
+
+> 说明：当前仓库的支付调用主链路仍在移动端（`src/lib/payment.ts`），Pages 若未接入支付页面，这两个变量不会影响 Worker 实际收款。
+
+移动端实测请同时确保 `.env`：
+
+- `EXPO_PUBLIC_PAYMENT_API_URL=https://<your-worker-domain>`
+- `EXPO_PUBLIC_PAYMENT_MOCK=false`
 
 在 Cloudflare Worker（后端）里配置：
 
 - `PAYMENT_MOCK=true`（联调）
 - 生产时改为 `PAYMENT_MOCK=false`，并配置：
   - 微信：`WECHAT_MCH_ID`, `WECHAT_APP_ID`, `WECHAT_API_V3_KEY`, `WECHAT_SERIAL_NO`, `WECHAT_PRIVATE_KEY`
-  - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
+  - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
   - 移动端安装包更新清单：
     - `MOBILE_LATEST_VERSION`（例如 `2.1.6`）
     - `MOBILE_ANDROID_APK_URL`（EAS 构建 APK 或你自己的 CDN 下载地址）
+
+可先检查配置完整性：
+
+```bash
+curl https://<your-worker-domain>/api/payment/config-check
+```
 
 ---
 
 ## 3) 部署 Worker
 
 ```bash
-npm run deploy:worker
+npm run cf:deploy
 ```
 
 （使用 `wrangler.toml`）
@@ -66,7 +79,7 @@ curl https://<your-worker-domain>/mobile/latest.json
 ## 4) 部署 Pages
 
 ```bash
-npm run deploy:cloudflare
+npm run build --prefix web
 ```
 
 （脚本内使用 `--project-name inventory-web`）
