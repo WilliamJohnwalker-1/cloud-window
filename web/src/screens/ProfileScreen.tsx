@@ -3,6 +3,8 @@ import { Bell, ChevronRight, LogOut, Mail, MapPin, Palette, Settings, Shield, St
 import type { LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import { avatarLibrary } from '../constants/avatarLibrary';
+import { parseEmojiAvatar } from '../utils/avatar';
 import webPackage from '../../package.json';
 
 interface SectionItem {
@@ -14,12 +16,24 @@ interface SectionItem {
 }
 
 export const ProfileScreen: React.FC = () => {
-  const { user, signOut, updateOwnProfile } = useAppStore();
+  const { user, signOut, updateOwnProfile, updateOwnAvatar } = useAppStore();
   const [showEditModal, setShowEditModal] = React.useState(false);
+  const [showAvatarModal, setShowAvatarModal] = React.useState(false);
   const [fullName, setFullName] = React.useState(user?.full_name || '');
   const [storeName, setStoreName] = React.useState(user?.store_name || '');
 
   if (!user) return null;
+
+  const selectedEmojiAvatar = parseEmojiAvatar(user.avatar_url);
+
+  const handleSelectAvatar = async (avatarUrl: string): Promise<void> => {
+    const { error } = await updateOwnAvatar(avatarUrl);
+    if (error) {
+      window.alert(`头像更新失败：${error.message}`);
+      return;
+    }
+    setShowAvatarModal(false);
+  };
 
   const sections: Array<{ title: string; items: SectionItem[] }> = [
     {
@@ -54,8 +68,28 @@ export const ProfileScreen: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         className="bg-white/5 border border-white/10 rounded-[40px] p-8 flex items-center space-x-8"
       >
-        <div className="w-24 h-24 rounded-full bg-tech-gradient flex items-center justify-center text-4xl font-black shadow-neon">
-          {user.email[0].toUpperCase()}
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-24 h-24 rounded-full bg-tech-gradient flex items-center justify-center text-4xl font-black shadow-neon overflow-hidden">
+            {selectedEmojiAvatar ? (
+              <div
+                className="w-full h-full flex items-center justify-center text-5xl"
+                style={{ backgroundColor: selectedEmojiAvatar.bgColor }}
+              >
+                {selectedEmojiAvatar.emoji}
+              </div>
+            ) : user.avatar_url ? (
+              <img src={user.avatar_url} alt="用户头像" className="w-full h-full object-cover" />
+            ) : (
+              user.email[0].toUpperCase()
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAvatarModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/10 text-xs font-bold hover:bg-white/20"
+          >
+            更换头像
+          </button>
         </div>
         <div>
           <h2 className="text-3xl font-bold">{user.store_name || '欢迎使用系统'}</h2>
@@ -156,6 +190,34 @@ export const ProfileScreen: React.FC = () => {
               >
                 保存
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAvatarModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">选择头像</h3>
+              <button type="button" onClick={() => setShowAvatarModal(false)} className="px-3 py-1.5 rounded-xl bg-white/10">关闭</button>
+            </div>
+            <p className="text-xs text-white/50">动物 · 水果 · 蔬菜</p>
+            <div className="grid grid-cols-5 gap-3 max-h-[340px] overflow-auto pr-1">
+              {avatarLibrary.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  onClick={() => {
+                    void handleSelectAvatar(item.value);
+                  }}
+                  className="flex items-center justify-center w-16 h-16 rounded-full border border-white/10 hover:scale-105 transition-transform"
+                  style={{ backgroundColor: item.bgColor }}
+                  title={item.label}
+                >
+                  <span className="text-3xl">{item.emoji}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
