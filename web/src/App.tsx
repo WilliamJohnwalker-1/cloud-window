@@ -31,6 +31,8 @@ function App() {
     notifications,
     products,
     orders,
+    schemaError,
+    schemaVersion,
   } = useAppStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('products');
@@ -146,6 +148,33 @@ function App() {
 
   if (!user) {
     return <LoginScreen />;
+  }
+
+  if (schemaError) {
+    return (
+      <div className="min-h-screen bg-background text-white flex items-center justify-center p-6">
+        <div className="max-w-xl w-full bg-white/5 border border-red-400/30 rounded-3xl p-6 space-y-4">
+          <h2 className="text-2xl font-bold text-red-300">数据库版本校验失败</h2>
+          <p className="text-white/80 text-sm leading-6">
+            当前 Web 版本要求数据库迁移至少到 <span className="font-semibold">v3.1.0</span>。
+            请在 Supabase SQL Editor 执行最新迁移后刷新页面。
+          </p>
+          <div className="text-xs text-white/60 space-y-1">
+            <p>当前数据库版本：{schemaVersion || 'unknown'}</p>
+            <p>错误信息：{schemaError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void signOut();
+            }}
+            className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-sm hover:bg-white/20"
+          >
+            退出并稍后重试
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const renderContent = (): React.ReactNode => {

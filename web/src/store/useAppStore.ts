@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase, supabaseConfigError } from '../lib/supabase';
 import { generateEAN13 } from '../utils/barcode';
+import { calculateRetailOrderTotals, getRetailUnitPrice } from '../utils/orderPricing';
 import type {
   City,
   InventoryLog,
@@ -102,6 +103,8 @@ interface RpcErrorLike {
   message?: string;
 }
 
+const requiredSchemaVersion = '3.1.0';
+
 const createRequestId = (userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `batch-${userId}-${Date.now()}-${randomPart}`;
@@ -112,7 +115,25 @@ const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
   const message = String(error.message || '').toLowerCase();
   const missingByCode = error.code === '42883' || error.code === 'PGRST202';
   if (missingByCode) return true;
-  return message.includes('could not find the function public.create_batch_order_atomic');
+
+  return message.includes('could not find the function public.create_batch_order_atomic')
+    || message.includes('could not find the function public.create_retail_order_atomic');
+};
+
+const parseSemver = (input: string): [number, number, number] | null => {
+  const match = input.trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+};
+
+const isSchemaVersionAtLeast = (currentVersion: string, minVersion: string): boolean => {
+  const current = parseSemver(currentVersion);
+  const min = parseSemver(minVersion);
+  if (!current || !min) return false;
+
+  if (current[0] !== min[0]) return current[0] > min[0];
+  if (current[1] !== min[1]) return current[1] > min[1];
+  return current[2] >= min[2];
 };
 
 const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
@@ -131,8 +152,11 @@ interface AppState {
   notifications: Notification[];
   inventoryLogs: InventoryLog[];
   isLoading: boolean;
+  schemaVersion: string | null;
+  schemaError: string | null;
 
   setLoading: (loading: boolean) => void;
+  checkSchemaVersion: () => Promise<{ error: Error | null }>;
   ensureActiveSession: () => Promise<Error | null>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -271,8 +295,41 @@ export const useAppStore = create<AppState>()(
       notifications: [],
       inventoryLogs: [],
       isLoading: false,
+      schemaVersion: null,
+      schemaError: null,
 
       setLoading: (isLoading) => set({ isLoading }),
+
+      checkSchemaVersion: async () => {
+        try {
+          const { data, error } = await supabase.rpc('get_app_schema_version');
+          if (error) {
+            if (isMissingRpcFunction(error)) {
+              const missingMessage = `数据库缺少版本门禁函数 get_app_schema_version，请执行迁移（>= ${requiredSchemaVersion}）`;
+              set({ schemaError: missingMessage });
+              return { error: new Error(missingMessage) };
+            }
+
+            const dbError = error as Error;
+            set({ schemaError: dbError.message });
+            return { error: dbError };
+          }
+
+          const currentVersion = String(data || '').trim();
+          if (!isSchemaVersionAtLeast(currentVersion, requiredSchemaVersion)) {
+            const versionError = `数据库版本过低（当前 ${currentVersion || 'unknown'}，要求 >= ${requiredSchemaVersion}）`;
+            set({ schemaVersion: currentVersion || null, schemaError: versionError });
+            return { error: new Error(versionError) };
+          }
+
+          set({ schemaVersion: currentVersion, schemaError: null });
+          return { error: null };
+        } catch (error) {
+          const schemaError = error as Error;
+          set({ schemaError: schemaError.message });
+          return { error: schemaError };
+        }
+      },
 
       ensureActiveSession: async () => {
         const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
@@ -327,7 +384,16 @@ export const useAppStore = create<AppState>()(
         try {
           await supabase.auth.signOut();
         } finally {
-          set({ user: null, cities: [], products: [], orders: [], notifications: [], inventoryLogs: [] });
+          set({
+            user: null,
+            cities: [],
+            products: [],
+            orders: [],
+            notifications: [],
+            inventoryLogs: [],
+            schemaVersion: null,
+            schemaError: null,
+          });
         }
       },
 
@@ -535,6 +601,13 @@ export const useAppStore = create<AppState>()(
           set({ isLoading: false });
           return;
         }
+
+        const { error: schemaCheckError } = await get().checkSchemaVersion();
+        if (schemaCheckError) {
+          set({ isLoading: false });
+          return;
+        }
+
         await Promise.all([
           get().fetchCities(),
           get().fetchProducts(),
@@ -803,9 +876,8 @@ export const useAppStore = create<AppState>()(
         }
 
         try {
-          let totalRetail = 0;
-          let totalDiscount = 0;
           let orderCityId: string | undefined;
+          const retailTotalLines: Array<{ product: ProductWithDetails; quantity: number }> = [];
 
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
@@ -815,13 +887,11 @@ export const useAppStore = create<AppState>()(
             const available = Number(product.quantity || 0);
             if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
 
-            const retailPrice = Number(product.price || 0);
+            const retailPrice = getRetailUnitPrice(product);
             const unitCost = Number(product.cost || 0);
             const oneTimeCost = Number(product.one_time_cost || 0);
-
-            totalRetail += retailPrice * item.quantity;
-            totalDiscount += retailPrice * item.quantity;
             orderCityId = product.city_id;
+            retailTotalLines.push({ product, quantity: item.quantity });
 
             return {
               product_id: product.id,
@@ -832,6 +902,8 @@ export const useAppStore = create<AppState>()(
               one_time_cost: oneTimeCost,
             };
           });
+
+          const retailTotals = calculateRetailOrderTotals(retailTotalLines);
 
           const requestId = createRequestId(user.id);
           const retailRpcPayload = orderItemsPayload.map((item) => ({
@@ -851,9 +923,7 @@ export const useAppStore = create<AppState>()(
             return { orderId: rpcOrderId ? String(rpcOrderId) : undefined, error: null };
           }
 
-          const fallbackByCode = (rpcError as RpcErrorLike).code === '42883' || (rpcError as RpcErrorLike).code === 'PGRST202';
-          const fallbackByMessage = String((rpcError as RpcErrorLike).message || '').toLowerCase().includes('could not find the function public.create_retail_order_atomic');
-          if (!fallbackByCode && !fallbackByMessage) {
+          if (!shouldFallbackToLegacyFlow(rpcError as RpcErrorLike)) {
             const message = String((rpcError as RpcErrorLike).message || '');
             if (message.includes('当前角色无收款建单权限')) {
               throw new Error('当前数据库函数未开放收款建单权限，请先执行最新迁移');
@@ -866,8 +936,8 @@ export const useAppStore = create<AppState>()(
             .insert({
               distributor_id: user.id,
               city_id: user.city_id ?? orderCityId,
-              total_retail_amount: totalRetail,
-              total_discount_amount: totalDiscount,
+              total_retail_amount: retailTotals.totalRetail,
+              total_discount_amount: retailTotals.totalDiscount,
               order_kind: 'retail',
               status: 'accepted',
             })
