@@ -22,7 +22,7 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Shadow, Radius } from '../theme';
+import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { encodeEAN13Bars } from '../utils/barcode';
 import type { ProductWithDetails } from '../types';
 
@@ -32,8 +32,8 @@ function BarcodeSvg({ value, height = 50, barWidth = 1.5 }: { value: string; hei
   return (
     <View style={{ alignItems: 'center' }}>
       <Svg width={totalWidth} height={height}>
-        {bars.map((bar, i) => (
-          <Rect key={i} x={bar.x} y={0} width={bar.w} height={height} fill="#2D2D3F" />
+        {bars.map((bar) => (
+          <Rect key={`${bar.x}-${bar.w}`} x={bar.x} y={0} width={bar.w} height={height} fill="#2D2D3F" />
         ))}
       </Svg>
       <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 3, letterSpacing: 2, fontVariant: ['tabular-nums'] }}>{value}</Text>
@@ -89,6 +89,8 @@ export default function ProductsScreen() {
   const [selectedDistributorId, setSelectedDistributorId] = useState('');
   const [customDistributorDiscount, setCustomDistributorDiscount] = useState('');
   const [searchText, setSearchText] = useState('');
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
   const isDistributor = user?.role === 'distributor';
@@ -104,7 +106,7 @@ export default function ProductsScreen() {
     if (user?.role === 'admin') {
       fetchDistributors();
     }
-  }, []);
+  }, [fetchCities, fetchDistributors, user?.role]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -167,7 +169,7 @@ export default function ProductsScreen() {
       image_url: imageUrl,
     };
 
-    let error;
+    let error: Error | null = null;
     if (editingProduct) {
       ({ error } = await updateProduct(editingProduct.id, productData));
     } else {
@@ -298,33 +300,30 @@ export default function ProductsScreen() {
   };
 
   const renderProduct = ({ item }: { item: ProductWithDetails }) => (
-    <TouchableOpacity style={styles.productCard} onPress={() => openEditModal(item)} activeOpacity={0.85}>
-      <View style={styles.productImage}>
+    <TouchableOpacity style={[styles.productCard, { backgroundColor: theme.surface }]} onPress={() => openEditModal(item)} activeOpacity={0.85}>
+      <View style={[styles.productImage, { backgroundColor: theme.surfaceSecondary }]}>
         {item.image_url ? (
           <Image source={{ uri: item.image_url }} style={styles.image} />
         ) : (
-          <ImageIcon size={30} color={Colors.textTertiary} />
+          <ImageIcon size={30} color={theme.textTertiary} />
         )}
       </View>
         <View style={styles.productInfo}>
-        <Text style={styles.productName}>{item.name}</Text>
+        <Text style={[styles.productName, { color: theme.textPrimary }]}>{item.name}</Text>
         <View style={styles.cityRow}>
-          <MapPin size={12} color={Colors.textSecondary} />
-          <Text style={styles.productCity}>{item.city_name}</Text>
+          <MapPin size={12} color={theme.textSecondary} />
+          <Text style={[styles.productCity, { color: theme.textSecondary }]}>{item.city_name}</Text>
         </View>
         <View style={styles.priceRow}>
           <Text style={styles.price}>售价: {item.price}元</Text>
-          {!isDistributor ? <Text style={styles.cost}>单个成本: {item.cost}元</Text> : null}
         </View>
-        <Text style={styles.discountText}>折扣价: {item.discount_price}元</Text>
-        {isAdminOrManager && item.barcode && (
-          <Text style={styles.barcodeText}>条码: {item.barcode}</Text>
-        )}
+        <Text style={[styles.discountText, { color: theme.textTertiary }]}>折扣价: {item.discount_price}元</Text>
         {!isDistributor && (
           <View style={styles.stockRow}>
-            <View style={styles.stockBadge}>
+            <View style={[styles.stockBadge, { backgroundColor: theme.surfaceSecondary }]}>
               <Text style={[
                 styles.stock,
+                { color: theme.textPrimary },
                 item.quantity !== undefined && item.quantity < (item.min_quantity ?? 10) && styles.lowStock
               ]}>
                 库存: {item.quantity ?? 0}
@@ -343,9 +342,9 @@ export default function ProductsScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>商品管理</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>商品管理</Text>
         {isAdminOrManager && products.some((p) => !p.barcode) && (
           <TouchableOpacity
             onPress={async () => {
@@ -388,7 +387,7 @@ export default function ProductsScreen() {
             onPress={() => setFilterCityId(null)}
           >
             <LinearGradient
-              colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [Colors.surfaceSecondary, Colors.surfaceSecondary]}
+               colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.cityGradientChip}
@@ -409,7 +408,7 @@ export default function ProductsScreen() {
               onPress={() => setFilterCityId(city.id)}
             >
               <LinearGradient
-                colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [Colors.surfaceSecondary, Colors.surfaceSecondary]}
+               colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.cityGradientChip}
@@ -427,14 +426,15 @@ export default function ProductsScreen() {
         </ScrollView>
       </View>
 
-      <View style={styles.searchContainer}>
-        <Search size={18} color={Colors.textTertiary} />
+       <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
+        <Search size={18} color={theme.textTertiary} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: theme.textPrimary }]}
           placeholder="搜索商品..."
-          placeholderTextColor={Colors.textTertiary}
+          placeholderTextColor={theme.textTertiary}
           value={searchText}
           onChangeText={setSearchText}
+          textAlignVertical="center"
         />
       </View>
 
@@ -450,9 +450,9 @@ export default function ProductsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Package size={48} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无商品</Text>
-            <Text style={styles.emptySubtext}>点击右上角添加商品</Text>
+            <Package size={48} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无商品</Text>
+            <Text style={[styles.emptySubtext, { color: theme.textTertiary }]}>点击右上角添加商品</Text>
           </View>
         }
       />
@@ -460,73 +460,73 @@ export default function ProductsScreen() {
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
+            <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }] }>
                 {editingProduct ? '编辑商品' : '添加商品'}
               </Text>
 
               <View style={styles.fieldRow}>
-                <Text style={styles.fieldLabel}>商品名称*</Text>
+                <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>商品名称*</Text>
                 <TextInput
-                  style={[styles.input, styles.fieldInput]}
+                  style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                   value={name}
                   onChangeText={setName}
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
               </View>
 
               <View style={styles.fieldRow}>
-                <Text style={styles.fieldLabel}>售价(元)*</Text>
+                <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>售价(元)*</Text>
                 <TextInput
-                  style={[styles.input, styles.fieldInput]}
+                  style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                   value={price}
                   onChangeText={setPrice}
                   keyboardType="numeric"
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
               </View>
 
               {!isDistributor && (
                 <>
                   <View style={styles.fieldRow}>
-                    <Text style={styles.fieldLabel}>单个成本(元)*</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>单个成本(元)*</Text>
                     <TextInput
-                      style={[styles.input, styles.fieldInput]}
+                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                       value={cost}
                       onChangeText={setCost}
                       keyboardType="numeric"
-                      placeholderTextColor={Colors.textTertiary}
+                      placeholderTextColor={theme.textTertiary}
                     />
                   </View>
                   <View style={styles.fieldRow}>
-                    <Text style={styles.fieldLabel}>一次性成本(元)</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>一次性成本(元)</Text>
                     <TextInput
-                      style={[styles.input, styles.fieldInput]}
+                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                       value={oneTimeCost}
                       onChangeText={setOneTimeCost}
                       keyboardType="numeric"
-                      placeholderTextColor={Colors.textTertiary}
+                      placeholderTextColor={theme.textTertiary}
                     />
                   </View>
                   <View style={styles.fieldRow}>
-                    <Text style={styles.fieldLabel}>折扣价(元)</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>折扣价(元)</Text>
                     <TextInput
-                      style={[styles.input, styles.fieldInput]}
+                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                       value={discountPrice}
                       onChangeText={setDiscountPrice}
                       keyboardType="numeric"
-                      placeholderTextColor={Colors.textTertiary}
+                      placeholderTextColor={theme.textTertiary}
                     />
                   </View>
                 </>
               )}
 
-              <Text style={styles.sectionLabel}>选择城市 *</Text>
+              <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>选择城市 *</Text>
               <View style={styles.cityList}>
                 {cities.map((city) => (
                   <TouchableOpacity
                     key={city.id}
-                    style={[styles.cityItem, selectedCity === city.id && styles.cityItemSelected]}
+                    style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedCity === city.id && styles.cityItemSelected]}
                     onPress={() => setSelectedCity(city.id)}
                   >
                     {selectedCity === city.id ? (
@@ -534,7 +534,7 @@ export default function ProductsScreen() {
                         <Text style={styles.cityItemTextSelected}>{city.name}</Text>
                       </LinearGradient>
                     ) : (
-                      <Text style={styles.cityItemText}>{city.name}</Text>
+                      <Text style={[styles.cityItemText, { color: theme.textSecondary }]}>{city.name}</Text>
                     )}
                   </TouchableOpacity>
                 ))}
@@ -562,21 +562,21 @@ export default function ProductsScreen() {
               )}
 
               {editingProduct?.barcode ? (
-                <View style={styles.barcodeSection}>
-                  <Text style={styles.sectionLabel}>商品条码</Text>
+                <View style={[styles.barcodeSection, { backgroundColor: theme.surfaceSecondary }]}>
+                  <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>商品条码</Text>
                   <BarcodeSvg value={editingProduct.barcode} height={60} barWidth={1.5} />
                 </View>
               ) : null}
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity
-                  style={styles.cancelButton}
+                  style={[styles.cancelButton, { borderColor: theme.border }]}
                   onPress={() => {
                     setModalVisible(false);
                     resetForm();
                   }}
                 >
-                  <Text style={styles.cancelButtonText}>取消</Text>
+                  <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>取消</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleSave} activeOpacity={0.85} style={styles.saveButtonWrap}>
                   <LinearGradient
@@ -603,16 +603,16 @@ export default function ProductsScreen() {
               )}
 
               {editingProduct && user?.role === 'admin' && (
-                <View style={styles.distributorDiscountBox}>
-                  <Text style={styles.sectionLabel}>分销商专属折扣价(元)</Text>
+                <View style={[styles.distributorDiscountBox, { borderTopColor: theme.divider }] }>
+                  <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>分销商专属折扣价(元)</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow}>
                     {distributors.map((d) => (
                       <TouchableOpacity
                         key={d.id}
-                        style={[styles.cityItem, selectedDistributorId === d.id && styles.cityItemSelected]}
+                        style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === d.id && styles.cityItemSelected]}
                         onPress={() => setSelectedDistributorId(d.id)}
                       >
-                        <Text style={[styles.cityItemText, selectedDistributorId === d.id && styles.cityItemTextSelected]}>
+                        <Text style={[styles.cityItemText, { color: theme.textSecondary }, selectedDistributorId === d.id && styles.cityItemTextSelected]}>
                           {d.store_name || d.email}
                         </Text>
                       </TouchableOpacity>
@@ -620,12 +620,12 @@ export default function ProductsScreen() {
                   </ScrollView>
                   <View style={styles.distributorDiscountRow}>
                     <TextInput
-                      style={[styles.input, styles.distributorDiscountInput]}
+                      style={[styles.input, styles.distributorDiscountInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                       placeholder="输入专属折扣价(元)"
                       value={customDistributorDiscount}
                       onChangeText={setCustomDistributorDiscount}
                       keyboardType="numeric"
-                      placeholderTextColor={Colors.textTertiary}
+                      placeholderTextColor={theme.textTertiary}
                     />
                     <TouchableOpacity onPress={handleSaveDistributorDiscount} style={styles.distributorSaveBtn}>
                       <Text style={styles.distributorSaveBtnText}>保存</Text>
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   cityFilterSpacer: {
-    height: 58,
+    height: 68,
   },
   cityFilterOverlay: {
     position: 'absolute',
@@ -739,7 +739,8 @@ const styles = StyleSheet.create({
     ...Shadow.card,
   },
   productImage: {
-    height: 100,
+    width: '100%',
+    aspectRatio: 1,
     backgroundColor: Colors.surfaceSecondary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -830,6 +831,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceSecondary,
     borderRadius: 999,
     marginHorizontal: 10,
+    marginTop: 8,
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -840,7 +842,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 14,
+    lineHeight: 20,
     color: Colors.textPrimary,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   emptyContainer: {
     alignItems: 'center',

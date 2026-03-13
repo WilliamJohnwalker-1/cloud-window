@@ -17,7 +17,7 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Shadow, Radius } from '../theme';
+import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import type { ProductWithDetails } from '../types';
 
 export default function InventoryScreen() {
@@ -58,24 +58,15 @@ export default function InventoryScreen() {
   const [inboundProduct, setInboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
-
-  if (user?.role === 'distributor') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>库存管理</Text>
-        </View>
-        <Text style={styles.emptyText}>分销商不可查看库存信息</Text>
-      </View>
-    );
-  }
 
   useEffect(() => {
     fetchProducts();
     fetchCities();
-  }, []);
+  }, [fetchProducts, fetchCities]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -222,22 +213,22 @@ export default function InventoryScreen() {
     const isLowStock = item.quantity !== undefined && item.quantity < (item.min_quantity ?? 10);
 
     return (
-      <View style={[styles.card, isLowStock && styles.lowStockCard]}>
+      <View style={[styles.card, { backgroundColor: theme.surface }, isLowStock && styles.lowStockCard]}>
         <View style={styles.cardHeader}>
-          <Text style={styles.productName}>{item.name}</Text>
-          <Text style={styles.cityName}>{item.city_name}</Text>
+          <Text style={[styles.productName, { color: theme.textPrimary }]}>{item.name}</Text>
+          <Text style={[styles.cityName, { color: theme.textSecondary }]}>{item.city_name}</Text>
         </View>
 
         <View style={styles.stockInfo}>
           <View style={styles.stockItem}>
-            <Text style={styles.stockLabel}>当前库存</Text>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>当前库存</Text>
             <Text style={[styles.stockValue, isLowStock && styles.lowStockValue]}>
               {item.quantity ?? 0}
             </Text>
           </View>
           <View style={styles.stockItem}>
-            <Text style={styles.stockLabel}>最低库存</Text>
-            <Text style={styles.stockValue}>{item.min_quantity ?? 10}</Text>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>最低库存</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary }]}>{item.min_quantity ?? 10}</Text>
           </View>
           <View style={styles.stockItem}>
             <Text style={styles.stockLabel}>状态</Text>
@@ -291,10 +282,21 @@ export default function InventoryScreen() {
   const totalStock = cityFilteredProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
   const lowStockCount = lowStockProducts.length;
 
+  if (user?.role === 'distributor') {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>库存管理</Text>
+        </View>
+        <Text style={[styles.emptyText, { color: theme.textTertiary }]}>分销商不可查看库存信息</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>库存管理</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>库存管理</Text>
         {isAdminOrManager ? (
           <TouchableOpacity
             onPress={() => {
@@ -329,7 +331,7 @@ export default function InventoryScreen() {
             onPress={() => setFilterCityId(null)}
           >
             <LinearGradient
-              colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [Colors.surfaceSecondary, Colors.surfaceSecondary]}
+               colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.cityGradientChip}
@@ -350,7 +352,7 @@ export default function InventoryScreen() {
               onPress={() => setFilterCityId(city.id)}
             >
               <LinearGradient
-                colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [Colors.surfaceSecondary, Colors.surfaceSecondary]}
+                 colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.cityGradientChip}
@@ -368,7 +370,7 @@ export default function InventoryScreen() {
         </ScrollView>
       </View>
 
-      <View style={styles.summary}>
+      <View style={[styles.summary, { backgroundColor: theme.surface, borderTopColor: theme.border }] }>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{cityFilteredProducts.length}</Text>
           <Text style={styles.summaryLabel}>商品种类</Text>
@@ -385,20 +387,21 @@ export default function InventoryScreen() {
         </View>
       </View>
 
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { backgroundColor: theme.surface }]}>
         {renderFilterButton('all', '全部')}
         {renderFilterButton('low', '库存不足')}
         {renderFilterButton('normal', '库存正常')}
       </View>
 
-      <View style={styles.searchContainer}>
-        <Search size={18} color={Colors.textTertiary} />
+      <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
+        <Search size={18} color={theme.textTertiary} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: theme.textPrimary }]}
           placeholder="搜索商品..."
-          placeholderTextColor={Colors.textTertiary}
+          placeholderTextColor={theme.textTertiary}
           value={searchText}
           onChangeText={setSearchText}
+          textAlignVertical="center"
         />
       </View>
 
@@ -412,52 +415,52 @@ export default function InventoryScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <PackageOpen size={48} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyStateText}>暂无数据</Text>
+            <PackageOpen size={48} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>暂无数据</Text>
           </View>
         }
       />
 
       <Modal visible={editModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>编辑库存</Text>
-            <Text style={styles.modalSubtitle}>{editingProduct?.name ?? ''}</Text>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>编辑库存</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>{editingProduct?.name ?? ''}</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>当前库存</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>当前库存</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={editQuantity}
                 onChangeText={setEditQuantity}
                 keyboardType="number-pad"
                 placeholder="输入当前库存"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>最低库存</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>最低库存</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={editMinQuantity}
                 onChangeText={setEditMinQuantity}
                 keyboardType="number-pad"
                 placeholder="输入最低库存"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
               />
             </View>
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.cancelButton}
+                style={[styles.cancelButton, { borderColor: theme.border }]}
                 onPress={() => {
                   setEditModalVisible(false);
                   setEditingProduct(null);
                 }}
                 disabled={savingEdit}
               >
-                <Text style={styles.cancelButtonText}>取消</Text>
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>取消</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.saveButton, savingEdit && styles.disabledButton]}
@@ -473,31 +476,31 @@ export default function InventoryScreen() {
 
       <Modal visible={inboundModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>条码入库</Text>
-            <Text style={styles.modalSubtitle}>扫码枪输入条码后回车可自动识别</Text>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>条码入库</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>扫码枪输入条码后回车可自动识别</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>商品条码</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>商品条码</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={inboundBarcode}
                 onChangeText={handleInboundBarcodeLookup}
                 keyboardType="number-pad"
                 autoFocus
                 maxLength={13}
                 placeholder="请输入13位条码"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
                 onSubmitEditing={() => handleInboundBarcodeLookup()}
               />
             </View>
 
             {inboundBarcode.length === 13 ? (
-              <View style={styles.scanResultBox}>
+              <View style={[styles.scanResultBox, { backgroundColor: theme.surfaceSecondary }]}>
                 {inboundProduct ? (
                   <>
-                    <Text style={styles.scanResultName}>{inboundProduct.name}</Text>
-                    <Text style={styles.scanResultStock}>当前库存：{inboundProduct.quantity ?? 0}</Text>
+                    <Text style={[styles.scanResultName, { color: theme.textPrimary }]}>{inboundProduct.name}</Text>
+                    <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>当前库存：{inboundProduct.quantity ?? 0}</Text>
                   </>
                 ) : (
                   <Text style={styles.scanResultError}>未找到对应商品</Text>
@@ -506,27 +509,27 @@ export default function InventoryScreen() {
             ) : null}
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>入库数量</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>入库数量</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={inboundQuantity}
                 onChangeText={setInboundQuantity}
                 keyboardType="number-pad"
                 placeholder="请输入数量"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
               />
             </View>
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.cancelButton}
+                style={[styles.cancelButton, { borderColor: theme.border }]}
                 onPress={() => {
                   setInboundModalVisible(false);
                   resetInboundForm();
                 }}
                 disabled={submittingInbound}
               >
-                <Text style={styles.cancelButtonText}>取消</Text>
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>取消</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.saveButton, submittingInbound && styles.disabledButton]}
@@ -922,7 +925,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 14,
+    lineHeight: 20,
     color: Colors.textPrimary,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   emptyContainer: {
     alignItems: 'center',

@@ -89,6 +89,24 @@ interface RpcErrorLike {
   message?: string;
 }
 
+const SESSION_GRACE_WINDOW_MS = 20_000;
+const SESSION_RETRY_DELAY_MS = 600;
+const SESSION_RETRY_TIMES = 2;
+
+let sessionGuardGraceUntil = 0;
+
+const setSessionGuardGraceWindow = (): void => {
+  sessionGuardGraceUntil = Date.now() + SESSION_GRACE_WINDOW_MS;
+};
+
+const isWithinSessionGuardGraceWindow = (): boolean => Date.now() <= sessionGuardGraceUntil;
+
+const waitMs = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
 const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${userId}-${Date.now()}-${randomPart}`;
@@ -257,18 +275,34 @@ export const useAppStore = create<AppState>()(
       setDarkMode: (isDarkMode) => set({ isDarkMode }),
 
       ensureActiveSession: async () => {
-        const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
-        if (checkError) {
-          if (isMissingRpcFunction(checkError)) return null;
-          return checkError as Error;
+        const checkActiveSessionOnce = async (): Promise<{ ok: boolean; error: Error | null }> => {
+          const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
+          if (checkError) {
+            if (isMissingRpcFunction(checkError)) {
+              return { ok: true, error: null };
+            }
+            return { ok: false, error: checkError as Error };
+          }
+          return { ok: Boolean(checkResult), error: null };
+        };
+
+        const firstCheck = await checkActiveSessionOnce();
+        if (firstCheck.error) return firstCheck.error;
+        if (firstCheck.ok) return null;
+
+        for (let attempt = 0; attempt < SESSION_RETRY_TIMES; attempt += 1) {
+          await waitMs(SESSION_RETRY_DELAY_MS);
+          const retryCheck = await checkActiveSessionOnce();
+          if (retryCheck.error) return retryCheck.error;
+          if (retryCheck.ok) return null;
         }
 
-        if (!checkResult) {
-          await get().signOut();
-          return new Error('账号已在其他设备登录，请重新登录');
+        if (isWithinSessionGuardGraceWindow()) {
+          return null;
         }
 
-        return null;
+        await get().signOut();
+        return new Error('账号已在其他设备登录，请重新登录');
       },
 
       signIn: async (email: string, password: string) => {
@@ -292,6 +326,8 @@ export const useAppStore = create<AppState>()(
               await get().signOut();
               throw activateError;
             }
+
+            setSessionGuardGraceWindow();
           }
 
           return { error: null };
@@ -343,6 +379,8 @@ export const useAppStore = create<AppState>()(
               await get().signOut();
               throw activateError;
             }
+
+            setSessionGuardGraceWindow();
           }
 
           return { error: null };

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,13 +19,15 @@ import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download, Che
 import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Shadow, Radius } from '../theme';
+import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import type { Order, ProductWithDetails } from '../types';
 
 interface CartItem {
   product: ProductWithDetails;
   quantity: number;
 }
+
+type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'date';
 
 export default function OrdersScreen() {
   const {
@@ -42,13 +44,16 @@ export default function OrdersScreen() {
     findProductByBarcode,
     outboundStock,
   } = useAppStore();
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   const [modalVisible, setModalVisible] = useState(false);
   const [cart, setCart] = useState<Map<string, CartItem>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [selectedDistributorId, setSelectedDistributorId] = useState<string | null>(null);
-  const [monthFilter, setMonthFilter] = useState<'all' | 'current'>('current');
+  const [statsRange, setStatsRange] = useState<StatsRange>('month');
+  const [selectedDate, setSelectedDate] = useState('');
   const [outboundModalVisible, setOutboundModalVisible] = useState(false);
   const [outboundBarcode, setOutboundBarcode] = useState('');
   const [outboundQuantity, setOutboundQuantity] = useState('');
@@ -58,8 +63,9 @@ export default function OrdersScreen() {
   const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
   const [statsExpanded, setStatsExpanded] = useState(true);
+  const [detailOrder, setDetailOrder] = useState<Order | null>(null);
 
-  const animatedHeight = useRef(new Animated.Value(120)).current;
+  const animatedHeight = useRef(new Animated.Value(168)).current;
   const animatedChevron = useRef(new Animated.Value(180)).current;
   const animatedOpacity = useRef(new Animated.Value(1)).current;
 
@@ -77,7 +83,7 @@ export default function OrdersScreen() {
   }, [fetchDistributors, fetchOrders, fetchProducts]);
 
   useEffect(() => {
-    animatedHeight.setValue(120);
+    animatedHeight.setValue(168);
     animatedChevron.setValue(180);
     animatedOpacity.setValue(1);
   }, [animatedChevron, animatedHeight, animatedOpacity]);
@@ -94,7 +100,7 @@ export default function OrdersScreen() {
 
     Animated.parallel([
       Animated.timing(animatedHeight, {
-        toValue: nextValue ? 120 : 40,
+        toValue: nextValue ? 168 : 40,
         duration: 300,
         useNativeDriver: false,
       }),
@@ -119,21 +125,55 @@ export default function OrdersScreen() {
     return inStock;
   }, [products, user]);
 
-  const filteredOrders = useMemo(() => {
+  const baseOrders = useMemo(() => {
     let list = [...orders];
-
     if (isAdmin && selectedDistributorId) {
       list = list.filter((o) => o.distributor_id === selectedDistributorId);
     }
+    return list;
+  }, [orders, isAdmin, selectedDistributorId]);
 
-    if (monthFilter === 'current') {
-      const now = new Date();
-      list = list.filter((o) => {
-        const d = new Date(o.created_at);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-      });
+  const matchesStatsRange = useCallback((order: Order): boolean => {
+    const date = new Date(order.created_at);
+    const now = new Date();
+
+    if (statsRange === 'all') return true;
+    if (statsRange === 'date') {
+      if (!selectedDate) return true;
+      const [year, month, day] = selectedDate.split('-').map((value) => Number.parseInt(value, 10));
+      if (!year || !month || !day) return true;
+      return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
     }
 
+    if (statsRange === 'day') {
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+    }
+
+    if (statsRange === 'week') {
+      const nowCopy = new Date(now);
+      const day = nowCopy.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      const weekStart = new Date(nowCopy.getFullYear(), nowCopy.getMonth(), nowCopy.getDate() - diffToMonday);
+      weekStart.setHours(0, 0, 0, 0);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+      return date >= weekStart && date < weekEnd;
+    }
+
+    if (statsRange === 'month') {
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    }
+
+    return date.getFullYear() === now.getFullYear();
+  }, [statsRange, selectedDate]);
+
+  const rangedOrders = useMemo(() => {
+    return baseOrders.filter(matchesStatsRange);
+  }, [baseOrders, matchesStatsRange]);
+
+  const filteredOrders = useMemo(() => {
+    let list = [...rangedOrders];
     if (searchText.trim()) {
       const lowerSearch = searchText.toLowerCase().trim();
       list = list.filter((o) => {
@@ -142,11 +182,10 @@ export default function OrdersScreen() {
         return shortId.includes(lowerSearch) || email.includes(lowerSearch);
       });
     }
-
     return list;
-  }, [orders, isAdmin, selectedDistributorId, monthFilter, searchText]);
+  }, [rangedOrders, searchText]);
 
-  const monthlyProductStats = useMemo(() => {
+  const rangedProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
     filteredOrders.forEach((order) => {
       order.items.forEach((item) => {
@@ -162,12 +201,8 @@ export default function OrdersScreen() {
   }, [filteredOrders]);
 
   const cumulativeProductStats = useMemo(() => {
-    let list = [...orders];
-    if (isAdmin && selectedDistributorId) {
-      list = list.filter((o) => o.distributor_id === selectedDistributorId);
-    }
     const map = new Map<string, { name: string; quantity: number }>();
-    list.forEach((order) => {
+    baseOrders.forEach((order) => {
       order.items.forEach((item) => {
         const key = item.product_id;
         const prev = map.get(key);
@@ -178,11 +213,28 @@ export default function OrdersScreen() {
       });
     });
     return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
-  }, [orders, isAdmin, selectedDistributorId]);
+  }, [baseOrders]);
 
-  const monthlyTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => ({ key: `m-${idx + 1}`, row: monthlyProductStats[idx] ?? null })),
-    [monthlyProductStats],
+  const rangeLabel = useMemo(() => {
+    switch (statsRange) {
+      case 'day':
+        return '当日';
+      case 'week':
+        return '本周';
+      case 'month':
+        return '本月';
+      case 'year':
+        return '年度';
+      case 'date':
+        return selectedDate || '指定日期';
+      default:
+        return '累计';
+    }
+  }, [statsRange, selectedDate]);
+
+  const rangedTopRows = useMemo(
+    () => Array.from({ length: 5 }, (_, idx) => ({ key: `r-${idx + 1}`, row: rangedProductStats[idx] ?? null })),
+    [rangedProductStats],
   );
 
   const cumulativeTopRows = useMemo(
@@ -457,35 +509,38 @@ export default function OrdersScreen() {
   const totalDiscount = filteredOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
 
   const renderOrder = ({ item }: { item: Order }) => (
-    <View style={styles.orderCard}>
+    <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
       <View style={styles.orderHeader}>
         <View>
-          <Text style={styles.orderId}>订单 #{item.id.slice(0, 8)}</Text>
-          <Text style={styles.orderKindTag}>{getOrderKindLabel(item.order_kind)}</Text>
+          <Text style={[styles.orderId, { color: theme.textPrimary }]}>订单 #{item.id.slice(0, 8)}</Text>
+          <Text style={[styles.orderKindTag, { color: theme.blue }]}>{getOrderKindLabel(item.order_kind)}</Text>
         </View>
-        <Text style={styles.orderDate}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+        <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
       </View>
 
       <View style={styles.orderMetaContainer}>
-        <PackageCheck size={14} color={Colors.textTertiary} style={{ marginRight: 4 }} />
-        <Text style={styles.orderMeta}>
+        <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
           下单账号: {item.distributor_email || item.distributor_id}
           {item.distributor_store ? ` · ${item.distributor_store}` : ''}
         </Text>
       </View>
 
-      {item.items.map((orderItem) => (
-        <View key={orderItem.id} style={styles.orderItemRow}>
-          <Text style={styles.orderItemName}>{orderItem.product_name}</Text>
-          <Text style={styles.orderItemQty}>x{orderItem.quantity}</Text>
-          <Text style={styles.orderItemPrice}>
-            {orderItem.discount_price}元
-          </Text>
-        </View>
-      ))}
+      <View style={styles.orderItemsSummary}>
+        <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
+          共 {item.items.length} 种商品，{item.items.reduce((sum, i) => sum + Number(i.quantity || 0), 0)} 件
+        </Text>
+        <TouchableOpacity
+          onPress={() => setDetailOrder(item)}
+          style={styles.detailButton}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.detailButtonText, { color: theme.blue }]}>查看详情</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.orderTotals}>
-        <Text style={styles.detailText}>零售总价: {Number(item.total_retail_amount).toFixed(2)}元</Text>
+        <Text style={[styles.detailText, { color: theme.textSecondary }]}>零售总价: {Number(item.total_retail_amount).toFixed(2)}元</Text>
         <Text style={styles.totalText}>{item.order_kind === 'retail' ? '收款总价' : '折扣总价'}: {Number(item.total_discount_amount).toFixed(2)}元</Text>
       </View>
 
@@ -592,9 +647,9 @@ export default function OrdersScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>销售订单</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>销售订单</Text>
         <View style={styles.headerActions}>
           {canCreateOrder && (
             <TouchableOpacity
@@ -624,13 +679,13 @@ export default function OrdersScreen() {
         <>
           <View style={styles.filterRowSpacer} />
           <View style={styles.filterRowOverlay}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.filterRow, { backgroundColor: theme.surface }]} contentContainerStyle={styles.filterRowContent}>
               <TouchableOpacity
-                style={[styles.chip, selectedDistributorId === null && styles.chipActive]}
+                style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === null && styles.chipActive]}
                 onPress={() => setSelectedDistributorId(null)}
               >
                 <Text
-                  style={[styles.chipText, selectedDistributorId === null && styles.chipTextActive]}
+                  style={[styles.chipText, { color: theme.textSecondary }, selectedDistributorId === null && styles.chipTextActive]}
                   numberOfLines={1}
                   ellipsizeMode="tail"
                 >
@@ -640,11 +695,11 @@ export default function OrdersScreen() {
               {distributors.map((d) => (
                   <TouchableOpacity
                     key={d.id}
-                    style={[styles.chip, selectedDistributorId === d.id && styles.chipActive]}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === d.id && styles.chipActive]}
                     onPress={() => setSelectedDistributorId(d.id)}
                   >
                     <Text
-                      style={[styles.chipText, selectedDistributorId === d.id && styles.chipTextActive]}
+                      style={[styles.chipText, { color: theme.textSecondary }, selectedDistributorId === d.id && styles.chipTextActive]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
@@ -657,54 +712,87 @@ export default function OrdersScreen() {
         </>
       )}
 
-      <View style={styles.monthSwitchRow}>
-        <TouchableOpacity style={[styles.switchChip, monthFilter === 'current' && styles.switchChipActive]} onPress={() => setMonthFilter('current')}>
-          <Text style={[styles.switchChipText, monthFilter === 'current' && styles.switchChipTextActive]}>本月</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.switchChip, monthFilter === 'all' && styles.switchChipActive]} onPress={() => setMonthFilter('all')}>
-          <Text style={[styles.switchChipText, monthFilter === 'all' && styles.switchChipTextActive]}>累计</Text>
-        </TouchableOpacity>
+      <View style={[styles.monthSwitchRow, { backgroundColor: theme.surface }]}>
+        {[
+          { key: 'day', label: '当日' },
+          { key: 'week', label: '本周' },
+          { key: 'month', label: '本月' },
+          { key: 'year', label: '年度' },
+          { key: 'all', label: '累计' },
+          { key: 'date', label: '指定日期' },
+        ].map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            style={[styles.switchChip, { backgroundColor: theme.surfaceSecondary }, statsRange === item.key && styles.switchChipActive]}
+            onPress={() => setStatsRange(item.key as StatsRange)}
+          >
+            <Text style={[styles.switchChipText, { color: theme.textSecondary }, statsRange === item.key && styles.switchChipTextActive]}>{item.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <View style={styles.summary}>
+      {statsRange === 'date' && (
+        <View style={[styles.customDateRow, { backgroundColor: theme.surface }] }>
+          <Text style={[styles.customDateLabel, { color: theme.textSecondary }]}>日期</Text>
+          <TextInput
+            value={selectedDate}
+            onChangeText={setSelectedDate}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={theme.textTertiary}
+            style={[
+              styles.customDateInput,
+              {
+                backgroundColor: theme.surfaceSecondary,
+                color: theme.textPrimary,
+                lineHeight: 18,
+                paddingVertical: 0,
+                includeFontPadding: false,
+              },
+            ]}
+            textAlignVertical="center"
+          />
+        </View>
+      )}
+
+      <View style={[styles.summary, { backgroundColor: theme.surface }]}>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{filteredOrders.length}</Text>
-          <Text style={styles.summaryLabel}>订单数</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>订单数</Text>
         </View>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{totalRetail.toFixed(2)}元</Text>
-          <Text style={styles.summaryLabel}>零售总价</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>零售总价</Text>
         </View>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{totalDiscount.toFixed(2)}元</Text>
-          <Text style={styles.summaryLabel}>折扣总价</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>折扣总价</Text>
         </View>
       </View>
 
       {isAdmin && (
-        <Animated.View style={[styles.statsCard, { height: animatedHeight }]}>
+        <Animated.View style={[styles.statsCard, { height: animatedHeight, backgroundColor: theme.surface }]}> 
           <TouchableOpacity onPress={toggleStatsExpanded} activeOpacity={0.85}>
             <View style={styles.statsHeader}>
-              <Text style={styles.statsTitle}>商品数量统计（同商品自动累加）</Text>
+              <Text style={[styles.statsTitle, { color: theme.textPrimary }]}>商品数量统计（同商品自动累加）</Text>
               <Animated.View style={{ transform: [{ rotate: animatedChevron.interpolate({ inputRange: [0, 180], outputRange: ['0deg', '180deg'] }) }] }}>
-                <ChevronDown size={16} color={Colors.textSecondary} />
+                <ChevronDown size={16} color={theme.textSecondary} />
               </Animated.View>
             </View>
           </TouchableOpacity>
           <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
             <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
-                <Text style={styles.statsSubTitle}>本月</Text>
-                {monthlyTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>{rangeLabel}</Text>
+                {rangedTopRows.map(({ key, row }) => (
+                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
                     {row ? `${row.name}: ${row.quantity}` : '—'}
                   </Text>
                 ))}
               </View>
               <View style={styles.statsColumn}>
-                <Text style={styles.statsSubTitle}>累计</Text>
+                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>累计</Text>
                 {cumulativeTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, !row && styles.statsRowPlaceholder]} numberOfLines={1} ellipsizeMode="tail">
+                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
                     {row ? `${row.name}: ${row.quantity}` : '—'}
                   </Text>
                 ))}
@@ -714,14 +802,15 @@ export default function OrdersScreen() {
         </Animated.View>
       )}
 
-      <View style={styles.searchContainer}>
-        <Search size={18} color={Colors.textTertiary} style={styles.searchIcon} />
+      <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }]}>
+        <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: theme.textPrimary }]}
           placeholder="搜索订单号或分销商邮箱..."
-          placeholderTextColor={Colors.textTertiary}
+          placeholderTextColor={theme.textTertiary}
           value={searchText}
           onChangeText={setSearchText}
+          textAlignVertical="center"
         />
       </View>
 
@@ -733,17 +822,17 @@ export default function OrdersScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <ClipboardList size={48} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无订单记录</Text>
+            <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无订单记录</Text>
           </View>
         }
       />
 
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>新建分销订单（合并为单条）</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>新建分销订单（合并为单条）</Text>
               <TouchableOpacity onPress={() => { clearCart(); setModalVisible(false); }}>
                 <Text style={styles.modalClose}>关闭</Text>
               </TouchableOpacity>
@@ -756,8 +845,8 @@ export default function OrdersScreen() {
               style={styles.productList}
               ListEmptyComponent={
                 <View style={styles.emptyContainerModal}>
-                  <ShoppingBag size={40} color={Colors.textTertiary} strokeWidth={1.5} />
-                  <Text style={styles.emptyText}>暂无可选商品</Text>
+                  <ShoppingBag size={40} color={theme.textTertiary} strokeWidth={1.5} />
+                  <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无可选商品</Text>
                 </View>
               }
             />
@@ -791,31 +880,31 @@ export default function OrdersScreen() {
 
       <Modal visible={outboundModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>条码出库</Text>
-            <Text style={styles.modalSubtitle}>扫码枪输入条码后回车可自动识别</Text>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>条码出库</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>扫码枪输入条码后回车可自动识别</Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>商品条码</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>商品条码</Text>
               <TextInput
-                style={styles.modalInput}
+                style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={outboundBarcode}
                 onChangeText={handleOutboundBarcodeLookup}
                 keyboardType="number-pad"
                 autoFocus
                 maxLength={13}
                 placeholder="请输入13位条码"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
                 onSubmitEditing={() => handleOutboundBarcodeLookup()}
               />
             </View>
 
             {outboundBarcode.length === 13 ? (
-              <View style={styles.scanResultBox}>
+              <View style={[styles.scanResultBox, { backgroundColor: theme.surfaceSecondary }]}>
                 {outboundProduct ? (
                   <>
-                    <Text style={styles.scanResultName}>{outboundProduct.name}</Text>
-                    <Text style={styles.scanResultStock}>当前库存：{outboundProduct.quantity ?? 0}</Text>
+                    <Text style={[styles.scanResultName, { color: theme.textPrimary }]}>{outboundProduct.name}</Text>
+                    <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>当前库存：{outboundProduct.quantity ?? 0}</Text>
                   </>
                 ) : (
                   <Text style={styles.scanResultError}>未找到对应商品</Text>
@@ -824,14 +913,14 @@ export default function OrdersScreen() {
             ) : null}
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>出库数量</Text>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>出库数量</Text>
               <TextInput
-                style={styles.modalInput}
+                style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                 value={outboundQuantity}
                 onChangeText={setOutboundQuantity}
                 keyboardType="number-pad"
                 placeholder="请输入数量"
-                placeholderTextColor={Colors.textTertiary}
+                placeholderTextColor={theme.textTertiary}
               />
             </View>
 
@@ -857,6 +946,63 @@ export default function OrdersScreen() {
                 </LinearGradient>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={detailOrder !== null} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>订单详情</Text>
+              <TouchableOpacity onPress={() => setDetailOrder(null)}>
+                <Text style={styles.modalClose}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {detailOrder ? (
+              <ScrollView style={styles.detailScroll}>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>订单号</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>#{detailOrder.id.slice(0, 8)}</Text>
+                </View>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>类型</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{getOrderKindLabel(detailOrder.order_kind)}</Text>
+                </View>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>时间</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{new Date(detailOrder.created_at).toLocaleString('zh-CN')}</Text>
+                </View>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>分销商</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
+                    {detailOrder.distributor_email || detailOrder.distributor_id}
+                    {detailOrder.distributor_store ? ` · ${detailOrder.distributor_store}` : ''}
+                  </Text>
+                </View>
+
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>商品明细</Text>
+                  {detailOrder.items.map((orderItem) => (
+                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}>
+                      <Text style={[styles.detailItemName, { color: theme.textPrimary }]}>{orderItem.product_name || '未知商品'}</Text>
+                      <Text style={[styles.detailItemQty, { color: theme.textSecondary }]}>x{orderItem.quantity}</Text>
+                      <Text style={styles.detailItemPrice}>{orderItem.discount_price}元</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>零售总价</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{Number(detailOrder.total_retail_amount || 0).toFixed(2)}元</Text>
+                </View>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>{detailOrder.order_kind === 'retail' ? '收款总价' : '折扣总价'}</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{Number(detailOrder.total_discount_amount || 0).toFixed(2)}元</Text>
+                </View>
+              </ScrollView>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -913,6 +1059,27 @@ const styles = StyleSheet.create({
   switchChipActive: { backgroundColor: Colors.blue },
   switchChipText: { color: Colors.textSecondary, fontSize: 12 },
   switchChipTextActive: { color: '#fff', fontWeight: '600' },
+  customDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+  },
+  customDateLabel: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginRight: 8,
+  },
+  customDateInput: {
+    flex: 1,
+    height: 36,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceSecondary,
+    paddingHorizontal: 10,
+    fontSize: 13,
+    color: Colors.textPrimary,
+  },
   summary: { flexDirection: 'row', backgroundColor: Colors.surface, minHeight: 70, paddingVertical: 12, marginBottom: 8, alignItems: 'center' },
   summaryItem: { flex: 1, alignItems: 'center' },
   summaryValue: { fontSize: 14, fontWeight: '700', color: Colors.pink },
@@ -933,10 +1100,10 @@ const styles = StyleSheet.create({
   },
   statsTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   statsSubTitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
-  statsRowText: { fontSize: 12, color: Colors.textPrimary, marginTop: 2 },
+  statsRowText: { fontSize: 12, color: Colors.textPrimary, marginTop: 2, lineHeight: 17, flexShrink: 1 },
   statsRowPlaceholder: { color: Colors.textTertiary },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  statsColumn: { flex: 1 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  statsColumn: { flex: 1, minWidth: 0 },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -948,7 +1115,15 @@ const styles = StyleSheet.create({
     height: 40,
   },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.textPrimary,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   list: { padding: 10 },
   orderCard: {
     backgroundColor: Colors.surface,
@@ -963,6 +1138,20 @@ const styles = StyleSheet.create({
   orderDate: { fontSize: 12, color: Colors.textTertiary },
   orderMetaContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   orderMeta: { fontSize: 12, color: Colors.textSecondary },
+  orderItemsSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  orderItemsSummaryText: { fontSize: 12, color: Colors.textSecondary },
+  detailButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.surfaceSecondary,
+  },
+  detailButtonText: { color: Colors.blue, fontSize: 12, fontWeight: '600' },
   orderItemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   orderItemName: { flex: 1, fontSize: 14, color: Colors.textPrimary },
   orderItemQty: { width: 50, textAlign: 'center', color: Colors.textSecondary, fontSize: 13 },
@@ -1031,6 +1220,20 @@ const styles = StyleSheet.create({
   scanResultName: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   scanResultStock: { marginTop: 4, color: Colors.textSecondary, fontSize: 13 },
   scanResultError: { color: Colors.danger, fontSize: 13, fontWeight: '600' },
+  detailScroll: { maxHeight: 420 },
+  detailSection: { marginBottom: 10 },
+  detailLabel: { fontSize: 12, color: Colors.textSecondary, marginBottom: 4 },
+  detailValue: { fontSize: 14, color: Colors.textPrimary },
+  detailItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  detailItemName: { flex: 1, fontSize: 14, color: Colors.textPrimary },
+  detailItemQty: { width: 46, textAlign: 'center', color: Colors.textSecondary, fontSize: 12 },
+  detailItemPrice: { width: 90, textAlign: 'right', color: Colors.blue, fontSize: 12, fontWeight: '600' },
   productList: { maxHeight: 280 },
   productRow: {
     flexDirection: 'row',

@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 type OrderFilter = 'all' | 'pending' | 'accepted';
+type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'date';
 
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail } = useAppStore();
@@ -16,15 +17,76 @@ export const OrdersScreen: React.FC = () => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
+  const [statsRange, setStatsRange] = useState<StatsRange>('month');
+  const [selectedDate, setSelectedDate] = useState('');
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
   };
 
-  const filteredOrders = useMemo(() => {
+  const baseOrders = useMemo(() => {
     if (filter === 'all') return orders;
     return orders.filter((order) => order.status === filter);
   }, [filter, orders]);
+
+  const matchesStatsRange = useCallback((createdAt: string): boolean => {
+    const date = new Date(createdAt);
+    const now = new Date();
+
+    if (statsRange === 'all') return true;
+    if (statsRange === 'date') {
+      if (!selectedDate) return true;
+      const [year, month, day] = selectedDate.split('-').map((value) => Number.parseInt(value, 10));
+      if (!year || !month || !day) return true;
+      return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+    }
+    if (statsRange === 'day') {
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+    }
+    if (statsRange === 'week') {
+      const nowCopy = new Date(now);
+      const day = nowCopy.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      const weekStart = new Date(nowCopy.getFullYear(), nowCopy.getMonth(), nowCopy.getDate() - diffToMonday);
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+      return date >= weekStart && date < weekEnd;
+    }
+    if (statsRange === 'month') {
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    }
+    return date.getFullYear() === now.getFullYear();
+  }, [statsRange, selectedDate]);
+
+  const filteredOrders = useMemo(() => {
+    return baseOrders.filter((order) => matchesStatsRange(order.created_at));
+  }, [baseOrders, matchesStatsRange]);
+
+  const totalRetail = useMemo(() => {
+    return filteredOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
+  }, [filteredOrders]);
+
+  const totalDiscount = useMemo(() => {
+    return filteredOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
+  }, [filteredOrders]);
+
+  const rangeLabel = useMemo(() => {
+    switch (statsRange) {
+      case 'day':
+        return '当日';
+      case 'week':
+        return '本周';
+      case 'month':
+        return '本月';
+      case 'year':
+        return '年度';
+      case 'date':
+        return selectedDate || '指定日期';
+      default:
+        return '累计';
+    }
+  }, [statsRange, selectedDate]);
 
   const filteredProducts = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
@@ -212,6 +274,55 @@ export const OrdersScreen: React.FC = () => {
             <Download size={18} />
             <span>导出列表</span>
           </button>
+        </div>
+      </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {[
+            { key: 'day', label: '当日' },
+            { key: 'week', label: '本周' },
+            { key: 'month', label: '本月' },
+            { key: 'year', label: '年度' },
+            { key: 'all', label: '累计' },
+            { key: 'date', label: '指定日期' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setStatsRange(item.key as StatsRange)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${statsRange === item.key ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {statsRange === 'date' && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-white/60">日期</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+            />
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white/5 rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">{rangeLabel}订单数</p>
+            <p className="text-xl font-black">{filteredOrders.length}</p>
+          </div>
+          <div className="bg-white/5 rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">{rangeLabel}零售总价</p>
+            <p className="text-xl font-black">¥{totalRetail.toFixed(2)}</p>
+          </div>
+          <div className="bg-white/5 rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">{rangeLabel}折扣总价</p>
+            <p className="text-xl font-black text-accent">¥{totalDiscount.toFixed(2)}</p>
+          </div>
         </div>
       </div>
 

@@ -17,7 +17,7 @@ import { BarChart, PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Shadow, Radius } from '../theme';
+import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 
 type ReportType = 'sales' | 'inventory' | 'profit';
 
@@ -34,13 +34,15 @@ export default function ReportsScreen() {
     })),
   );
   const [reportType, setReportType] = useState<ReportType>('sales');
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   const isDistributor = user?.role === 'distributor';
 
   useEffect(() => {
     fetchProducts();
     fetchOrders();
-  }, []);
+  }, [fetchOrders, fetchProducts]);
 
   const salesData = useMemo(() => {
     const totalRetailSales = orders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
@@ -298,13 +300,13 @@ export default function ReportsScreen() {
   const renderTabButton = (key: ReportType, label: string) => {
     const isActive = reportType === key;
     return (
-      <TouchableOpacity style={[styles.tab, isActive && styles.activeTabWrap]} onPress={() => setReportType(key)}>
+      <TouchableOpacity style={[styles.tab, { backgroundColor: theme.surfaceSecondary }, isActive && styles.activeTabWrap]} onPress={() => setReportType(key)}>
         {isActive ? (
           <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.activeTab}>
             <Text style={styles.activeTabText}>{label}</Text>
           </LinearGradient>
         ) : (
-          <Text style={styles.tabText}>{label}</Text>
+          <Text style={[styles.tabText, { color: theme.textSecondary }]}>{label}</Text>
         )}
       </TouchableOpacity>
     );
@@ -312,22 +314,22 @@ export default function ReportsScreen() {
 
   const renderSalesReport = () => (
     <ScrollView>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>销售概览</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>销售概览</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{salesData.totalRetailSales.toFixed(2)}元</Text>
-            <Text style={styles.statLabel}>零售总价</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{salesData.totalRetailSales.toFixed(2)}元</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>零售总价</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{salesData.totalOrders}</Text>
-            <Text style={styles.statLabel}>订单数量</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{salesData.totalOrders}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>订单数量</Text>
           </View>
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>商品销量排行榜</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销量排行榜</Text>
         {salesData.topProductsQty.length > 0 ? (
           <BarChart
             data={salesData.topProductsQty.map((item, index) => ({
@@ -335,7 +337,7 @@ export default function ReportsScreen() {
               label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
               frontColor: CHART_COLORS[index % CHART_COLORS.length],
               topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: Colors.textSecondary, marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
                   {item.quantity}
                 </Text>
               ),
@@ -346,9 +348,9 @@ export default function ReportsScreen() {
             roundedBottom
             hideRules
             xAxisThickness={1}
-            xAxisColor={Colors.divider}
+            xAxisColor={theme.divider}
             yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: Colors.textTertiary }}
+            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
             noOfSections={4}
             maxValue={Math.ceil((salesData.topProductsQty[0]?.quantity || 1) * 1.2)}
             isAnimated
@@ -357,14 +359,14 @@ export default function ReportsScreen() {
           />
         ) : (
           <View style={styles.emptyChartContainer}>
-            <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无销售数据</Text>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无销售数据</Text>
           </View>
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>商品销售额排行榜</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销售额排行榜</Text>
         {salesData.topProductsAmt.length > 0 ? (
           <BarChart
             data={salesData.topProductsAmt.map((item, index) => ({
@@ -372,7 +374,7 @@ export default function ReportsScreen() {
               label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
               frontColor: CHART_COLORS[index % CHART_COLORS.length],
               topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: Colors.textSecondary, marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
                   {item.amount.toFixed(0)}
                 </Text>
               ),
@@ -383,9 +385,9 @@ export default function ReportsScreen() {
             roundedBottom
             hideRules
             xAxisThickness={1}
-            xAxisColor={Colors.divider}
+            xAxisColor={theme.divider}
             yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: Colors.textTertiary }}
+            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
             noOfSections={4}
             maxValue={Math.ceil((salesData.topProductsAmt[0]?.amount || 1) * 1.2)}
             isAnimated
@@ -394,15 +396,15 @@ export default function ReportsScreen() {
           />
         ) : (
           <View style={styles.emptyChartContainer}>
-            <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无销售数据</Text>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无销售数据</Text>
           </View>
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>商品动销率排行榜</Text>
-        <Text style={styles.cardSubtitle}>动销率 = 销售数量 / 当前库存，低于0.5标红</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品动销率排行榜</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>动销率 = 销售数量 / 当前库存，低于0.5标红</Text>
         {salesData.topProductsVelocity.length > 0 ? (
           salesData.topProductsVelocity.map((item, index) => (
             <View key={item.name} style={[styles.velocityItem, item.isUnhealthy && styles.velocityUnhealthyBg]}>
@@ -411,12 +413,12 @@ export default function ReportsScreen() {
               </View>
               <View style={styles.velocityInfo}>
                 <View style={styles.velocityNameRow}>
-                  {item.isUnhealthy && <AlertTriangle size={14} color={Colors.danger} style={styles.alertIcon} />}
-                  <Text style={[styles.velocityName, item.isUnhealthy && styles.velocityUnhealthy]}>
+                  {item.isUnhealthy && <AlertTriangle size={14} color={theme.danger} style={styles.alertIcon} />}
+                  <Text style={[styles.velocityName, { color: theme.textPrimary }, item.isUnhealthy && styles.velocityUnhealthy]}>
                     {item.name}
                   </Text>
                 </View>
-                <Text style={styles.velocityMeta}>
+                <Text style={[styles.velocityMeta, { color: theme.textSecondary }]}>
                   销量{item.quantity} / 库存{item.inventory} = 动销率{item.velocity.toFixed(2)}
                 </Text>
               </View>
@@ -424,15 +426,15 @@ export default function ReportsScreen() {
           ))
         ) : (
           <View style={styles.emptyChartContainer}>
-            <BarChart3 size={40} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无动销数据</Text>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无动销数据</Text>
           </View>
         )}
       </View>
 
       {salesData.salesByCity.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>城市销售分布</Text>
+        <View style={[styles.card, { backgroundColor: theme.surface }] }>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>城市销售分布</Text>
           <View style={styles.pieContainer}>
             <PieChart
               data={salesData.salesByCity.map((item, index) => ({
@@ -442,21 +444,21 @@ export default function ReportsScreen() {
               donut
               radius={70}
               innerRadius={40}
-              innerCircleColor={Colors.surface}
-              centerLabelComponent={() => (
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.textPrimary }}>
-                    {salesData.salesByCity.reduce((s, c) => s + c.total, 0).toFixed(0)}
-                  </Text>
-                  <Text style={{ fontSize: 10, color: Colors.textSecondary }}>总额</Text>
-                </View>
-              )}
+               innerCircleColor={theme.surface}
+               centerLabelComponent={() => (
+                 <View style={{ alignItems: 'center' }}>
+                   <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
+                     {salesData.salesByCity.reduce((s, c) => s + c.total, 0).toFixed(0)}
+                   </Text>
+                   <Text style={{ fontSize: 10, color: theme.textSecondary }}>总额</Text>
+                 </View>
+               )}
             />
             <View style={styles.legendContainer}>
               {salesData.salesByCity.map((item, index) => (
                 <View key={item.city} style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
-                  <Text style={styles.legendText}>{item.city}: {item.total.toFixed(0)}元</Text>
+                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.city}: {item.total.toFixed(0)}元</Text>
                 </View>
               ))}
             </View>
@@ -468,22 +470,22 @@ export default function ReportsScreen() {
 
   const renderInventoryReport = () => (
     <ScrollView>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>库存概览</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>库存概览</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{inventoryData.totalProducts}</Text>
-            <Text style={styles.statLabel}>商品种类</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{inventoryData.totalProducts}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>商品种类</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{products.reduce((sum, p) => sum + (p.quantity || 0), 0)}</Text>
-            <Text style={styles.statLabel}>总库存</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{products.reduce((sum, p) => sum + (p.quantity || 0), 0)}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总库存</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, inventoryData.lowStockItems.length > 0 && styles.warningText]}>
               {inventoryData.lowStockItems.length}
             </Text>
-            <Text style={styles.statLabel}>库存不足</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>库存不足</Text>
           </View>
         </View>
       </View>
@@ -492,20 +494,20 @@ export default function ReportsScreen() {
 
   const renderProfitReport = () => (
     <ScrollView>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>利润概览</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>利润概览</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{profitData.totalRetailRevenue.toFixed(2)}元</Text>
-            <Text style={styles.statLabel}>零售总价</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{profitData.totalRetailRevenue.toFixed(2)}元</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>零售总价</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{profitData.totalDiscountRevenue.toFixed(2)}元</Text>
-            <Text style={styles.statLabel}>总收入(折扣)</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{profitData.totalDiscountRevenue.toFixed(2)}元</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总收入(折扣)</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, styles.profitText]}>{profitData.totalProfit.toFixed(2)}元</Text>
-            <Text style={styles.statLabel}>总利润</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总利润</Text>
           </View>
         </View>
       </View>
@@ -521,30 +523,30 @@ export default function ReportsScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>商品利润排行</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品利润排行</Text>
         {profitData.profitByProduct.length > 0 ? (
           profitData.profitByProduct.map((item) => (
-            <View key={item.name} style={styles.profitItem}>
+            <View key={item.name} style={[styles.profitItem, { borderBottomColor: theme.divider }]}>
               <View style={styles.profitItemHeader}>
-                <Text style={styles.profitItemName}>{item.name}</Text>
+                <Text style={[styles.profitItemName, { color: theme.textPrimary }]}>{item.name}</Text>
                 <Text style={[styles.profitItemValue, item.profit >= 0 ? styles.profitText : styles.lossText]}>
                   {item.profit.toFixed(2)}元
                 </Text>
               </View>
               <View style={styles.profitDetails}>
-                <Text style={styles.profitDetailText}>零售总价: {item.retailRevenue.toFixed(2)}元</Text>
-                <Text style={styles.profitDetailText}>总收入: {item.discountRevenue.toFixed(2)}元</Text>
+                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>零售总价: {item.retailRevenue.toFixed(2)}元</Text>
+                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>总收入: {item.discountRevenue.toFixed(2)}元</Text>
               </View>
               <View style={styles.profitDetails}>
-                <Text style={styles.profitDetailText}>总成本: {item.cost.toFixed(2)}元</Text>
+                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>总成本: {item.cost.toFixed(2)}元</Text>
               </View>
             </View>
           ))
         ) : (
           <View style={styles.emptyChartContainer}>
-            <TrendingUp size={40} color={Colors.textTertiary} strokeWidth={1.5} />
-            <Text style={styles.emptyText}>暂无利润数据</Text>
+            <TrendingUp size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无利润数据</Text>
           </View>
         )}
       </View>
@@ -552,18 +554,18 @@ export default function ReportsScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>数据报表</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>数据报表</Text>
       </View>
 
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: theme.surface }]}>
         {renderTabButton('sales', '销售报表')}
         {!isDistributor && renderTabButton('inventory', '库存报表')}
         {!isDistributor && renderTabButton('profit', '利润报表')}
       </View>
 
-      <View style={styles.content}>
+      <View style={[styles.content, { backgroundColor: theme.background }]}>
         {reportType === 'sales' && renderSalesReport()}
         {!isDistributor && reportType === 'inventory' && renderInventoryReport()}
         {!isDistributor && reportType === 'profit' && renderProfitReport()}

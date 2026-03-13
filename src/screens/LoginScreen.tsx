@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
-import { Colors, Gradients, Shadow, Radius } from '../theme';
+import { Colors, Gradients, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import logoAvatar from '../../assets/ui/login-avatar.png';
 
 export default function LoginScreen() {
@@ -34,10 +34,12 @@ export default function LoginScreen() {
       isLoading: state.isLoading,
     })),
   );
+  const isDarkMode = useAppStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? DarkColors : LightColors;
 
   React.useEffect(() => {
     fetchCities();
-  }, []);
+  }, [fetchCities]);
 
   const handleAuth = async () => {
     if (!email || !password) {
@@ -95,45 +97,45 @@ export default function LoginScreen() {
             <Text style={styles.subtitle}>供销管理系统</Text>
           </View>
 
-          <View style={styles.form}>
+          <View style={[styles.form, { backgroundColor: isDarkMode ? 'rgba(37,37,66,0.96)' : 'rgba(255,255,255,0.95)' }] }>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
               placeholder="邮箱"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={theme.textTertiary}
             />
             
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
               placeholder="密码"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
-              placeholderTextColor={Colors.textTertiary}
+              placeholderTextColor={theme.textTertiary}
             />
             
             {!isLogin && (
               <>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                   placeholder="确认密码"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                   placeholder="店面名称"
                   value={storeName}
                   onChangeText={setStoreName}
-                  placeholderTextColor={Colors.textTertiary}
+                  placeholderTextColor={theme.textTertiary}
                 />
 
-                <Text style={styles.sectionLabel}>归属城市</Text>
+                <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>归属城市</Text>
                 {cities.length === 0 ? (
                   <Text style={styles.emptyCityText}>暂无可选城市，请联系管理员先创建城市</Text>
                 ) : (
@@ -141,10 +143,10 @@ export default function LoginScreen() {
                     {cities.map((city) => (
                       <TouchableOpacity
                         key={city.id}
-                        style={[styles.cityChip, selectedCityId === city.id && styles.cityChipActive]}
+                        style={[styles.cityChip, { backgroundColor: theme.surfaceSecondary }, selectedCityId === city.id && styles.cityChipActive]}
                         onPress={() => setSelectedCityId(city.id)}
                       >
-                        <Text style={[styles.cityChipText, selectedCityId === city.id && styles.cityChipTextActive]}>
+                        <Text style={[styles.cityChipText, { color: theme.textSecondary }, selectedCityId === city.id && styles.cityChipTextActive]}>
                           {city.name}
                         </Text>
                       </TouchableOpacity>
@@ -180,7 +182,7 @@ export default function LoginScreen() {
               style={styles.switchButton}
               onPress={() => setIsLogin(!isLogin)}
             >
-              <Text style={styles.switchText}>
+              <Text style={[styles.switchText, { color: theme.pink }]}>
                 {isLogin ? '没有账号？点击注册' : '已有账号？点击登录'}
               </Text>
             </TouchableOpacity>
@@ -250,6 +252,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: Colors.surfaceSecondary,
     color: Colors.textPrimary,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   sectionLabel: {
     fontSize: 13,
