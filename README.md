@@ -164,7 +164,7 @@ npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 ```
 
 该命令会自动：下载 APK、上传到 `cloud-window-apk-prod`、并回写 Worker 的
-`MOBILE_LATEST_VERSION` 和 `MOBILE_ANDROID_APK_KEY`。
+`MOBILE_LATEST_VERSION`、`MOBILE_ANDROID_APK_KEY`、`MOBILE_ANDROID_APK_URL`。
 
 > 默认写入 **默认 Worker**（不附加 `--env`），避免误写到 `worker-name-production`。
 > 可通过 `--worker-name <你的Worker名>` 指定回写目标（默认 `cloud-window`）。
@@ -186,6 +186,34 @@ npm run push:both
 其中 `cf:deploy` / `cf:version` 都使用 `wrangler deploy --keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
 
 > 注意：`wrangler versions upload` 当前不支持 `--keep-vars`。若把 Deploy command 设为 `npm run cf:version:upload`（或直接用 `wrangler versions upload`），会覆盖 Dashboard Text 变量（Secrets 通常仍保留）。
+
+### 9. 自定义域名（解决 workers.dev 443 可达性 + APK 下载）
+
+本项目采用子域拆分：
+
+- 支付 API：`https://pay.yunchuang888888.com`
+- APK 下载：`https://yunchuang888888.com/mobile/download/latest.apk`
+
+- EAS 构建环境：`eas.json` 已设置 `EXPO_PUBLIC_PAYMENT_API_URL=https://pay.yunchuang888888.com`
+- Web 环境请设置：`VITE_PAYMENT_API_URL=https://pay.yunchuang888888.com`
+- Worker 路由建议：
+  - `pay.yunchuang888888.com/api/*`
+  - `pay.yunchuang888888.com/health`
+  - `yunchuang888888.com/mobile/*`
+
+连通性检查：
+
+```bash
+curl -I https://pay.yunchuang888888.com/health
+curl https://pay.yunchuang888888.com/api/payment/config-check
+curl https://yunchuang888888.com/mobile/latest.json
+curl -I https://yunchuang888888.com/mobile/download/latest.apk
+```
+
+支付与下载相关 Worker 变量建议：
+
+- `ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify`
+- `MOBILE_ANDROID_APK_URL=https://yunchuang888888.com/mobile/download/latest.apk`
 
 ## 目录结构
 

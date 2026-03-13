@@ -193,6 +193,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 
 - 当前 Web 已提供“扫码盒扫商品创建订单 -> 扫客户付款码收款”的收款台页面（面向 admin / inventory_manager）。
 - 移动端暂不承担扫码盒收款职责（扫码盒能力以 Web 为主）。
+- 域名策略：支付接口走 `pay.yunchuang888888.com`；APK 下载走根域 `yunchuang888888.com/mobile/*`。
 - 当前状态：支付链路代码已接入，**真实支付待测试**（待实单验证回调、对账与异常重试链路）。
 - **仍需继续推进生产级支付能力**：
   - 微信 Native 支付正式签名与回调验签

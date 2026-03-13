@@ -14,14 +14,14 @@ npm run web:build
 
 在 Cloudflare Pages（前端）里配置（如当前 Web 站点接入支付时）：
 
-- `VITE_PAYMENT_API_URL`：Worker 地址（如 `https://inventory-payment.xxx.workers.dev`）
+- `VITE_PAYMENT_API_URL`：支付 Worker 地址（本项目建议 `https://pay.yunchuang888888.com`）
 - `VITE_PAYMENT_MOCK`：`true`（联调）/`false`（生产）
 
 > 说明：当前仓库的支付调用主链路仍在移动端（`src/lib/payment.ts`），Pages 若未接入支付页面，这两个变量不会影响 Worker 实际收款。
 
 移动端实测请同时确保 `.env`：
 
-- `EXPO_PUBLIC_PAYMENT_API_URL=https://<your-worker-domain>`
+- `EXPO_PUBLIC_PAYMENT_API_URL=https://pay.yunchuang888888.com`
 - `EXPO_PUBLIC_PAYMENT_MOCK=false`
 
 在 Cloudflare Worker（后端）里配置：
@@ -32,12 +32,15 @@ npm run web:build
   - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
   - 移动端安装包更新清单：
     - `MOBILE_LATEST_VERSION`（例如 `2.1.6`）
-    - `MOBILE_ANDROID_APK_URL`（EAS 构建 APK 或你自己的 CDN 下载地址）
+    - `MOBILE_ANDROID_APK_URL`（建议固定为 `https://yunchuang888888.com/mobile/download/latest.apk`）
 
 可先检查配置完整性：
 
 ```bash
-curl https://<your-worker-domain>/api/payment/config-check
+curl https://pay.yunchuang888888.com/api/payment/config-check
+
+# 建议回调地址（支付宝）
+# ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify
 ```
 
 ---
@@ -57,13 +60,13 @@ npm run cf:deploy
 健康检查：
 
 ```bash
-curl https://<your-worker-domain>/health
+curl https://pay.yunchuang888888.com/health
 ```
 
 移动端更新清单检查：
 
 ```bash
-curl https://<your-worker-domain>/mobile/latest.json
+curl https://yunchuang888888.com/mobile/latest.json
 ```
 
 期望返回：
@@ -86,6 +89,12 @@ curl https://<your-worker-domain>/mobile/latest.json
 npm run build --prefix web
 ```
 
+> 若你的控制台/流程不允许该变量留空，请直接将 `MOBILE_ANDROID_APK_URL` 设为：
+>
+> `https://yunchuang888888.com/mobile/download/latest.apk`
+>
+> 并保持 `MOBILE_ANDROID_APK_KEY` 为当前版本 APK 对象键（如 `inventory-app-2.1.6.apk`）。
+
 （脚本内使用 `--project-name inventory-web`）
 
 或者在 Cloudflare Pages 控制台设置：
@@ -94,6 +103,51 @@ npm run build --prefix web
 - Output directory: `dist`
 
 `public/_redirects` 已配置 SPA 路由回落，`public/_headers` 已配置缓存策略。
+
+---
+
+## 4.1) Cloudflare 控制台一次性配置（支付子域 + 下载主域）
+
+### A. Worker 路由（解决 workers.dev 443 可达性）
+
+Cloudflare Dashboard -> Workers & Pages -> `cloud-window` -> Settings -> Domains & Routes：
+
+添加以下 Route（推荐）：
+
+- `pay.yunchuang888888.com/api/*`
+- `pay.yunchuang888888.com/health`
+- `yunchuang888888.com/mobile/*`
+
+> 若你希望全部都放在支付子域，也可改成 `pay.yunchuang888888.com/mobile/*`，并同步改 `MOBILE_ANDROID_APK_URL`。
+
+### B. DNS/SSL
+
+Cloudflare Dashboard -> DNS：
+
+- 确保 `yunchuang888888.com` 记录为 **Proxied（橙云）**。
+
+Cloudflare Dashboard -> SSL/TLS：
+
+- 模式建议 `Full` 或 `Full (strict)`。
+
+### C. Builds（避免覆盖 Dashboard Text Variables）
+
+Cloudflare Dashboard -> Worker -> Settings -> Builds：
+
+- Build command: `None`
+- Deploy command: `npm run cf:deploy`
+- Version command: `npm run cf:version`
+
+不要使用：`npm run cf:version:upload`
+
+### D. 支付与 APK 下载连通验证
+
+```bash
+curl -I https://pay.yunchuang888888.com/health
+curl https://pay.yunchuang888888.com/api/payment/config-check
+curl https://yunchuang888888.com/mobile/latest.json
+curl -I https://yunchuang888888.com/mobile/download/latest.apk
+```
 
 ---
 
