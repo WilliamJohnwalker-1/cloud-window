@@ -18,7 +18,7 @@
       "channel": "preview",
       "environment": "preview",
       "env": {
-        "EXPO_PUBLIC_PAYMENT_API_URL": "https://cloud-window.williamjohnnen.workers.dev"
+        "EXPO_PUBLIC_PAYMENT_API_URL": "https://pay.yunchuang888888.com"
       },
       "android": {
         "buildType": "apk"
@@ -28,7 +28,7 @@
       "channel": "production",
       "environment": "production",
       "env": {
-        "EXPO_PUBLIC_PAYMENT_API_URL": "https://cloud-window.williamjohnnen.workers.dev"
+        "EXPO_PUBLIC_PAYMENT_API_URL": "https://pay.yunchuang888888.com"
       },
       "autoIncrement": true,
       "android": {
