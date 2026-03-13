@@ -22,7 +22,8 @@ npx expo start --android     # Android
 npx expo start --ios         # iOS
 npm run build --prefix web   # Build Vite web app
 npm run cf:deploy            # Cloudflare Worker deploy with --keep-vars
-npm run cf:version           # Cloudflare Worker versions upload command
+npm run cf:version           # Safe deploy alias with --keep-vars (for non-empty Version command)
+npm run cf:version:upload    # Raw versions upload (WARNING: may override Dashboard Text vars)
 eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
 eas build --platform android --profile production             # Build production APK
 npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets (default worker env)
@@ -186,13 +187,17 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
   - 新建订单：+/- 按钮一次增减5件
   - 支持直接输入数量，输入时自动清空输入框
   - 确认下单时会验证，不满足5的倍数则提示具体商品
+  - 例外：Web 收款台扫码建单为线下收银场景，扫码每次加购 1 件，使用独立建单逻辑
 
 ## WEB PAYMENT STATUS (TODO)
 
-- 当前 Web 出库已支持“生成收款码 -> 确认收款 -> 出库扣减”的流程骨架。
-- **尚未完成生产支付接入**（必须继续推进）：
+- 当前 Web 已提供“扫码盒扫商品创建订单 -> 扫客户付款码收款”的收款台页面（面向 admin / inventory_manager）。
+- 移动端暂不承担扫码盒收款职责（扫码盒能力以 Web 为主）。
+- 域名策略：支付接口走 `pay.yunchuang888888.com`；APK 下载走根域 `yunchuang888888.com/mobile/*`。
+- 当前状态：支付链路代码已接入，**真实支付待测试**（待实单验证回调、对账与异常重试链路）。
+- **仍需继续推进生产级支付能力**：
   - 微信 Native 支付正式签名与回调验签
-  - 支付宝当面付正式签名与回调验签
+  - 支付宝异常场景补齐（超时撤销/重试策略）
   - 支付回调幂等、防重放、金额校验与对账
   - Cloudflare Worker 生产密钥管理与监控告警
 
@@ -201,7 +206,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.6-order-item-rls-hardening.sql -> 8. migrate-v2.7-session-avatar.sql -> 9. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. storage-policies.sql
 
 **Upgrade v1->v2:**
 1. migrate-v2.sql -> 2-9 same as above
@@ -223,7 +228,10 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.6`
+- Current mobile baseline: `v2.1.7`
+- Current web baseline: `v1.2.4`
+- Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
+- Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

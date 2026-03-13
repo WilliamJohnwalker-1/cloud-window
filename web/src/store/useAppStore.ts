@@ -18,6 +18,7 @@ interface ProfileRow {
   id: string;
   email: string;
   full_name?: string;
+  avatar_url?: string | null;
   role: Profile['role'];
   city_id?: string | null;
   cities?: { name: string } | null;
@@ -62,6 +63,7 @@ interface OrderRow {
   city_id?: string | null;
   cities?: { name: string } | Array<{ name: string }> | null;
   status: Order['status'];
+  order_kind?: Order['order_kind'] | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   product_id?: string | null;
@@ -86,6 +88,11 @@ interface InventoryLogRow {
 }
 
 interface CartCreateItem {
+  productId: string;
+  quantity: number;
+}
+
+interface CashierCreateItem {
   productId: string;
   quantity: number;
 }
@@ -147,9 +154,11 @@ interface AppState {
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[]) => Promise<{ error: Error | null }>;
+  createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   updateOwnProfile: (payload: ProfileUpdateInput) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
+  updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
 }
@@ -171,6 +180,7 @@ const mapProfile = (row: ProfileRow): Profile => ({
   id: row.id,
   email: row.email,
   full_name: row.full_name,
+  avatar_url: row.avatar_url ?? undefined,
   role: row.role,
   city_id: row.city_id,
   city_name: row.cities?.name,
@@ -230,6 +240,7 @@ const mapOrder = (row: OrderRow): Order => {
     city_id: row.city_id ?? undefined,
     city_name: cityData?.name,
     status: row.status,
+    order_kind: row.order_kind || 'distribution',
     total_retail_amount: Number(row.total_retail_amount || 0),
     total_discount_amount: Number(row.total_discount_amount || 0),
     created_at: row.created_at,
@@ -392,7 +403,7 @@ export const useAppStore = create<AppState>()(
       fetchOrderDetail: async (orderId) => {
         const { data: orderRow, error: orderError } = await supabase
           .from('orders')
-          .select('id, distributor_id, city_id, status, total_retail_amount, total_discount_amount, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
+          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
           .eq('id', orderId)
           .maybeSingle();
         if (orderError || !orderRow) return null;
@@ -742,6 +753,7 @@ export const useAppStore = create<AppState>()(
               city_id: user.city_id ?? orderCityId,
               total_retail_amount: totalRetail,
               total_discount_amount: totalDiscount,
+              order_kind: 'distribution',
             })
             .select('id')
             .single();
@@ -777,6 +789,110 @@ export const useAppStore = create<AppState>()(
 
           await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
           return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      createRetailOrders: async (items: CashierCreateItem[]) => {
+        const { user, products } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (items.length === 0) return { error: new Error('购物车为空') };
+        if (!(user.role === 'admin' || user.role === 'inventory_manager')) {
+          return { error: new Error('当前角色无收款建单权限') };
+        }
+
+        try {
+          let totalRetail = 0;
+          let totalDiscount = 0;
+          let orderCityId: string | undefined;
+
+          const orderItemsPayload = items.map((item) => {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) throw new Error('商品不存在');
+            if (item.quantity <= 0) throw new Error(`${product.name} 数量必须大于 0`);
+
+            const available = Number(product.quantity || 0);
+            if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
+
+            const retailPrice = Number(product.price || 0);
+            const unitCost = Number(product.cost || 0);
+            const oneTimeCost = Number(product.one_time_cost || 0);
+
+            totalRetail += retailPrice * item.quantity;
+            totalDiscount += retailPrice * item.quantity;
+            orderCityId = product.city_id;
+
+            return {
+              product_id: product.id,
+              quantity: item.quantity,
+              retail_price: retailPrice,
+              discount_price: retailPrice,
+              unit_cost: unitCost,
+              one_time_cost: oneTimeCost,
+            };
+          });
+
+          const requestId = createRequestId(user.id);
+          const retailRpcPayload = orderItemsPayload.map((item) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            retail_price: item.retail_price,
+            unit_cost: item.unit_cost,
+            one_time_cost: item.one_time_cost,
+          }));
+          const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_retail_order_atomic', {
+            p_items: retailRpcPayload,
+            p_request_id: requestId,
+          });
+
+          if (!rpcError) {
+            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+            return { orderId: rpcOrderId ? String(rpcOrderId) : undefined, error: null };
+          }
+
+          const fallbackByCode = (rpcError as RpcErrorLike).code === '42883' || (rpcError as RpcErrorLike).code === 'PGRST202';
+          const fallbackByMessage = String((rpcError as RpcErrorLike).message || '').toLowerCase().includes('could not find the function public.create_retail_order_atomic');
+          if (!fallbackByCode && !fallbackByMessage) {
+            const message = String((rpcError as RpcErrorLike).message || '');
+            if (message.includes('当前角色无收款建单权限')) {
+              throw new Error('当前数据库函数未开放收款建单权限，请先执行最新迁移');
+            }
+            throw rpcError;
+          }
+
+          const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .insert({
+              distributor_id: user.id,
+              city_id: user.city_id ?? orderCityId,
+              total_retail_amount: totalRetail,
+              total_discount_amount: totalDiscount,
+              order_kind: 'retail',
+              status: 'accepted',
+            })
+            .select('id')
+            .single();
+          if (orderError) throw orderError;
+
+          const { error: itemError } = await supabase
+            .from('order_items')
+            .insert(orderItemsPayload.map((item) => ({ ...item, order_id: orderData.id })));
+          if (itemError) throw itemError;
+
+          for (const item of items) {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) continue;
+            const nextQty = Number(product.quantity || 0) - item.quantity;
+            const { error: inventoryError } = await supabase
+              .from('inventory')
+              .update({ quantity: nextQty, updated_at: new Date().toISOString() })
+              .eq('product_id', product.id);
+            if (inventoryError) throw inventoryError;
+          }
+
+          await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+          return { orderId: orderData.id, error: null };
         } catch (error) {
           return { error: error as Error };
         }
@@ -823,6 +939,32 @@ export const useAppStore = create<AppState>()(
 
       updateOwnStoreName: async (storeName) => {
         return get().updateOwnProfile({ store_name: storeName });
+      },
+
+      updateOwnAvatar: async (avatarUrl) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+
+          const updateAt = new Date().toISOString();
+          const { error } = await supabase
+            .from('profiles')
+            .update({ avatar_url: avatarUrl, updated_at: updateAt })
+            .eq('id', user.id);
+          if (error) throw error;
+
+          set({
+            user: {
+              ...user,
+              avatar_url: avatarUrl,
+              updated_at: updateAt,
+            },
+          });
+
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
       },
 
       markNotificationRead: async (notificationId) => {

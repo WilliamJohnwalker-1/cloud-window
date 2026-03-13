@@ -12,41 +12,61 @@ npm run web:build
 
 ## 2) 部署前环境变量
 
-在 Cloudflare Pages（前端）里配置：
+在 Cloudflare Pages（前端）里配置（如当前 Web 站点接入支付时）：
 
-- `EXPO_PUBLIC_PAYMENT_API_URL`：Worker 地址（如 `https://inventory-payment.xxx.workers.dev`）
-- `EXPO_PUBLIC_PAYMENT_MOCK`：`true`（联调）/`false`（生产）
+- `VITE_PAYMENT_API_URL`：支付 Worker 地址（本项目建议 `https://pay.yunchuang888888.com`）
+- `VITE_PAYMENT_MOCK`：`true`（联调）/`false`（生产）
+
+> 说明：当前仓库的支付调用主链路仍在移动端（`src/lib/payment.ts`），Pages 若未接入支付页面，这两个变量不会影响 Worker 实际收款。
+
+移动端实测请同时确保 `.env`：
+
+- `EXPO_PUBLIC_PAYMENT_API_URL=https://pay.yunchuang888888.com`
+- `EXPO_PUBLIC_PAYMENT_MOCK=false`
 
 在 Cloudflare Worker（后端）里配置：
 
 - `PAYMENT_MOCK=true`（联调）
 - 生产时改为 `PAYMENT_MOCK=false`，并配置：
   - 微信：`WECHAT_MCH_ID`, `WECHAT_APP_ID`, `WECHAT_API_V3_KEY`, `WECHAT_SERIAL_NO`, `WECHAT_PRIVATE_KEY`
-  - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
+  - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
   - 移动端安装包更新清单：
     - `MOBILE_LATEST_VERSION`（例如 `2.1.6`）
-    - `MOBILE_ANDROID_APK_URL`（EAS 构建 APK 或你自己的 CDN 下载地址）
+    - `MOBILE_ANDROID_APK_URL`（建议固定为 `https://yunchuang888888.com/mobile/download/latest.apk`）
+
+可先检查配置完整性：
+
+```bash
+curl https://pay.yunchuang888888.com/api/payment/config-check
+
+# 建议回调地址（支付宝）
+# ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify
+```
 
 ---
 
 ## 3) 部署 Worker
 
 ```bash
-npm run deploy:worker
+npm run cf:deploy
 ```
+
+> 若 Cloudflare 控制台要求 Version command 非空，可填 `npm run cf:version`（等同安全部署，含 `--keep-vars`）。
+>
+> 请勿将 Deploy command 设置为 `npm run cf:version:upload`。`wrangler versions upload` 不支持 `--keep-vars`，会覆盖 Dashboard Text 变量（Secrets 通常仍保留）。
 
 （使用 `wrangler.toml`）
 
 健康检查：
 
 ```bash
-curl https://<your-worker-domain>/health
+curl https://pay.yunchuang888888.com/health
 ```
 
 移动端更新清单检查：
 
 ```bash
-curl https://<your-worker-domain>/mobile/latest.json
+curl https://yunchuang888888.com/mobile/latest.json
 ```
 
 期望返回：
@@ -66,8 +86,14 @@ curl https://<your-worker-domain>/mobile/latest.json
 ## 4) 部署 Pages
 
 ```bash
-npm run deploy:cloudflare
+npm run build --prefix web
 ```
+
+> 若你的控制台/流程不允许该变量留空，请直接将 `MOBILE_ANDROID_APK_URL` 设为：
+>
+> `https://yunchuang888888.com/mobile/download/latest.apk`
+>
+> 并保持 `MOBILE_ANDROID_APK_KEY` 为当前版本 APK 对象键（如 `inventory-app-2.1.6.apk`）。
 
 （脚本内使用 `--project-name inventory-web`）
 
@@ -77,6 +103,51 @@ npm run deploy:cloudflare
 - Output directory: `dist`
 
 `public/_redirects` 已配置 SPA 路由回落，`public/_headers` 已配置缓存策略。
+
+---
+
+## 4.1) Cloudflare 控制台一次性配置（支付子域 + 下载主域）
+
+### A. Worker 路由（解决 workers.dev 443 可达性）
+
+Cloudflare Dashboard -> Workers & Pages -> `cloud-window` -> Settings -> Domains & Routes：
+
+添加以下 Route（推荐）：
+
+- `pay.yunchuang888888.com/api/*`
+- `pay.yunchuang888888.com/health`
+- `yunchuang888888.com/mobile/*`
+
+> 若你希望全部都放在支付子域，也可改成 `pay.yunchuang888888.com/mobile/*`，并同步改 `MOBILE_ANDROID_APK_URL`。
+
+### B. DNS/SSL
+
+Cloudflare Dashboard -> DNS：
+
+- 确保 `yunchuang888888.com` 记录为 **Proxied（橙云）**。
+
+Cloudflare Dashboard -> SSL/TLS：
+
+- 模式建议 `Full` 或 `Full (strict)`。
+
+### C. Builds（避免覆盖 Dashboard Text Variables）
+
+Cloudflare Dashboard -> Worker -> Settings -> Builds：
+
+- Build command: `None`
+- Deploy command: `npm run cf:deploy`
+- Version command: `npm run cf:version`
+
+不要使用：`npm run cf:version:upload`
+
+### D. 支付与 APK 下载连通验证
+
+```bash
+curl -I https://pay.yunchuang888888.com/health
+curl https://pay.yunchuang888888.com/api/payment/config-check
+curl https://yunchuang888888.com/mobile/latest.json
+curl -I https://yunchuang888888.com/mobile/download/latest.apk
+```
 
 ---
 

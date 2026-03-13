@@ -13,6 +13,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v2.3-barcode.sql`: Barcode field.
 - `migrate-v2.4-atomic-order-workflows.sql`: Transactional RPC for order/outbound workflows.
 - `migrate-v2.5-inventory-logs.sql`: Inventory movement logging table + RLS.
+- `migrate-v2.8-payment-events.sql`: Payment fields on orders + payment event ledger.
+- `migrate-v2.9-order-kinds-retail.sql`: Order kind split + retail cashier atomic order RPC.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -24,7 +26,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 4. `migrate-v2.3-barcode.sql`
 5. `migrate-v2.4-atomic-order-workflows.sql`
 6. `migrate-v2.5-inventory-logs.sql`
-7. `storage-policies.sql`
+7. `migrate-v2.8-payment-events.sql`
+8. `migrate-v2.9-order-kinds-retail.sql`
+9. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -33,7 +37,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 4. `migrate-v2.3-barcode.sql`
 5. `migrate-v2.4-atomic-order-workflows.sql`
 6. `migrate-v2.5-inventory-logs.sql`
-7. `storage-policies.sql`
+7. `migrate-v2.8-payment-events.sql`
+8. `migrate-v2.9-order-kinds-retail.sql`
+9. `storage-policies.sql`
 
 ## TABLES
 

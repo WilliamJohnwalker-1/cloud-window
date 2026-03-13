@@ -23,7 +23,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../store/useAppStore';
 import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
-import { Colors, LightColors, DarkColors, Radius } from '../theme';
+import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
 import type { Notification } from '../types';
 
 export default function ProfileScreen() {
@@ -328,6 +328,14 @@ export default function ProfileScreen() {
   };
 
   const selectedEmojiAvatar = parseEmojiAvatar(user?.avatar_url);
+  const avatarRingGradientColors: readonly [string, string] = isDarkMode
+    ? ['rgba(255,255,255,0.55)', 'rgba(255,255,255,0.18)']
+    : ['rgba(255,255,255,0.44)', 'rgba(255,255,255,0.12)'];
+  const avatarHaloColor = isDarkMode ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)';
+  const avatarActionGradientColors: readonly [string, string] = isDarkMode
+    ? ['rgba(255,255,255,0.34)', 'rgba(255,255,255,0.14)']
+    : ['rgba(255,255,255,0.28)', 'rgba(255,255,255,0.10)'];
+  const avatarActionBorderColor = isDarkMode ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.22)';
 
   const menuItems = [
     { IconComponent: User, label: '个人信息', onPress: () => setProfileModalVisible(true) },
@@ -410,7 +418,13 @@ export default function ProfileScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.profileCardGradient}
       >
-        <View style={styles.avatarRing}>
+        <LinearGradient
+          colors={avatarRingGradientColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.avatarRing}
+        >
+          <View style={[styles.avatarHalo, { backgroundColor: avatarHaloColor }]} />
           <View style={[styles.avatar, selectedEmojiAvatar && { backgroundColor: selectedEmojiAvatar.bgColor }]}> 
             {selectedEmojiAvatar ? (
               <Text style={styles.avatarEmojiText}>{selectedEmojiAvatar.emoji}</Text>
@@ -422,9 +436,16 @@ export default function ProfileScreen() {
               </Text>
             )}
           </View>
-        </View>
-        <TouchableOpacity style={styles.avatarActionButton} onPress={() => setAvatarModalVisible(true)}>
-          <Text style={styles.avatarActionText}>更换头像</Text>
+        </LinearGradient>
+        <TouchableOpacity style={[styles.avatarActionButton, { borderColor: avatarActionBorderColor }]} onPress={() => setAvatarModalVisible(true)}>
+          <LinearGradient
+            colors={avatarActionGradientColors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.avatarActionGradient}
+          >
+            <Text style={styles.avatarActionText}>更换头像</Text>
+          </LinearGradient>
         </TouchableOpacity>
         <Text style={styles.emailWhite}>{user?.email}</Text>
         {user?.city_name ? <Text style={styles.subInfoWhite}>{user.city_name}{user?.store_name ? ` · ${user.store_name}` : ''}</Text> : null}
@@ -796,21 +817,36 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   avatarRing: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 14,
+    position: 'relative',
+    overflow: 'hidden',
+    ...Shadow.elevated,
+  },
+  avatarHalo: {
+    position: 'absolute',
+    top: 8,
+    left: 10,
+    width: 52,
+    height: 24,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    transform: [{ rotate: '-12deg' }],
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   avatarImage: {
     width: '100%',
@@ -820,11 +856,16 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 32, color: '#fff', fontWeight: '800' },
   avatarEmojiText: { fontSize: 38 },
   avatarActionButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
     borderRadius: Radius.xl,
+    marginBottom: 10,
+    overflow: 'hidden',
+    ...Shadow.soft,
+  },
+  avatarActionGradient: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    marginBottom: 10,
   },
   avatarActionText: {
     color: '#fff',

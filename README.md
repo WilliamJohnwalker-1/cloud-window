@@ -62,6 +62,7 @@
   - 出库订单按**零售价**计算（视为零售订单）
   - 仅管理员/库存管理员可用
 - **历史商品条码补齐**：管理员可在商品页一键为“无条码商品”批量生成条码
+- **Web 收款台（扫码盒）**：管理员/库存管理员可在 Web 端执行“扫商品条码建单 -> 扫客户付款码收款”
 
 ## 技术栈
 
@@ -103,8 +104,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
-7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
-8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
+7. 执行 `supabase/migrate-v2.8-payment-events.sql`
+8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
 9. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
@@ -115,8 +116,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 4. 执行 `supabase/migrate-v2.3-barcode.sql`
 5. 执行 `supabase/migrate-v2.4-atomic-order-workflows.sql`
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
-7. 执行 `supabase/migrate-v2.6-order-item-rls-hardening.sql`
-8. 执行 `supabase/migrate-v2.7-session-avatar.sql`
+7. 执行 `supabase/migrate-v2.8-payment-events.sql`
+8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
 9. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
@@ -125,7 +126,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.1.0）
+### 5. 启动 Web 端（v1.2.4）
 
 ```bash
 npm run web:v2
@@ -163,7 +164,7 @@ npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 ```
 
 该命令会自动：下载 APK、上传到 `cloud-window-apk-prod`、并回写 Worker 的
-`MOBILE_LATEST_VERSION` 和 `MOBILE_ANDROID_APK_KEY`。
+`MOBILE_LATEST_VERSION`、`MOBILE_ANDROID_APK_KEY`、`MOBILE_ANDROID_APK_URL`。
 
 > 默认写入 **默认 Worker**（不附加 `--env`），避免误写到 `worker-name-production`。
 > 可通过 `--worker-name <你的Worker名>` 指定回写目标（默认 `cloud-window`）。
@@ -182,7 +183,37 @@ npm run push:both
 - Deploy command: `npm run cf:deploy`
 - Version command: `npm run cf:version`
 
-其中 `cf:deploy` 含 `--keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
+其中 `cf:deploy` / `cf:version` 都使用 `wrangler deploy --keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
+
+> 注意：`wrangler versions upload` 当前不支持 `--keep-vars`。若把 Deploy command 设为 `npm run cf:version:upload`（或直接用 `wrangler versions upload`），会覆盖 Dashboard Text 变量（Secrets 通常仍保留）。
+
+### 9. 自定义域名（解决 workers.dev 443 可达性 + APK 下载）
+
+本项目采用子域拆分：
+
+- 支付 API：`https://pay.yunchuang888888.com`
+- APK 下载：`https://yunchuang888888.com/mobile/download/latest.apk`
+
+- EAS 构建环境：`eas.json` 已设置 `EXPO_PUBLIC_PAYMENT_API_URL=https://pay.yunchuang888888.com`
+- Web 环境请设置：`VITE_PAYMENT_API_URL=https://pay.yunchuang888888.com`
+- Worker 路由建议：
+  - `pay.yunchuang888888.com/api/*`
+  - `pay.yunchuang888888.com/health`
+  - `yunchuang888888.com/mobile/*`
+
+连通性检查：
+
+```bash
+curl -I https://pay.yunchuang888888.com/health
+curl https://pay.yunchuang888888.com/api/payment/config-check
+curl https://yunchuang888888.com/mobile/latest.json
+curl -I https://yunchuang888888.com/mobile/download/latest.apk
+```
+
+支付与下载相关 Worker 变量建议：
+
+- `ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify`
+- `MOBILE_ANDROID_APK_URL=https://yunchuang888888.com/mobile/download/latest.apk`
 
 ## 目录结构
 
@@ -257,6 +288,13 @@ npm run push:both
 
 ## 更新日志
 
+### Mobile v2.1.7 (2026-03-13) - 订单类型拆分与头像视觉升级
+
+- 订单模型升级支持 `order_kind`（`distribution` / `retail`），移动端可直接识别并展示“分销订单/零售订单”
+- 分销订单与零售订单口径对齐：分销订单维持折扣价与 5 倍数规则，零售订单按零售价结算
+- 我的页面头像视觉升级：增强立体感、渐变高光与浅色模式降噪，双端观感更统一
+- **支付状态**：Web 收款链路已接入，真实支付联调与回归测试待完成
+
 ### Mobile v2.1.6 (2026-03-11) - 会话策略与安装包更新链路修复
 
 - 修复单会话保护：重复登录时仅踢下旧设备，保留最新登录设备在线
@@ -281,6 +319,15 @@ npm run push:both
 - 接入 `expo-updates`，支持应用启动自动检查更新
 - 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
 - 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
+
+### Web v1.2.4 (2026-03-13) - 收款台接入与订单类型解耦
+
+- 新增 Web 收款台流程：扫码盒扫商品建单 -> 扫客户付款码收款
+- 建单逻辑拆分：
+  - 手动建单：分销订单（折扣价、5 倍数规则、不接入真实支付）
+  - 收款台扫码建单：零售订单（零售价、数量粒度 1、接入真实支付链路）
+- 侧边栏头像与个人页头像逻辑统一（emoji/图片/首字母兜底）
+- **支付状态**：真实支付已进入待测试阶段（变量/回调链路就绪，待实单验证）
 
 ### Web v1.2.3 (2026-03-10) - 订单与导出链路调整
 

@@ -45,6 +45,7 @@ const parseArgs = () => {
     bucket: pick('--bucket', env.R2_BUCKET_NAME || 'cloud-window-apk-prod'),
     workerEnv: pick('--worker-env', ''),
     workerName: pick('--worker-name', env.WORKER_NAME || 'cloud-window'),
+    apiBaseUrl: pick('--api-base-url', env.MOBILE_APK_BASE_URL || 'https://yunchuang888888.com'),
   };
 };
 
@@ -189,6 +190,8 @@ const main = () => {
   }
 
   const apkKey = `inventory-app-${appVersion}.apk`;
+  const normalizedApiBaseUrl = String(opts.apiBaseUrl || '').trim().replace(/\/$/, '');
+  const apkPublicUrl = `${normalizedApiBaseUrl}/mobile/download/latest.apk`;
   const artifactDir = join(process.cwd(), 'artifacts');
   const artifactFile = join(artifactDir, apkKey);
   mkdirSync(artifactDir, { recursive: true });
@@ -202,6 +205,7 @@ const main = () => {
   console.log('🔐 Updating Worker secrets (versioned)');
   run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
   run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
+  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
 
   const latestVersionId = getLatestWorkerVersionId(opts.workerName, envArgs);
   console.log(`🚚 Deploying worker version ${latestVersionId}`);
@@ -213,6 +217,7 @@ const main = () => {
       buildId,
       appVersion,
       apkKey,
+      apkPublicUrl,
       bucket: opts.bucket,
       workerName: opts.workerName,
       workerEnv: opts.workerEnv || 'default',

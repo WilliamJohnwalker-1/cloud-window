@@ -17,6 +17,10 @@ export const OrdersScreen: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
 
+  const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
+    return kind === 'retail' ? '零售订单' : '分销订单';
+  };
+
   const filteredOrders = useMemo(() => {
     if (filter === 'all') return orders;
     return orders.filter((order) => order.status === filter);
@@ -107,6 +111,7 @@ export const OrdersScreen: React.FC = () => {
       const pieces = resolvedOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       return {
         订单号: order.id,
+        订单类型: getOrderKindLabel(order.order_kind),
         状态: order.status,
         城市: order.city_name || '',
         分销商: order.distributor_store || order.distributor_email || '',
@@ -232,6 +237,9 @@ export const OrdersScreen: React.FC = () => {
                 <div>
                   <div className="flex items-center space-x-3">
                     <h3 className="text-lg font-bold">订单 #{order.id.slice(0, 8)}</h3>
+                    <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.order_kind === 'retail' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : 'text-violet-300 bg-violet-500/10 border-violet-500/20'}`}>
+                      {getOrderKindLabel(order.order_kind)}
+                    </div>
                     <div className={`flex items-center space-x-1 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.status === 'accepted' ? 'text-green-500 bg-green-500/10 border-green-500/20' : 'text-orange-500 bg-orange-500/10 border-orange-500/20'}`}>
                       {order.status === 'accepted' ? <CheckCircle2 size={14} /> : <Clock size={14} />}
                       <span>{order.status === 'accepted' ? '已接单' : '待处理'}</span>
@@ -304,7 +312,7 @@ export const OrdersScreen: React.FC = () => {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold">新建订单</h3>
+              <h3 className="text-xl font-bold">新建分销订单</h3>
               <button type="button" onClick={() => setShowCreateModal(false)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
                 <X size={16} />
               </button>
@@ -381,7 +389,7 @@ export const OrdersScreen: React.FC = () => {
                 </div>
 
                 <button type="button" onClick={handleCreateOrder} className="mt-4 w-full py-2.5 rounded-xl bg-tech-gradient font-bold">
-                  确认下单
+                  确认创建分销订单
                 </button>
               </div>
             </div>
@@ -400,6 +408,7 @@ export const OrdersScreen: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">类型：</span>{getOrderKindLabel(detailOrder.order_kind)}</div>
               <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">状态：</span>{detailOrder.status}</div>
               <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
               <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>

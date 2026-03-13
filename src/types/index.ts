@@ -61,6 +61,7 @@ export interface Order {
   distributor_store?: string;
   city_id?: string;
   city_name?: string;
+  order_kind: OrderKind;
   status: OrderStatus;
   total_retail_amount: number;
   total_discount_amount: number;
@@ -91,6 +92,8 @@ export interface InventoryReport {
 }
 
 export type OrderStatus = 'pending' | 'accepted';
+
+export type OrderKind = 'distribution' | 'retail';
 
 export type NotificationType = 'new_order' | 'order_accepted';
 

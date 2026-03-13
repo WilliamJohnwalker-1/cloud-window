@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   Package, 
   Database, 
+  ScanLine,
   ShoppingCart, 
   BarChart3, 
   User, 
@@ -10,6 +11,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { parseEmojiAvatar } from '../utils/avatar';
 
 interface SidebarProps {
   activeTab: string;
@@ -19,11 +21,13 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const { user, signOut, notifications } = useAppStore();
   const unreadCount = notifications.filter((item) => !item.is_read).length;
+  const selectedEmojiAvatar = parseEmojiAvatar(user?.avatar_url);
 
   const menuItems = [
     { id: 'products', label: '商品', icon: Package },
     { id: 'inventory', label: '库存', icon: Database, roles: ['admin', 'inventory_manager'] },
     { id: 'orders', label: '订单', icon: ShoppingCart },
+    { id: 'payment', label: '收款台', icon: ScanLine, roles: ['admin', 'inventory_manager'] },
     { id: 'reports', label: '报表', icon: BarChart3, roles: ['admin'] },
     { id: 'profile', label: '我的', icon: User },
   ];
@@ -71,8 +75,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       <div className="p-4 border-t border-white/10 space-y-4">
         {user && (
           <div className="px-4 py-3 bg-white/5 rounded-xl flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-full bg-tech-gradient flex items-center justify-center text-xs font-bold">
-              {user.email[0].toUpperCase()}
+            <div className="w-8 h-8 rounded-full bg-tech-gradient flex items-center justify-center text-xs font-bold overflow-hidden shadow-neon/40">
+              {selectedEmojiAvatar ? (
+                <div
+                  className="w-full h-full flex items-center justify-center text-base"
+                  style={{ backgroundColor: selectedEmojiAvatar.bgColor }}
+                >
+                  {selectedEmojiAvatar.emoji}
+                </div>
+              ) : user.avatar_url ? (
+                <img src={user.avatar_url} alt="用户头像" className="w-full h-full object-cover" />
+              ) : (
+                user.email[0].toUpperCase()
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{user.store_name || user.email}</p>
