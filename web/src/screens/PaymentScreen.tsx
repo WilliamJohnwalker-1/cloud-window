@@ -3,16 +3,19 @@ import { CreditCard, ScanLine } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import {
   collectAlipayByAuthCode,
-  fetchPaymentConfigCheck,
+  runPaymentReadinessPrecheck,
   isPaymentMockMode,
   queryPaymentStatus,
   validateAuthCode,
   type WebPaymentStatus,
 } from '../lib/payment';
+import { calculateRetailOrderTotals } from '../utils/orderPricing';
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
 });
+
+const scanResetThresholdMs = 300;
 
 export const PaymentScreen: React.FC = () => {
   const { user, products, createRetailOrders, fetchOrders } = useAppStore();
@@ -48,7 +51,7 @@ export const PaymentScreen: React.FC = () => {
   }, [cart, products]);
 
   const totalAmount = useMemo(() => {
-    return cartItems.reduce((sum, item) => sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity, 0);
+    return calculateRetailOrderTotals(cartItems).totalRetail;
   }, [cartItems]);
 
   useEffect(() => {
@@ -58,16 +61,23 @@ export const PaymentScreen: React.FC = () => {
   useEffect(() => {
     const loadConfig = async (): Promise<void> => {
       try {
-        const config = await fetchPaymentConfigCheck();
-        if (config.mock) {
-          setConfigMessage('当前为 Mock 模式（PAYMENT_MOCK=true），可用于联调。');
+        const readiness = await runPaymentReadinessPrecheck();
+        if (!readiness.health.ok) {
+          setConfigMessage(`支付网关健康检查未通过：${readiness.endpoint}`);
           return;
         }
-        if (!config.liveReady) {
-          setConfigMessage(`真实收款未就绪，缺少变量：${config.missing.join(', ')}`);
+
+        if (readiness.config.mock) {
+          setConfigMessage(`当前为 Mock 模式（PAYMENT_MOCK=true） · 网关 ${readiness.endpoint}`);
           return;
         }
-        setConfigMessage('真实收款已就绪，可以开始扫码收款。');
+
+        if (!readiness.config.liveReady) {
+          setConfigMessage(`真实收款未就绪，缺少变量：${readiness.config.missing.join(', ')} · 网关 ${readiness.endpoint}`);
+          return;
+        }
+
+        setConfigMessage(`真实收款已就绪，可以开始扫码收款 · 网关 ${readiness.endpoint}`);
       } catch (error) {
         setConfigMessage(`配置检查失败：${error instanceof Error ? error.message : '未知错误'}`);
       }
@@ -276,7 +286,7 @@ export const PaymentScreen: React.FC = () => {
       const now = Date.now();
 
       if (isDigit) {
-        if (now - lastKeyTsRef.current > 80) {
+        if (now - lastKeyTsRef.current > scanResetThresholdMs) {
           scanBufferRef.current = '';
         }
         lastKeyTsRef.current = now;
@@ -290,20 +300,25 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
-      if (event.key === 'Enter' && scanBufferRef.current.length > 0) {
+      if ((event.key === 'Enter' || event.key === 'Tab') && scanBufferRef.current.length > 0) {
         event.preventDefault();
         const scanned = scanBufferRef.current;
         scanBufferRef.current = '';
 
         if (scanTarget === 'product') {
-          addProductByBarcodeRef.current(scanned);
+          const barcode = scanned.replace(/\D/g, '').slice(0, 13);
+          if (barcode.length === 13) {
+            addProductByBarcodeRef.current(barcode);
+          }
           setProductScanCode('');
           return;
         }
 
-        const authCode = scanned.slice(0, 24);
+        const authCode = scanned.replace(/\D/g, '').slice(0, 24);
         setPaymentAuthCode(authCode);
-        void collectByCodeRef.current(authCode);
+        if (authCode.length >= 16 && authCode.length <= 24) {
+          void collectByCodeRef.current(authCode);
+        }
       }
     };
 
