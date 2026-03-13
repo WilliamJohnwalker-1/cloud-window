@@ -108,7 +108,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
 9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
 10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
-11. 执行 `supabase/storage-policies.sql`
+11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
+12. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -122,7 +123,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
 9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
 10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
-11. 执行 `supabase/storage-policies.sql`
+11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
+12. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 

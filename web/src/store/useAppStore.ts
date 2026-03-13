@@ -103,7 +103,7 @@ interface RpcErrorLike {
   message?: string;
 }
 
-const requiredSchemaVersion = '3.1.0';
+const requiredSchemaVersion = '3.2.0';
 
 const createRequestId = (userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -115,6 +115,21 @@ const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
   const message = String(error.message || '').toLowerCase();
   const missingByCode = error.code === '42883' || error.code === 'PGRST202';
   if (missingByCode) return true;
+
+  const onOrdersTable = message.includes('relation "orders"') || message.includes('table "orders"');
+  const legacyColumnHit =
+    message.includes('column "quantity"')
+    || message.includes('column "unit_price"')
+    || message.includes('column "product_id"')
+    || message.includes('column "total_amount"')
+    || message.includes('column "total-amount"')
+    || message.includes('column quantity')
+    || message.includes('column unit_price')
+    || message.includes('column product_id')
+    || message.includes('column total_amount')
+    || message.includes('column total-amount');
+  const legacyNotNullHit = error.code === '23502' && onOrdersTable && legacyColumnHit;
+  if (legacyNotNullHit) return true;
 
   return message.includes('could not find the function public.create_batch_order_atomic')
     || message.includes('could not find the function public.create_retail_order_atomic');
@@ -775,6 +790,7 @@ export const useAppStore = create<AppState>()(
 
           let totalRetail = 0;
           let totalDiscount = 0;
+          let totalQuantity = 0;
           let orderCityId: string | undefined;
 
           const orderItemsPayload = items.map((item) => {
@@ -792,6 +808,7 @@ export const useAppStore = create<AppState>()(
 
             totalRetail += retailPrice * item.quantity;
             totalDiscount += discountPrice * item.quantity;
+            totalQuantity += item.quantity;
             orderCityId = product.city_id;
 
             return {
@@ -819,17 +836,88 @@ export const useAppStore = create<AppState>()(
             throw rpcError;
           }
 
-          const { data: orderData, error: orderError } = await supabase
+          const baseOrderPayload = {
+            distributor_id: user.id,
+            city_id: user.city_id ?? orderCityId,
+            total_retail_amount: totalRetail,
+            total_discount_amount: totalDiscount,
+            quantity: totalQuantity,
+            order_kind: 'distribution' as const,
+          };
+
+          let orderInsert = await supabase
             .from('orders')
-            .insert({
-              distributor_id: user.id,
-              city_id: user.city_id ?? orderCityId,
-              total_retail_amount: totalRetail,
-              total_discount_amount: totalDiscount,
-              order_kind: 'distribution',
-            })
+            .insert(baseOrderPayload)
             .select('id')
             .single();
+
+          if (orderInsert.error && orderItemsPayload.length > 0) {
+            const message = String(orderInsert.error.message || '').toLowerCase();
+            const details = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+            const combined = `${message} ${details}`;
+            const legacyColumnHit =
+              combined.includes('column "quantity"')
+              || combined.includes('column "unit_price"')
+              || combined.includes('column "product_id"')
+              || combined.includes('column "total_amount"')
+              || combined.includes('column "total-amount"')
+              || combined.includes('column quantity')
+              || combined.includes('column unit_price')
+              || combined.includes('column product_id')
+              || combined.includes('column total_amount')
+              || combined.includes('column total-amount');
+            const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+            const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+            if (legacyConstraintHit) {
+              const primaryItem = orderItemsPayload[0];
+              const legacyOrderPayload = {
+                ...baseOrderPayload,
+                product_id: primaryItem.product_id,
+                quantity: primaryItem.quantity,
+                unit_price: primaryItem.retail_price,
+                total_amount: totalDiscount,
+              };
+
+              orderInsert = await supabase
+                .from('orders')
+                .insert(legacyOrderPayload)
+                .select('id')
+                .single();
+
+              if (orderInsert.error) {
+                const retryMessage = String(orderInsert.error.message || '').toLowerCase();
+                const retryDetails = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+                const retryCombined = `${retryMessage} ${retryDetails}`;
+                const legacyDashTotalAmountHit =
+                  orderInsert.error.code === '23502'
+                  && (retryCombined.includes('column "total-amount"') || retryCombined.includes('column total-amount'))
+                  && (retryCombined.includes('relation "orders"') || retryCombined.includes('table "orders"'));
+
+                if (legacyDashTotalAmountHit) {
+                  const legacyDashPayloadBase = {
+                    distributor_id: legacyOrderPayload.distributor_id,
+                    city_id: legacyOrderPayload.city_id,
+                    total_retail_amount: legacyOrderPayload.total_retail_amount,
+                    total_discount_amount: legacyOrderPayload.total_discount_amount,
+                    product_id: legacyOrderPayload.product_id,
+                    quantity: legacyOrderPayload.quantity,
+                    unit_price: legacyOrderPayload.unit_price,
+                  };
+                  orderInsert = await supabase
+                    .from('orders')
+                    .insert({
+                      ...legacyDashPayloadBase,
+                      'total-amount': totalDiscount,
+                    })
+                    .select('id')
+                    .single();
+                }
+              }
+            }
+          }
+
+          const { data: orderData, error: orderError } = orderInsert;
           if (orderError) throw orderError;
 
           const { error: itemError } = await supabase
@@ -878,6 +966,7 @@ export const useAppStore = create<AppState>()(
         try {
           let orderCityId: string | undefined;
           const retailTotalLines: Array<{ product: ProductWithDetails; quantity: number }> = [];
+          let totalQuantity = 0;
 
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
@@ -892,6 +981,7 @@ export const useAppStore = create<AppState>()(
             const oneTimeCost = Number(product.one_time_cost || 0);
             orderCityId = product.city_id;
             retailTotalLines.push({ product, quantity: item.quantity });
+            totalQuantity += item.quantity;
 
             return {
               product_id: product.id,
@@ -931,18 +1021,89 @@ export const useAppStore = create<AppState>()(
             throw rpcError;
           }
 
-          const { data: orderData, error: orderError } = await supabase
+          const baseOrderPayload = {
+            distributor_id: user.id,
+            city_id: user.city_id ?? orderCityId,
+            total_retail_amount: retailTotals.totalRetail,
+            total_discount_amount: retailTotals.totalDiscount,
+            quantity: totalQuantity,
+            order_kind: 'retail' as const,
+            status: 'accepted' as const,
+          };
+
+          let orderInsert = await supabase
             .from('orders')
-            .insert({
-              distributor_id: user.id,
-              city_id: user.city_id ?? orderCityId,
-              total_retail_amount: retailTotals.totalRetail,
-              total_discount_amount: retailTotals.totalDiscount,
-              order_kind: 'retail',
-              status: 'accepted',
-            })
+            .insert(baseOrderPayload)
             .select('id')
             .single();
+
+          if (orderInsert.error && orderItemsPayload.length > 0) {
+            const message = String(orderInsert.error.message || '').toLowerCase();
+            const details = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+            const combined = `${message} ${details}`;
+            const legacyColumnHit =
+              combined.includes('column "quantity"')
+              || combined.includes('column "unit_price"')
+              || combined.includes('column "product_id"')
+              || combined.includes('column "total_amount"')
+              || combined.includes('column "total-amount"')
+              || combined.includes('column quantity')
+              || combined.includes('column unit_price')
+              || combined.includes('column product_id')
+              || combined.includes('column total_amount')
+              || combined.includes('column total-amount');
+            const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+            const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+            if (legacyConstraintHit) {
+              const primaryItem = orderItemsPayload[0];
+              const legacyOrderPayload = {
+                ...baseOrderPayload,
+                product_id: primaryItem.product_id,
+                quantity: primaryItem.quantity,
+                unit_price: primaryItem.retail_price,
+                total_amount: retailTotals.totalDiscount,
+              };
+
+              orderInsert = await supabase
+                .from('orders')
+                .insert(legacyOrderPayload)
+                .select('id')
+                .single();
+
+              if (orderInsert.error) {
+                const retryMessage = String(orderInsert.error.message || '').toLowerCase();
+                const retryDetails = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+                const retryCombined = `${retryMessage} ${retryDetails}`;
+                const legacyDashTotalAmountHit =
+                  orderInsert.error.code === '23502'
+                  && (retryCombined.includes('column "total-amount"') || retryCombined.includes('column total-amount'))
+                  && (retryCombined.includes('relation "orders"') || retryCombined.includes('table "orders"'));
+
+                if (legacyDashTotalAmountHit) {
+                  const legacyDashPayloadBase = {
+                    distributor_id: legacyOrderPayload.distributor_id,
+                    city_id: legacyOrderPayload.city_id,
+                    total_retail_amount: legacyOrderPayload.total_retail_amount,
+                    total_discount_amount: legacyOrderPayload.total_discount_amount,
+                    product_id: legacyOrderPayload.product_id,
+                    quantity: legacyOrderPayload.quantity,
+                    unit_price: legacyOrderPayload.unit_price,
+                  };
+                  orderInsert = await supabase
+                    .from('orders')
+                    .insert({
+                      ...legacyDashPayloadBase,
+                      'total-amount': retailTotals.totalDiscount,
+                    })
+                    .select('id')
+                    .single();
+                }
+              }
+            }
+          }
+
+          const { data: orderData, error: orderError } = orderInsert;
           if (orderError) throw orderError;
 
           const { error: itemError } = await supabase
