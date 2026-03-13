@@ -183,7 +183,9 @@ npm run push:both
 - Deploy command: `npm run cf:deploy`
 - Version command: `npm run cf:version`
 
-其中 `cf:deploy` 含 `--keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
+其中 `cf:deploy` / `cf:version` 都使用 `wrangler deploy --keep-vars`，用于避免部署时清空你在 Dashboard 手动添加的 Text 变量。
+
+> 注意：`wrangler versions upload` 当前不支持 `--keep-vars`。若把 Deploy command 设为 `npm run cf:version:upload`（或直接用 `wrangler versions upload`），会覆盖 Dashboard Text 变量（Secrets 通常仍保留）。
 
 ## 目录结构
 

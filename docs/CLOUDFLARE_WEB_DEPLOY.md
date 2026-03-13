@@ -48,6 +48,10 @@ curl https://<your-worker-domain>/api/payment/config-check
 npm run cf:deploy
 ```
 
+> 若 Cloudflare 控制台要求 Version command 非空，可填 `npm run cf:version`（等同安全部署，含 `--keep-vars`）。
+>
+> 请勿将 Deploy command 设置为 `npm run cf:version:upload`。`wrangler versions upload` 不支持 `--keep-vars`，会覆盖 Dashboard Text 变量（Secrets 通常仍保留）。
+
 （使用 `wrangler.toml`）
 
 健康检查：

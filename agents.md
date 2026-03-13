@@ -22,7 +22,8 @@ npx expo start --android     # Android
 npx expo start --ios         # iOS
 npm run build --prefix web   # Build Vite web app
 npm run cf:deploy            # Cloudflare Worker deploy with --keep-vars
-npm run cf:version           # Cloudflare Worker versions upload command
+npm run cf:version           # Safe deploy alias with --keep-vars (for non-empty Version command)
+npm run cf:version:upload    # Raw versions upload (WARNING: may override Dashboard Text vars)
 eas update --channel production --message "mobile ota: xxx"  # Publish OTA update
 eas build --platform android --profile production             # Build production APK
 npm run release:android:sync -- --build-id <EAS_BUILD_ID> --worker-name cloud-window  # Sync APK to R2 + write worker secrets (default worker env)
