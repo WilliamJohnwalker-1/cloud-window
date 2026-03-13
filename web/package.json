@@ -1,11 +1,12 @@
 {
   "name": "inventory-web",
   "private": true,
-  "version": "1.2.5",
+  "version": "1.2.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "payment:precheck": "node ./scripts/payment-precheck.mjs",
     "lint": "eslint \"src/**/*.{ts,tsx}\" --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

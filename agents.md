@@ -206,10 +206,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-9 same as above
+1. migrate-v2.sql -> 2-11 same as above
 
 ## GOTCHAS
 
@@ -224,12 +224,13 @@ Before committing:
 - [ ] npx tsc --noEmit passes
 - [ ] npx expo start loads without errors
 - [ ] Manual test: Distributor login -> Create order -> Admin accept
+- [ ] npm run payment:precheck --prefix web
 - [ ] Web manual test: barcode outbound flow + payment mock flow
 
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.8`
-- Current web baseline: `v1.2.5`
+- Current web baseline: `v1.2.6`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest mobile stabilization: 非我的页面深色模式适配 + 订单指定日期输入框 placeholder 稳定 + 单会话登录保护竞态修复（登录后宽限 + 重试）

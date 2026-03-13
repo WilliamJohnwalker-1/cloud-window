@@ -15,6 +15,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v2.5-inventory-logs.sql`: Inventory movement logging table + RLS.
 - `migrate-v2.8-payment-events.sql`: Payment fields on orders + payment event ledger.
 - `migrate-v2.9-order-kinds-retail.sql`: Order kind split + retail cashier atomic order RPC.
+- `migrate-v3.0-request-id-compat.sql`: request_id compatibility hotfix for atomic order RPC.
+- `migrate-v3.1-schema-version-gate.sql`: schema version gate RPC for web startup checks.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -28,7 +30,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 6. `migrate-v2.5-inventory-logs.sql`
 7. `migrate-v2.8-payment-events.sql`
 8. `migrate-v2.9-order-kinds-retail.sql`
-9. `storage-policies.sql`
+9. `migrate-v3.0-request-id-compat.sql`
+10. `migrate-v3.1-schema-version-gate.sql`
+11. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -39,7 +43,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 6. `migrate-v2.5-inventory-logs.sql`
 7. `migrate-v2.8-payment-events.sql`
 8. `migrate-v2.9-order-kinds-retail.sql`
-9. `storage-policies.sql`
+9. `migrate-v3.0-request-id-compat.sql`
+10. `migrate-v3.1-schema-version-gate.sql`
+11. `storage-policies.sql`
 
 ## TABLES
 

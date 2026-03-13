@@ -106,7 +106,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.8-payment-events.sql`
 8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
-9. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
+10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
+11. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -118,7 +120,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 6. 执行 `supabase/migrate-v2.5-inventory-logs.sql`
 7. 执行 `supabase/migrate-v2.8-payment-events.sql`
 8. 执行 `supabase/migrate-v2.9-order-kinds-retail.sql`
-9. 执行 `supabase/storage-policies.sql`
+9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
+10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
+11. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -126,7 +130,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.5）
+### 5. 启动 Web 端（v1.2.6）
 
 ```bash
 npm run web:v2
@@ -141,9 +145,17 @@ Web 登录依赖以下变量（推荐使用 `VITE_` 前缀）：
 ```env
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+VITE_PAYMENT_API_URL=https://pay.yunchuang888888.com
+VITE_PAYMENT_MOCK=false
 ```
 
 > 兼容 `EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY`，但部署时建议统一使用 `VITE_*`。
+
+支付链路发布前建议执行：
+
+```bash
+npm run payment:precheck --prefix web
+```
 
 ### 6. 移动端 OTA 发布（应用内更新）
 
@@ -326,6 +338,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 接入 `expo-updates`，支持应用启动自动检查更新
 - 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
 - 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
+
+### Web v1.2.6 (2026-03-13) - 支付长期方案落地与版本门禁
+
+- 建单链路收紧为“原子 RPC 优先”，移除 `request_id` 缺列场景的长期 fallback 依赖
+- 新增数据库版本门禁：Web 启动会校验 `get_app_schema_version()`，版本不足直接阻断并提示迁移
+- 统一收款金额口径：收款台与零售建单共用零售金额计算逻辑，避免订单金额与支付金额偏差
+- 新增支付预检脚本：`npm run payment:precheck --prefix web`（检查 `/health` + `/api/payment/config-check`）
 
 ### Web v1.2.5 (2026-03-13) - 订单页统计增强与展示优化
 
