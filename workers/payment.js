@@ -29,7 +29,14 @@ function pemToArrayBuffer(pem) {
   return bytes.buffer;
 }
 
-function buildAlipaySignContent(params) {
+function buildAlipayRequestSignContent(params) {
+  const keys = Object.keys(params)
+    .filter((key) => key !== 'sign' && params[key] !== undefined && params[key] !== null && params[key] !== '')
+    .sort();
+  return keys.map((key) => `${key}=${params[key]}`).join('&');
+}
+
+function buildAlipayVerifySignContent(params) {
   const keys = Object.keys(params)
     .filter((key) => key !== 'sign' && key !== 'sign_type' && params[key] !== undefined && params[key] !== null && params[key] !== '')
     .sort();
@@ -80,7 +87,7 @@ async function postAlipayRequest(env, method, bizContent) {
     biz_content: JSON.stringify(bizContent),
   };
 
-  const signContent = buildAlipaySignContent(requestParams);
+  const signContent = buildAlipayRequestSignContent(requestParams);
   const sign = await rsa2Sign(signContent, privateKey);
 
   const form = new URLSearchParams({ ...requestParams, sign });
@@ -110,6 +117,7 @@ async function postAlipayRequest(env, method, bizContent) {
     status: 'failed',
     error: methodPayload.sub_msg || methodPayload.msg || '支付宝请求失败',
     code: methodPayload.code,
+    signContent,
     raw: payload,
   };
 }
@@ -425,6 +433,10 @@ export default {
       });
 
       if (!alipayResult.ok) {
+        const alipayError = String(alipayResult.error || '支付宝请求失败');
+        const signatureHint = alipayError.includes('验签')
+          ? `；请确认 ALIPAY_PRIVATE_KEY 与应用公钥配对，并使用包含 sign_type 的待签名串。sign_content=${alipayResult.signContent || ''}`
+          : '';
         await patchOrderPayment(env, orderId, { payment_status: 'failed' });
         await upsertPaymentEvent(env, {
           idempotency_key: buildPaymentEventKey({
@@ -441,9 +453,9 @@ export default {
           status: 'failed',
           amount,
           processed: true,
-          payload: { error: alipayResult.error, code: alipayResult.code },
+          payload: { error: alipayError, code: alipayResult.code, sign_content: alipayResult.signContent || null },
         });
-        return json({ success: false, status: 'failed', error: alipayResult.error }, { status: 400 });
+        return json({ success: false, status: 'failed', error: `${alipayError}${signatureHint}` }, { status: 400 });
       }
 
       if (alipayResult.status === 'paid') {
@@ -569,7 +581,7 @@ export default {
           return new Response('failure', { status: 400 });
         }
 
-        const signContent = buildAlipaySignContent(params);
+        const signContent = buildAlipayVerifySignContent(params);
         const verified = await rsa2Verify(signContent, sign, env.ALIPAY_PUBLIC_KEY);
         if (!verified) {
           return new Response('failure', { status: 400 });
