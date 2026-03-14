@@ -1009,7 +1009,7 @@ export const useAppStore = create<AppState>()(
           });
 
           if (!rpcError) {
-            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+            void Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
             return { orderId: rpcOrderId ? String(rpcOrderId) : undefined, error: null };
           }
 
@@ -1111,18 +1111,24 @@ export const useAppStore = create<AppState>()(
             .insert(orderItemsPayload.map((item) => ({ ...item, order_id: orderData.id })));
           if (itemError) throw itemError;
 
-          for (const item of items) {
-            const product = products.find((p) => p.id === item.productId);
-            if (!product) continue;
-            const nextQty = Number(product.quantity || 0) - item.quantity;
+          const inventoryDeltas = items.reduce((map, item) => {
+            const current = map.get(item.productId) || 0;
+            map.set(item.productId, current + item.quantity);
+            return map;
+          }, new Map<string, number>());
+
+          await Promise.all(Array.from(inventoryDeltas.entries()).map(async ([productId, deltaQty]) => {
+            const product = products.find((p) => p.id === productId);
+            if (!product) return;
+            const nextQty = Number(product.quantity || 0) - deltaQty;
             const { error: inventoryError } = await supabase
               .from('inventory')
               .update({ quantity: nextQty, updated_at: new Date().toISOString() })
               .eq('product_id', product.id);
             if (inventoryError) throw inventoryError;
-          }
+          }));
 
-          await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+          void Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
           return { orderId: orderData.id, error: null };
         } catch (error) {
           return { error: error as Error };

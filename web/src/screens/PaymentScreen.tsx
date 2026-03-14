@@ -16,6 +16,8 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
 });
 
 const scanResetThresholdMs = 300;
+const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
+const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
 
 export const PaymentScreen: React.FC = () => {
   const { user, products, createRetailOrders, fetchOrders } = useAppStore();
@@ -40,15 +42,34 @@ export const PaymentScreen: React.FC = () => {
 
   const canUseCashier = user?.role === 'admin' || user?.role === 'inventory_manager';
 
+  const productById = useMemo(() => {
+    const byId = new Map<string, (typeof products)[number]>();
+    products.forEach((product) => {
+      byId.set(product.id, product);
+    });
+    return byId;
+  }, [products]);
+
+  const productByBarcode = useMemo(() => {
+    const byBarcode = new Map<string, (typeof products)[number]>();
+    products.forEach((product) => {
+      const normalized = normalizeProductBarcode(String(product.barcode || ''));
+      if (normalized.length === 13) {
+        byBarcode.set(normalized, product);
+      }
+    });
+    return byBarcode;
+  }, [products]);
+
   const cartItems = useMemo(() => {
     return Array.from(cart.entries())
       .map(([productId, quantity]) => {
-        const product = products.find((item) => item.id === productId);
+        const product = productById.get(productId);
         if (!product) return null;
         return { product, quantity };
       })
       .filter((item): item is { product: (typeof products)[number]; quantity: number } => item !== null);
-  }, [cart, products]);
+  }, [cart, productById]);
 
   const totalAmount = useMemo(() => {
     return calculateRetailOrderTotals(cartItems).totalRetail;
@@ -99,14 +120,24 @@ export const PaymentScreen: React.FC = () => {
   }, []);
 
   const addProductByBarcode = useCallback((rawCode: string): void => {
-    const barcode = rawCode.replace(/\D/g, '').slice(0, 13);
+    const digits = normalizeDigits(rawCode.trim());
+    if (digits.length >= 16 && digits.length <= 24) {
+      setScanTarget('payment');
+      setPaymentAuthCode(digits.slice(0, 24));
+      setStatus('failed');
+      setStatusMessage('检测到付款码（16-24位），已切换到付款码扫码目标');
+      paymentInputRef.current?.focus();
+      return;
+    }
+
+    const barcode = normalizeProductBarcode(digits);
     if (barcode.length !== 13) {
       setStatus('failed');
       setStatusMessage('商品条码必须是 13 位数字');
       return;
     }
 
-    const product = products.find((item) => item.barcode === barcode);
+    const product = productByBarcode.get(barcode);
     if (!product) {
       setStatus('failed');
       setStatusMessage(`未找到条码 ${barcode} 对应商品`);
@@ -117,7 +148,7 @@ export const PaymentScreen: React.FC = () => {
     updateCartQuantity(product.id, currentQty + 1);
     setStatus('pending');
     setStatusMessage(`已加入 ${product.name} x1`);
-  }, [cart, products, updateCartQuantity]);
+  }, [cart, productByBarcode, updateCartQuantity]);
 
   const handleProductScanSubmit = (): void => {
     addProductByBarcode(productScanCode);
@@ -173,7 +204,9 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
-      await fetchOrders();
+      if (!result.orderId) {
+        await fetchOrders();
+      }
       const created = result.orderId
         ? { id: result.orderId, amount: totalAmount }
         : resolveCreatedOrder(totalAmount);
@@ -306,7 +339,18 @@ export const PaymentScreen: React.FC = () => {
         scanBufferRef.current = '';
 
         if (scanTarget === 'product') {
-          const barcode = scanned.replace(/\D/g, '').slice(0, 13);
+          const normalizedDigits = normalizeDigits(scanned);
+          if (normalizedDigits.length >= 16 && normalizedDigits.length <= 24) {
+            setScanTarget('payment');
+            setPaymentAuthCode(normalizedDigits.slice(0, 24));
+            setStatus('failed');
+            setStatusMessage('检测到付款码（16-24位），已切换到付款码扫码目标');
+            setProductScanCode('');
+            paymentInputRef.current?.focus();
+            return;
+          }
+
+          const barcode = normalizeProductBarcode(normalizedDigits);
           if (barcode.length === 13) {
             addProductByBarcodeRef.current(barcode);
           }
