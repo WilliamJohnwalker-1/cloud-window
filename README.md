@@ -132,7 +132,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.6）
+### 5. 启动 Web 端（v1.2.7）
 
 ```bash
 npm run web:v2
@@ -340,6 +340,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 接入 `expo-updates`，支持应用启动自动检查更新
 - 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
 - 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
+
+### Web v1.2.7 (2026-03-14) - 收款台联调稳定性修复
+
+- 收款台扫码建单提速：去除建单成功后的阻塞式订单刷新，fallback 库存回写改为聚合并行更新
+- 条码识别增强：商品扫码统一数字归一化，识别误扫付款码（16-24位）并自动切换到付款码模式
+- 支付签名修复：支付宝请求签名串改为包含 `sign_type`，回调验签维持排除 `sign/sign_type`，并补充失败排查信息
 
 ### Web v1.2.6 (2026-03-13) - 支付长期方案落地与版本门禁
 

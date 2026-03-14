@@ -230,9 +230,10 @@ Before committing:
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.8`
-- Current web baseline: `v1.2.6`
+- Current web baseline: `v1.2.7`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
+- Latest web stabilization: 收款台建单链路提速 + 商品条码归一化/误扫付款码识别 + 支付签名串（含 sign_type）修复
 - Latest mobile stabilization: 非我的页面深色模式适配 + 订单指定日期输入框 placeholder 稳定 + 单会话登录保护竞态修复（登录后宽限 + 重试）
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
