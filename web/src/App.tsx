@@ -51,25 +51,49 @@ function App() {
   useEffect(() => {
     if (!user) return;
 
-    const validateSession = async () => {
-      const sessionError = await ensureActiveSession();
-      if (sessionError) {
+    let isValidating = false;
+    let lastValidatedAt = 0;
+    const minValidateIntervalMs = 4000;
+
+    const validateSession = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastValidatedAt < minValidateIntervalMs) {
+        return;
+      }
+      if (isValidating) {
+        return;
+      }
+
+      isValidating = true;
+      let sessionError: Error | null = null;
+      try {
+        sessionError = await ensureActiveSession();
+      } finally {
+        lastValidatedAt = Date.now();
+        isValidating = false;
+      }
+
+      if (!sessionError) {
+        return;
+      }
+
+      if (sessionError.message.includes('账号已在其他设备登录')) {
         await signOut();
       }
     };
 
     const onFocus = () => {
-      void validateSession();
+      void validateSession(true);
     };
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        void validateSession();
+        void validateSession(true);
       }
     };
 
     const timer = window.setInterval(() => {
       void validateSession();
-    }, 10000);
+    }, 15000);
 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
@@ -156,7 +180,7 @@ function App() {
         <div className="max-w-xl w-full bg-white/5 border border-red-400/30 rounded-3xl p-6 space-y-4">
           <h2 className="text-2xl font-bold text-red-300">数据库版本校验失败</h2>
           <p className="text-white/80 text-sm leading-6">
-            当前 Web 版本要求数据库迁移至少到 <span className="font-semibold">v3.2.0</span>。
+            当前 Web 版本要求数据库迁移至少到 <span className="font-semibold">v3.4.0</span>。
             请在 Supabase SQL Editor 执行最新迁移后刷新页面。
           </p>
           <div className="text-xs text-white/60 space-y-1">

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DollarSign, Download, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
@@ -9,41 +9,47 @@ const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 export const ReportsScreen: React.FC = () => {
   const { orders } = useAppStore();
 
-  const { stats, salesData, cityData, productRanking } = useMemo(() => {
+  const medalStyles = [
+    'from-amber-400/30 to-amber-600/20 border-amber-300/40 text-amber-200',
+    'from-slate-300/30 to-slate-500/20 border-slate-300/30 text-slate-100',
+    'from-orange-500/30 to-orange-700/20 border-orange-300/30 text-orange-200',
+  ];
+
+  const { stats, productVolumeRanking, cityData, productAmountRanking } = useMemo(() => {
     const totalRetail = orders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = orders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
     const pendingCount = orders.filter((order) => order.status === 'pending').length;
 
-    const dayMap = new Map<string, number>();
     const cityMap = new Map<string, number>();
-    const productMap = new Map<string, number>();
+    const productAmountMap = new Map<string, number>();
+    const productVolumeMap = new Map<string, number>();
 
     orders.forEach((order) => {
-      const dayKey = new Date(order.created_at).toISOString().slice(0, 10);
-      dayMap.set(dayKey, (dayMap.get(dayKey) || 0) + Number(order.total_discount_amount || 0));
-
       const cityName = order.city_name || '未知';
       cityMap.set(cityName, (cityMap.get(cityName) || 0) + Number(order.total_discount_amount || 0));
 
       order.items.forEach((item) => {
         const key = item.product_name || item.product_id;
-        productMap.set(key, (productMap.get(key) || 0) + Number(item.discount_price || 0) * Number(item.quantity || 0));
+        const itemQty = Number(item.quantity || 0);
+        const itemAmount = Number(item.discount_price || 0) * itemQty;
+        productAmountMap.set(key, (productAmountMap.get(key) || 0) + itemAmount);
+        productVolumeMap.set(key, (productVolumeMap.get(key) || 0) + itemQty);
       });
     });
-
-    const sortedDays = Array.from(dayMap.entries())
-      .sort(([a], [b]) => (a > b ? 1 : -1))
-      .slice(-10)
-      .map(([date, value]) => ({ name: date.slice(5), value }));
 
     const sortedCities = Array.from(cityMap.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
       .map(([name, value]) => ({ name, value }));
 
-    const sortedProducts = Array.from(productMap.entries())
+    const sortedProductAmount = Array.from(productAmountMap.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
+      .slice(0, 15)
+      .map(([name, value]) => ({ name, value }));
+
+    const sortedProductVolume = Array.from(productVolumeMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
       .map(([name, value]) => ({ name, value }));
 
     return {
@@ -53,27 +59,27 @@ export const ReportsScreen: React.FC = () => {
         { label: '折扣差额', value: `¥${(totalRetail - totalDiscount).toFixed(2)}`, icon: TrendingUp, trend: '零售额 - 折扣额', isUp: totalRetail - totalDiscount >= 0 },
         { label: '待处理订单', value: String(pendingCount), icon: TrendingDown, trend: 'pending', isUp: pendingCount === 0 },
       ],
-      salesData: sortedDays,
+      productVolumeRanking: sortedProductVolume,
       cityData: sortedCities,
-      productRanking: sortedProducts,
+      productAmountRanking: sortedProductAmount,
     };
   }, [orders]);
 
-  const exportSalesCsv = (): void => {
-    const header = '日期,销售额';
-    const lines = salesData.map((row) => `${row.name},${row.value}`);
+  const exportVolumeCsv = (): void => {
+    const header = '商品,销量';
+    const lines = productVolumeRanking.map((row) => `${row.name},${row.value}`);
     const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `sales-trend-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `product-volume-ranking-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   const exportProductCsv = (): void => {
     const header = '商品,销售额';
-    const lines = productRanking.map((row) => `${row.name},${row.value}`);
+    const lines = productAmountRanking.map((row) => `${row.name},${row.value}`);
     const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -82,6 +88,17 @@ export const ReportsScreen: React.FC = () => {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  const volumeTop3 = productVolumeRanking.slice(0, 3);
+  const amountTop3 = productAmountRanking.slice(0, 3);
+  const volumeChartData = productVolumeRanking.slice(0, 10).map((row) => ({
+    ...row,
+    shortName: row.name.length > 6 ? `${row.name.slice(0, 6)}…` : row.name,
+  }));
+  const amountChartData = productAmountRanking.slice(0, 10).map((row) => ({
+    ...row,
+    shortName: row.name.length > 6 ? `${row.name.slice(0, 6)}…` : row.name,
+  }));
 
   return (
     <div className="space-y-8">
@@ -114,26 +131,54 @@ export const ReportsScreen: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">销售趋势</h3>
-            <button type="button" onClick={exportSalesCsv} className="text-white/40 hover:text-white transition-colors">
+            <h3 className="text-xl font-bold">商品销量排行</h3>
+            <button type="button" onClick={exportVolumeCsv} className="text-white/40 hover:text-white transition-colors">
               <Download size={20} />
             </button>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            {volumeTop3.map((row, idx) => (
+              <div
+                key={row.name}
+                className={`rounded-2xl border bg-gradient-to-br px-4 py-3 ${medalStyles[idx] ?? 'border-white/10 text-white/80'}`}
+              >
+                <p className="text-[10px] font-black uppercase tracking-widest opacity-80">TOP {idx + 1}</p>
+                <p className="text-sm font-bold mt-1 truncate">{row.name}</p>
+                <p className="text-lg font-black mt-1">{row.value}</p>
+              </div>
+            ))}
+            {volumeTop3.length === 0 && <p className="text-sm text-white/40 col-span-3">暂无销量排行数据</p>}
+          </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={salesData}>
+              <BarChart data={volumeChartData} margin={{ top: 8, right: 10, left: 0, bottom: 28 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-                <XAxis dataKey="name" stroke="#ffffff40" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#ffffff40" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value: number) => `¥${value}`} />
-                <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} />
-                <Line type="monotone" dataKey="value" stroke="url(#lineGradient)" strokeWidth={4} dot={{ r: 4, fill: '#5B8DEF', strokeWidth: 2 }} activeDot={{ r: 6, fill: '#FF6B9D', stroke: '#fff' }} />
-                <defs>
-                  <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#FF6B9D" />
-                    <stop offset="100%" stopColor="#5B8DEF" />
-                  </linearGradient>
-                </defs>
-              </LineChart>
+                <XAxis
+                  dataKey="shortName"
+                  stroke="#ffffff40"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={0}
+                />
+                <YAxis
+                  stroke="#ffffff40"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                  itemStyle={{ color: '#fff' }}
+                  formatter={(value: number) => [value, '销量']}
+                  labelFormatter={(_, payload) => String(payload?.[0]?.payload?.name || '')}
+                />
+                <Bar dataKey="value" radius={[10, 10, 0, 0]}>
+                  {volumeChartData.map((entry, index) => (
+                    <Cell key={entry.name} fill={colors[index % colors.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -164,15 +209,53 @@ export const ReportsScreen: React.FC = () => {
             <Download size={20} />
           </button>
         </div>
-        <div className="space-y-2 max-h-[360px] overflow-auto">
-          {productRanking.map((row) => (
-            <div key={row.name} className="flex items-center justify-between bg-white/[0.03] rounded-xl px-4 py-3">
-              <span className="text-sm text-white/90">{row.name}</span>
-              <span className="font-bold text-accent">¥{row.value.toFixed(2)}</span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          {amountTop3.map((row, idx) => (
+            <div
+              key={row.name}
+              className={`rounded-2xl border bg-gradient-to-br px-4 py-3 ${medalStyles[idx] ?? 'border-white/10 text-white/80'}`}
+            >
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-80">TOP {idx + 1}</p>
+              <p className="text-sm font-bold mt-1 truncate">{row.name}</p>
+              <p className="text-lg font-black mt-1">¥{row.value.toFixed(2)}</p>
             </div>
           ))}
-          {productRanking.length === 0 && <p className="text-sm text-white/40">暂无可导出的报表数据</p>}
+          {amountTop3.length === 0 && <p className="text-sm text-white/40 col-span-3">暂无销售额排行数据</p>}
         </div>
+        <div className="h-[360px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={amountChartData} margin={{ top: 8, right: 10, left: 0, bottom: 28 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+              <XAxis
+                dataKey="shortName"
+                stroke="#ffffff40"
+                fontSize={11}
+                tickLine={false}
+                axisLine={false}
+                interval={0}
+              />
+              <YAxis
+                stroke="#ffffff40"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value: number) => `¥${value}`}
+              />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                itemStyle={{ color: '#fff' }}
+                formatter={(value: number) => [`¥${value.toFixed(2)}`, '销售额']}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.name || '')}
+              />
+              <Bar dataKey="value" radius={[10, 10, 0, 0]}>
+                {amountChartData.map((entry, index) => (
+                  <Cell key={entry.name} fill={colors[index % colors.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {productAmountRanking.length === 0 && <p className="text-sm text-white/40 mt-4">暂无可导出的报表数据</p>}
       </div>
     </div>
   );

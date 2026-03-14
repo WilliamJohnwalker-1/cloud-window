@@ -4,12 +4,18 @@ import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 export const InventoryScreen: React.FC = () => {
-  const { products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs } = useAppStore();
+  const { cities, products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
+  const [cityFilter, setCityFilter] = React.useState<string>('all');
 
-  const lowStockCount = products.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity || 10)).length;
+  const filteredProducts = React.useMemo(() => {
+    if (cityFilter === 'all') return products;
+    return products.filter((item) => item.city_id === cityFilter);
+  }, [cityFilter, products]);
+
+  const lowStockCount = filteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity || 10)).length;
 
   return (
     <div className="space-y-6">
@@ -51,18 +57,39 @@ export const InventoryScreen: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setCityFilter('all')}
+          className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+        >
+          全部城市
+        </button>
+        {cities.map((city) => (
+          <button
+            type="button"
+            key={city.id}
+            onClick={() => setCityFilter(city.id)}
+            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+          >
+            {city.name}
+          </button>
+        ))}
+      </div>
+
       <div className="bg-white/5 border border-white/10 rounded-[32px] overflow-hidden backdrop-blur-md">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-white/5 bg-white/[0.02]">
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest">商品信息</th>
+              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">城市</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">当前库存</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">告警阈值</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">快速操作</th>
             </tr>
           </thead>
           <tbody>
-            {products.map((product, index) => {
+            {filteredProducts.map((product, index) => {
               const currentQty = Number(product.quantity || 0);
               const isLowStock = currentQty < Number(product.min_quantity || 10);
               return (
@@ -83,6 +110,9 @@ export const InventoryScreen: React.FC = () => {
                         <p className="text-xs text-white/30 font-mono mt-1">{product.barcode || '无条码'}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-8 py-5 text-center">
+                    <span className="text-sm font-medium text-white/70">{product.city_name || '-'}</span>
                   </td>
                   <td className="px-8 py-5 text-center">
                     <div className="flex flex-col items-center">
@@ -184,6 +214,11 @@ export const InventoryScreen: React.FC = () => {
                 </motion.tr>
               );
             })}
+            {filteredProducts.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-8 py-10 text-center text-white/40">当前筛选下暂无库存商品</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
