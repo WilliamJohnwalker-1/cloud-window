@@ -109,7 +109,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
 10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
 11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
-12. 执行 `supabase/storage-policies.sql`
+12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
+13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
+14. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -124,7 +126,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 9. 执行 `supabase/migrate-v3.0-request-id-compat.sql`
 10. 执行 `supabase/migrate-v3.1-schema-version-gate.sql`
 11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
-12. 执行 `supabase/storage-policies.sql`
+12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
+13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
+14. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -132,7 +136,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.7）
+### 5. 启动 Web 端（v1.2.8）
 
 ```bash
 npm run web:v2
@@ -340,6 +344,14 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 接入 `expo-updates`，支持应用启动自动检查更新
 - 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
 - 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
+
+### Web v1.2.8 (2026-03-15) - 会话稳定性 + 城市管理 + 报表可视化升级
+
+- 单会话登录保护稳定性增强：增加登录宽限、会话校验节流/重试与错误分级，降低误踢下线概率
+- 商品与库存城市体验升级：商品新增城市选择改为统一 chips 交互，库存页支持按城市筛选
+- 管理端新增城市排序能力：支持上移/下移并持久化（配套城市排序迁移与原子交换 RPC）
+- 订单能力补齐：Web 端支持单笔订单导出送货单（与移动端字段一致）与安全删除（原子恢复库存）
+- 报表升级：销售趋势替换为商品销量排行，并将商品销售额排行改为竖列图表 + Top3 高亮卡片
 
 ### Web v1.2.7 (2026-03-14) - 收款台联调稳定性修复
 
