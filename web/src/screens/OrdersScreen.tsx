@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, X } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
@@ -7,7 +7,7 @@ type OrderFilter = 'all' | 'pending' | 'accepted';
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'date';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, deleteOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -19,6 +19,7 @@ export const OrdersScreen: React.FC = () => {
   const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
   const [selectedDate, setSelectedDate] = useState('');
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
@@ -188,6 +189,59 @@ export const OrdersScreen: React.FC = () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, '订单列表');
     XLSX.writeFile(workbook, `orders-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportSingleOrderXlsx = async (orderId: string): Promise<void> => {
+    const latestOrder = await fetchOrderDetail(orderId);
+    const targetOrder = latestOrder || getResolvedOrder(orderId);
+    if (!targetOrder) {
+      window.alert('未找到订单，无法导出');
+      return;
+    }
+
+    const XLSX = await import('xlsx');
+    const headers = ['商品名称', '送货数量', '单价', '查收'];
+    const dataRows = targetOrder.items.map((item) => [
+      resolveItemName(item.product_id, item.product_name),
+      item.quantity,
+      item.discount_price,
+      '',
+    ]);
+    const sheetData = [headers, ...dataRows];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+
+    const colWidths = headers.map((header, colIdx) => {
+      let maxLen = header.length * 2;
+      dataRows.forEach((row) => {
+        const len = String(row[colIdx] ?? '').length;
+        if (len > maxLen) maxLen = len;
+      });
+      return { wch: Math.max(maxLen + 2, 12) };
+    });
+    worksheet['!cols'] = colWidths;
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '送货单');
+    XLSX.writeFile(workbook, `delivery-${targetOrder.id.slice(0, 8)}-${Date.now()}.xlsx`);
+  };
+
+  const handleDeleteOrder = async (orderId: string): Promise<void> => {
+    const confirmed = window.confirm(`确定删除订单 #${orderId.slice(0, 8)} 吗？删除后会恢复库存。`);
+    if (!confirmed) return;
+
+    setDeletingOrderId(orderId);
+    const { error } = await deleteOrder(orderId);
+    setDeletingOrderId(null);
+
+    if (error) {
+      window.alert(`删除失败：${error.message}`);
+      return;
+    }
+
+    window.alert('订单已删除并恢复库存');
+    if (detailOrderId === orderId) {
+      closeOrderDetail();
+    }
   };
 
   const setCartQuantity = (productId: string, quantity: number): void => {
@@ -402,6 +456,29 @@ export const OrdersScreen: React.FC = () => {
 
               <div className="flex items-center space-x-4">
                 <p className="text-sm text-white/40">共 {totalPieces} 件商品 / {itemKinds} 种</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void exportSingleOrderXlsx(order.id);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white text-xs font-bold inline-flex items-center gap-1"
+                >
+                  <Download size={14} />
+                  <span>导出</span>
+                </button>
+                {(user?.role === 'admin' || user?.role === 'inventory_manager') && order.status === 'pending' && order.order_kind === 'distribution' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDeleteOrder(order.id);
+                    }}
+                    disabled={deletingOrderId === order.id}
+                    className="px-2.5 py-1.5 rounded-lg border border-red-400/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 size={14} />
+                    <span>{deletingOrderId === order.id ? '删除中' : '删除'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

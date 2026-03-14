@@ -103,7 +103,12 @@ interface RpcErrorLike {
   message?: string;
 }
 
-const requiredSchemaVersion = '3.2.0';
+const requiredSchemaVersion = '3.4.0';
+const sessionActivationGraceMs = 20000;
+const sessionRetryDelayMs = 600;
+const sessionRetryTimes = 2;
+
+let sessionGraceUntil = 0;
 
 const createRequestId = (userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -177,6 +182,7 @@ interface AppState {
   signOut: () => Promise<void>;
 
   fetchCities: () => Promise<void>;
+  moveCityOrder: (cityId: string, direction: 'up' | 'down') => Promise<{ error: Error | null }>;
   fetchProducts: () => Promise<void>;
   fetchOrders: () => Promise<void>;
   fetchNotifications: () => Promise<void>;
@@ -195,6 +201,7 @@ interface AppState {
   createBatchOrders: (items: CartCreateItem[]) => Promise<{ error: Error | null }>;
   createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
+  deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
   updateOwnProfile: (payload: ProfileUpdateInput) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
   updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
@@ -347,18 +354,39 @@ export const useAppStore = create<AppState>()(
       },
 
       ensureActiveSession: async () => {
-        const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
-        if (checkError) {
-          if (isMissingRpcFunction(checkError)) return null;
-          return checkError as Error;
+        if (Date.now() < sessionGraceUntil) {
+          return null;
         }
 
-        if (!checkResult) {
-          await get().signOut();
-          return new Error('账号已在其他设备登录，请重新登录');
+        const checkOnce = async (): Promise<{ ok: boolean; error: Error | null }> => {
+          const { data: checkResult, error: checkError } = await supabase.rpc('is_current_session_active');
+          if (checkError) {
+            if (isMissingRpcFunction(checkError)) {
+              return { ok: true, error: null };
+            }
+            return { ok: false, error: checkError as Error };
+          }
+          return { ok: Boolean(checkResult), error: null };
+        };
+
+        const firstCheck = await checkOnce();
+        if (firstCheck.error) return firstCheck.error;
+        if (firstCheck.ok) return null;
+
+        for (let attempt = 0; attempt < sessionRetryTimes; attempt += 1) {
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, sessionRetryDelayMs);
+          });
+          const retryCheck = await checkOnce();
+          if (retryCheck.error) return retryCheck.error;
+          if (retryCheck.ok) return null;
         }
 
-        return null;
+        if (Date.now() < sessionGraceUntil) {
+          return null;
+        }
+
+        return new Error('账号已在其他设备登录，请重新登录');
       },
 
       signIn: async (email, password) => {
@@ -372,6 +400,7 @@ export const useAppStore = create<AppState>()(
           if (error) throw error;
 
           if (data.user) {
+            sessionGraceUntil = Date.now() + sessionActivationGraceMs;
             const { data: profile, error: profileError } = await supabase
               .from('profiles')
               .select('*, cities(name)')
@@ -385,6 +414,8 @@ export const useAppStore = create<AppState>()(
               await get().signOut();
               throw activateError;
             }
+
+            sessionGraceUntil = Date.now() + sessionActivationGraceMs;
           }
 
           return { error: null };
@@ -399,6 +430,7 @@ export const useAppStore = create<AppState>()(
         try {
           await supabase.auth.signOut();
         } finally {
+          sessionGraceUntil = 0;
           set({
             user: null,
             cities: [],
@@ -413,8 +445,38 @@ export const useAppStore = create<AppState>()(
       },
 
       fetchCities: async () => {
-        const { data, error } = await supabase.from('cities').select('*').order('name');
+        const { data, error } = await supabase
+          .from('cities')
+          .select('*')
+          .order('sort_index', { ascending: true })
+          .order('name', { ascending: true });
         if (!error && data) set({ cities: data as City[] });
+      },
+
+      moveCityOrder: async (cityId, direction) => {
+        try {
+          const { user, cities } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可调整城市排序');
+
+          const currentIndex = cities.findIndex((city) => city.id === cityId);
+          if (currentIndex < 0) throw new Error('城市不存在');
+          const atBoundary = direction === 'up' ? currentIndex === 0 : currentIndex === cities.length - 1;
+          if (atBoundary) {
+            return { error: null };
+          }
+
+          const { error } = await supabase.rpc('swap_city_sort_order', {
+            p_city_id: cityId,
+            p_direction: direction,
+          });
+          if (error) throw error;
+
+          await get().fetchCities();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
       },
 
       fetchProducts: async () => {
@@ -1140,6 +1202,20 @@ export const useAppStore = create<AppState>()(
           const { error } = await supabase.from('orders').update({ status: 'accepted' }).eq('id', orderId);
           if (error) throw error;
           await Promise.all([get().fetchOrders(), get().fetchNotifications()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      deleteOrder: async (orderId) => {
+        try {
+          const { error } = await supabase.rpc('delete_order_with_inventory_restore_atomic', {
+            p_order_id: orderId,
+          });
+          if (error) throw error;
+
+          await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };

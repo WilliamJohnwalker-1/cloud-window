@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, ChevronRight, LogOut, Mail, MapPin, Palette, Settings, Shield, Store, User } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bell, ChevronRight, LogOut, Mail, MapPin, Palette, Settings, Shield, Store, User } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
@@ -16,11 +16,12 @@ interface SectionItem {
 }
 
 export const ProfileScreen: React.FC = () => {
-  const { user, signOut, updateOwnProfile, updateOwnAvatar } = useAppStore();
+  const { user, cities, signOut, updateOwnProfile, updateOwnAvatar, moveCityOrder } = useAppStore();
   const [showEditModal, setShowEditModal] = React.useState(false);
   const [showAvatarModal, setShowAvatarModal] = React.useState(false);
   const [fullName, setFullName] = React.useState(user?.full_name || '');
   const [storeName, setStoreName] = React.useState(user?.store_name || '');
+  const [sortingCityId, setSortingCityId] = React.useState<string | null>(null);
 
   if (!user) return null;
 
@@ -139,6 +140,61 @@ export const ProfileScreen: React.FC = () => {
           </motion.div>
         ))}
       </div>
+
+      {user.role === 'admin' && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4"
+        >
+          <h3 className="text-xs font-bold text-white/20 uppercase tracking-[0.2em] ml-4">城市排序管理</h3>
+          <div className="bg-white/5 border border-white/10 rounded-[32px] p-5 space-y-3">
+            {cities.map((city, index) => {
+              const isBusy = sortingCityId === city.id;
+              const canMoveUp = index > 0;
+              const canMoveDown = index < cities.length - 1;
+              return (
+                <div key={city.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
+                  <div>
+                    <p className="font-semibold">{city.name}</p>
+                    <p className="text-xs text-white/40">排序位置：{index + 1}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!canMoveUp || isBusy}
+                      onClick={async () => {
+                        setSortingCityId(city.id);
+                        const { error } = await moveCityOrder(city.id, 'up');
+                        setSortingCityId(null);
+                        if (error) window.alert(`上移失败：${error.message}`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                    >
+                      <ArrowUp size={14} />
+                      <span>上移</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canMoveDown || isBusy}
+                      onClick={async () => {
+                        setSortingCityId(city.id);
+                        const { error } = await moveCityOrder(city.id, 'down');
+                        setSortingCityId(null);
+                        if (error) window.alert(`下移失败：${error.message}`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                    >
+                      <ArrowDown size={14} />
+                      <span>下移</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
 
       <div className="pt-8 flex justify-center">
         <button

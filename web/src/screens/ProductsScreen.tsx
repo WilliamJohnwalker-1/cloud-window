@@ -244,12 +244,21 @@ export const ProductsScreen: React.FC = () => {
               <input value={form.cost} onChange={(event) => setForm((prev) => ({ ...prev, cost: event.target.value }))} placeholder="成本价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.discount_price} onChange={(event) => setForm((prev) => ({ ...prev, discount_price: event.target.value }))} placeholder="折扣价(可选)" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <select value={form.city_id} onChange={(event) => setForm((prev) => ({ ...prev, city_id: event.target.value }))} className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
-                <option value="" className="bg-black">请选择城市</option>
-                {cities.map((city) => (
-                  <option key={city.id} value={city.id} className="bg-black">{city.name}</option>
-                ))}
-              </select>
+              <div className="col-span-2 space-y-2">
+                <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择城市</p>
+                <div className="flex flex-wrap gap-2">
+                  {cities.map((city) => (
+                    <button
+                      type="button"
+                      key={city.id}
+                      onClick={() => setForm((prev) => ({ ...prev, city_id: city.id }))}
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${form.city_id === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+                    >
+                      {city.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
