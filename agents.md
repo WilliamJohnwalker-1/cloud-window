@@ -206,10 +206,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-14 same as above
+1. migrate-v2.sql -> 2-15 same as above
 
 ## GOTCHAS
 
@@ -229,12 +229,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.8`
-- Current web baseline: `v1.2.8`
+- Current mobile baseline: `v2.1.9`
+- Current web baseline: `v1.2.9`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 单会话登录保护稳定性增强（宽限+节流+重试） + 城市排序与库存按城市筛选 + 报表销量/销售额排行图表升级
-- Latest mobile stabilization: 非我的页面深色模式适配 + 订单指定日期输入框 placeholder 稳定 + 单会话登录保护竞态修复（登录后宽限 + 重试）
+- Latest web stabilization: 商品动销率排行 + 利润报表导出与移动端口径对齐 + 订单自定义时间段筛选 + 单笔删除权限链路补齐
+- Latest mobile stabilization: 城市管理支持排序（上移/下移） + 分销商所属城市置顶并可浏览其他城市商品（只读） + 订单改为自定义时间段筛选
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

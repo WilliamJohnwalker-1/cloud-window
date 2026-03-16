@@ -20,6 +20,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v3.2-orders-quantity-compat.sql`: orders.quantity compatibility and order_items sync trigger.
 - `migrate-v3.3-city-sort-order.sql`: admin city sort index support.
 - `migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`: atomic city reorder and safe order delete RPC.
+- `migrate-v3.5-order-delete-permissions.sql`: align delete permissions with web/mobile single-order delete flow.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -38,7 +39,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 11. `migrate-v3.2-orders-quantity-compat.sql`
 12. `migrate-v3.3-city-sort-order.sql`
 13. `migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
-14. `storage-policies.sql`
+14. `migrate-v3.5-order-delete-permissions.sql`
+15. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -54,7 +56,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 11. `migrate-v3.2-orders-quantity-compat.sql`
 12. `migrate-v3.3-city-sort-order.sql`
 13. `migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
-14. `storage-policies.sql`
+14. `migrate-v3.5-order-delete-permissions.sql`
+15. `storage-policies.sql`
 
 ## TABLES
 
