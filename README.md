@@ -111,7 +111,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
 12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
 13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
-14. 执行 `supabase/storage-policies.sql`
+14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
+15. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -128,7 +129,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 11. 执行 `supabase/migrate-v3.2-orders-quantity-compat.sql`
 12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
 13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
-14. 执行 `supabase/storage-policies.sql`
+14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
+15. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -136,7 +138,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.8）
+### 5. 启动 Web 端（v1.2.9）
 
 ```bash
 npm run web:v2
@@ -306,6 +308,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
+### Mobile v2.1.9 (2026-03-16) - 城市排序管理与分销商跨城市浏览优化
+
+- 移动端城市管理新增排序能力：管理员可在城市管理中执行上移/下移，排序会同步影响商品与库存城市展示顺序
+- 分销商商品页默认优先置顶所属城市（首次进入自动定位），并允许切换浏览其他城市商品
+- 分销商权限继续收敛：仅允许浏览商品，不开放商品编辑；库存页仍保持不可查看
+- 订单日期筛选由“指定日期”升级为“自定义时间段”，与 Web 口径一致
+
 ### Mobile v2.1.8 (2026-03-13) - 深色模式补齐与单会话稳定性修复
 
 - 移动端非“我的”页面补齐深色模式适配：商品/库存/订单/报表/登录页面统一跟随主题色板
@@ -344,6 +353,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 接入 `expo-updates`，支持应用启动自动检查更新
 - 我的页面新增“检查更新”入口，可手动拉取并重启应用更新
 - 新增文档 `docs/ota-update-checklist.md`，明确可 OTA / 不可 OTA 变更边界
+
+### Web v1.2.9 (2026-03-16) - 报表增强与订单筛选能力补齐
+
+- 报表新增商品动销率排行（销量/库存）并对低动销商品进行风险提示
+- 商品利润报表导出与移动端格式对齐（商品名称、销量、零售价、零售总价、折扣价、折扣总收入、总成本、总利润）
+- 订单筛选由“指定日期”升级为“自定义时间段”（起止日期）
+- 单笔订单删除链路补齐并对齐权限模型，删除时仍保持原子库存恢复
 
 ### Web v1.2.8 (2026-03-15) - 会话稳定性 + 城市管理 + 报表可视化升级
 

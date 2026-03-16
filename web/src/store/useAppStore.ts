@@ -103,7 +103,7 @@ interface RpcErrorLike {
   message?: string;
 }
 
-const requiredSchemaVersion = '3.4.0';
+const requiredSchemaVersion = '3.5.0';
 const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;

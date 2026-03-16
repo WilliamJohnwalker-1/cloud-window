@@ -16,7 +16,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun } from 'lucide-react-native';
+import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -44,6 +44,7 @@ export default function ProfileScreen() {
     fetchNotifications,
     addCity,
     deleteCity,
+    moveCityOrder,
     updateDistributorProfile,
     updateOwnStoreName,
     updateOwnAvatar,
@@ -68,6 +69,7 @@ export default function ProfileScreen() {
       fetchNotifications: state.fetchNotifications,
       addCity: state.addCity,
       deleteCity: state.deleteCity,
+      moveCityOrder: state.moveCityOrder,
       updateDistributorProfile: state.updateDistributorProfile,
       updateOwnStoreName: state.updateOwnStoreName,
       updateOwnAvatar: state.updateOwnAvatar,
@@ -95,6 +97,7 @@ export default function ProfileScreen() {
   const [binaryUpdateUrl, setBinaryUpdateUrl] = useState('');
   const [binaryUpdateVersion, setBinaryUpdateVersion] = useState('');
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
+  const [sortingCityId, setSortingCityId] = useState<string | null>(null);
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
@@ -714,11 +717,37 @@ export default function ProfileScreen() {
               data={cities}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
-                <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}>
+                <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}> 
                   <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.name}</Text>
-                  <TouchableOpacity onPress={() => handleDeleteCity(item.id, item.name)}>
-                    <Text style={styles.deleteCityText}>删除</Text>
-                  </TouchableOpacity>
+                  <View style={styles.cityActionsRow}>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        setSortingCityId(item.id);
+                        const { error } = await moveCityOrder(item.id, 'up');
+                        setSortingCityId(null);
+                        if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+                      }}
+                      disabled={sortingCityId === item.id}
+                      style={[styles.citySortBtn, sortingCityId === item.id && styles.citySortBtnDisabled]}
+                    >
+                      <ArrowUp size={14} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        setSortingCityId(item.id);
+                        const { error } = await moveCityOrder(item.id, 'down');
+                        setSortingCityId(null);
+                        if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+                      }}
+                      disabled={sortingCityId === item.id}
+                      style={[styles.citySortBtn, sortingCityId === item.id && styles.citySortBtnDisabled]}
+                    >
+                      <ArrowDown size={14} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteCity(item.id, item.name)}>
+                      <Text style={styles.deleteCityText}>删除</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无城市</Text>}
@@ -1036,6 +1065,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+  },
+  cityActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  citySortBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceSecondary,
+    marginRight: 6,
+  },
+  citySortBtnDisabled: {
+    opacity: 0.5,
   },
   cityName: { fontSize: 16, color: Colors.textPrimary },
   deleteCityText: { fontSize: 14, color: Colors.danger, fontWeight: '500' },

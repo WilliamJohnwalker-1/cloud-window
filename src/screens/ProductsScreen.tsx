@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -89,11 +89,19 @@ export default function ProductsScreen() {
   const [selectedDistributorId, setSelectedDistributorId] = useState('');
   const [customDistributorDiscount, setCustomDistributorDiscount] = useState('');
   const [searchText, setSearchText] = useState('');
+  const [hasPinnedOwnCity, setHasPinnedOwnCity] = useState(false);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
   const isDistributor = user?.role === 'distributor';
+
+  const orderedCities = useMemo(() => {
+    if (!isDistributor || !user?.city_id) return cities;
+    const ownCity = cities.find((city) => city.id === user.city_id);
+    if (!ownCity) return cities;
+    return [ownCity, ...cities.filter((city) => city.id !== ownCity.id)];
+  }, [cities, isDistributor, user?.city_id]);
 
   const filteredProducts = products.filter((p) => {
     const matchesCity = filterCityId ? p.city_id === filterCityId : true;
@@ -107,6 +115,13 @@ export default function ProductsScreen() {
       fetchDistributors();
     }
   }, [fetchCities, fetchDistributors, user?.role]);
+
+  useEffect(() => {
+    if (isDistributor && user?.city_id && !hasPinnedOwnCity) {
+      setFilterCityId(user.city_id);
+      setHasPinnedOwnCity(true);
+    }
+  }, [hasPinnedOwnCity, isDistributor, user?.city_id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -300,7 +315,14 @@ export default function ProductsScreen() {
   };
 
   const renderProduct = ({ item }: { item: ProductWithDetails }) => (
-    <TouchableOpacity style={[styles.productCard, { backgroundColor: theme.surface }]} onPress={() => openEditModal(item)} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={[styles.productCard, { backgroundColor: theme.surface }]}
+      onPress={() => {
+        if (isAdminOrManager) openEditModal(item);
+      }}
+      activeOpacity={isAdminOrManager ? 0.85 : 1}
+      disabled={!isAdminOrManager}
+    >
       <View style={[styles.productImage, { backgroundColor: theme.surfaceSecondary }]}>
         {item.image_url ? (
           <Image source={{ uri: item.image_url }} style={styles.image} />
@@ -401,7 +423,7 @@ export default function ProductsScreen() {
               </Text>
             </LinearGradient>
           </TouchableOpacity>
-          {cities.map((city) => (
+          {orderedCities.map((city) => (
             <TouchableOpacity
               key={city.id}
               style={[styles.cityFilterItem, filterCityId === city.id && styles.cityFilterItemActive]}
@@ -523,7 +545,7 @@ export default function ProductsScreen() {
 
               <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>选择城市 *</Text>
               <View style={styles.cityList}>
-                {cities.map((city) => (
+                {orderedCities.map((city) => (
                   <TouchableOpacity
                     key={city.id}
                     style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedCity === city.id && styles.cityItemSelected]}

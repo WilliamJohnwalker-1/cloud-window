@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 type OrderFilter = 'all' | 'pending' | 'accepted';
-type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'date';
+type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
 
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, deleteOrder } = useAppStore();
@@ -18,7 +18,8 @@ export const OrdersScreen: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
-  const [selectedDate, setSelectedDate] = useState('');
+  const [rangeStartDate, setRangeStartDate] = useState('');
+  const [rangeEndDate, setRangeEndDate] = useState('');
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
@@ -35,11 +36,19 @@ export const OrdersScreen: React.FC = () => {
     const now = new Date();
 
     if (statsRange === 'all') return true;
-    if (statsRange === 'date') {
-      if (!selectedDate) return true;
-      const [year, month, day] = selectedDate.split('-').map((value) => Number.parseInt(value, 10));
-      if (!year || !month || !day) return true;
-      return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+    if (statsRange === 'range') {
+      if (!rangeStartDate && !rangeEndDate) return true;
+
+      const start = rangeStartDate ? new Date(`${rangeStartDate}T00:00:00`) : null;
+      const end = rangeEndDate ? new Date(`${rangeEndDate}T23:59:59.999`) : null;
+
+      if (start && Number.isNaN(start.getTime())) return true;
+      if (end && Number.isNaN(end.getTime())) return true;
+      if (start && end && start > end) return false;
+
+      if (start && date < start) return false;
+      if (end && date > end) return false;
+      return true;
     }
     if (statsRange === 'day') {
       return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
@@ -58,7 +67,7 @@ export const OrdersScreen: React.FC = () => {
       return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
     }
     return date.getFullYear() === now.getFullYear();
-  }, [statsRange, selectedDate]);
+  }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const filteredOrders = useMemo(() => {
     return baseOrders.filter((order) => matchesStatsRange(order.created_at));
@@ -82,12 +91,16 @@ export const OrdersScreen: React.FC = () => {
         return '本月';
       case 'year':
         return '年度';
-      case 'date':
-        return selectedDate || '指定日期';
+      case 'range': {
+        if (rangeStartDate && rangeEndDate) return `${rangeStartDate}~${rangeEndDate}`;
+        if (rangeStartDate) return `${rangeStartDate}~今`;
+        if (rangeEndDate) return `~${rangeEndDate}`;
+        return '自定义时间段';
+      }
       default:
         return '累计';
     }
-  }, [statsRange, selectedDate]);
+  }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const filteredProducts = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
@@ -339,7 +352,7 @@ export const OrdersScreen: React.FC = () => {
             { key: 'month', label: '本月' },
             { key: 'year', label: '年度' },
             { key: 'all', label: '累计' },
-            { key: 'date', label: '指定日期' },
+            { key: 'range', label: '自定义时间段' },
           ].map((item) => (
             <button
               key={item.key}
@@ -352,13 +365,20 @@ export const OrdersScreen: React.FC = () => {
           ))}
         </div>
 
-        {statsRange === 'date' && (
+        {statsRange === 'range' && (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-white/60">日期</span>
+            <span className="text-white/60">起止</span>
             <input
               type="date"
-              value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
+              value={rangeStartDate}
+              onChange={(event) => setRangeStartDate(event.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+            />
+            <span className="text-white/50">至</span>
+            <input
+              type="date"
+              value={rangeEndDate}
+              onChange={(event) => setRangeEndDate(event.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
             />
           </div>
@@ -466,7 +486,7 @@ export const OrdersScreen: React.FC = () => {
                   <Download size={14} />
                   <span>导出</span>
                 </button>
-                {(user?.role === 'admin' || user?.role === 'inventory_manager') && order.status === 'pending' && order.order_kind === 'distribution' && (
+                {(user?.role === 'admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
                   <button
                     type="button"
                     onClick={() => {

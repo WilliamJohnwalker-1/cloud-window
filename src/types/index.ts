@@ -16,6 +16,7 @@ export interface Profile {
 export interface City {
   id: string;
   name: string;
+  sort_index?: number;
   created_at: string;
 }
 
