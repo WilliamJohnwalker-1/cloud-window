@@ -27,7 +27,7 @@ interface CartItem {
   quantity: number;
 }
 
-type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'date';
+type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
 
 export default function OrdersScreen() {
   const {
@@ -53,7 +53,8 @@ export default function OrdersScreen() {
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [selectedDistributorId, setSelectedDistributorId] = useState<string | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
-  const [selectedDate, setSelectedDate] = useState('');
+  const [rangeStartDate, setRangeStartDate] = useState('');
+  const [rangeEndDate, setRangeEndDate] = useState('');
   const [outboundModalVisible, setOutboundModalVisible] = useState(false);
   const [outboundBarcode, setOutboundBarcode] = useState('');
   const [outboundQuantity, setOutboundQuantity] = useState('');
@@ -138,11 +139,18 @@ export default function OrdersScreen() {
     const now = new Date();
 
     if (statsRange === 'all') return true;
-    if (statsRange === 'date') {
-      if (!selectedDate) return true;
-      const [year, month, day] = selectedDate.split('-').map((value) => Number.parseInt(value, 10));
-      if (!year || !month || !day) return true;
-      return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+    if (statsRange === 'range') {
+      if (!rangeStartDate && !rangeEndDate) return true;
+
+      const start = rangeStartDate ? new Date(`${rangeStartDate}T00:00:00`) : null;
+      const end = rangeEndDate ? new Date(`${rangeEndDate}T23:59:59.999`) : null;
+      if (start && Number.isNaN(start.getTime())) return true;
+      if (end && Number.isNaN(end.getTime())) return true;
+      if (start && end && start > end) return false;
+
+      if (start && date < start) return false;
+      if (end && date > end) return false;
+      return true;
     }
 
     if (statsRange === 'day') {
@@ -166,7 +174,7 @@ export default function OrdersScreen() {
     }
 
     return date.getFullYear() === now.getFullYear();
-  }, [statsRange, selectedDate]);
+  }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const rangedOrders = useMemo(() => {
     return baseOrders.filter(matchesStatsRange);
@@ -225,12 +233,16 @@ export default function OrdersScreen() {
         return '本月';
       case 'year':
         return '年度';
-      case 'date':
-        return selectedDate || '指定日期';
+      case 'range': {
+        if (rangeStartDate && rangeEndDate) return `${rangeStartDate}~${rangeEndDate}`;
+        if (rangeStartDate) return `${rangeStartDate}~今`;
+        if (rangeEndDate) return `~${rangeEndDate}`;
+        return '自定义时间段';
+      }
       default:
         return '累计';
     }
-  }, [statsRange, selectedDate]);
+  }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const rangedTopRows = useMemo(
     () => Array.from({ length: 5 }, (_, idx) => ({ key: `r-${idx + 1}`, row: rangedProductStats[idx] ?? null })),
@@ -719,7 +731,7 @@ export default function OrdersScreen() {
           { key: 'month', label: '本月' },
           { key: 'year', label: '年度' },
           { key: 'all', label: '累计' },
-          { key: 'date', label: '指定日期' },
+          { key: 'range', label: '自定义时间段' },
         ].map((item) => (
           <TouchableOpacity
             key={item.key}
@@ -731,13 +743,31 @@ export default function OrdersScreen() {
         ))}
       </View>
 
-      {statsRange === 'date' && (
+      {statsRange === 'range' && (
         <View style={[styles.customDateRow, { backgroundColor: theme.surface }] }>
-          <Text style={[styles.customDateLabel, { color: theme.textSecondary }]}>日期</Text>
+          <Text style={[styles.customDateLabel, { color: theme.textSecondary }]}>起止</Text>
           <TextInput
-            value={selectedDate}
-            onChangeText={setSelectedDate}
-            placeholder="YYYY-MM-DD"
+            value={rangeStartDate}
+            onChangeText={setRangeStartDate}
+            placeholder="开始 YYYY-MM-DD"
+            placeholderTextColor={theme.textTertiary}
+            style={[
+              styles.customDateInput,
+              {
+                backgroundColor: theme.surfaceSecondary,
+                color: theme.textPrimary,
+                lineHeight: 18,
+                paddingVertical: 0,
+                includeFontPadding: false,
+              },
+            ]}
+            textAlignVertical="center"
+          />
+          <Text style={[styles.customDateSeparator, { color: theme.textSecondary }]}>至</Text>
+          <TextInput
+            value={rangeEndDate}
+            onChangeText={setRangeEndDate}
+            placeholder="结束 YYYY-MM-DD"
             placeholderTextColor={theme.textTertiary}
             style={[
               styles.customDateInput,
@@ -1070,6 +1100,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     marginRight: 8,
+  },
+  customDateSeparator: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginHorizontal: 8,
   },
   customDateInput: {
     flex: 1,

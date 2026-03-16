@@ -166,6 +166,7 @@ interface AppState {
   signOut: () => Promise<void>;
 
   fetchCities: () => Promise<void>;
+  moveCityOrder: (cityId: string, direction: 'up' | 'down') => Promise<{ error: Error | null }>;
   fetchProducts: () => Promise<void>;
   fetchInventory: () => Promise<void>;
   fetchOrders: () => Promise<void>;
@@ -408,8 +409,31 @@ export const useAppStore = create<AppState>()(
       },
 
       fetchCities: async () => {
-        const { data, error } = await supabase.from('cities').select('*').order('name');
+        const { data, error } = await supabase
+          .from('cities')
+          .select('*')
+          .order('sort_index', { ascending: true })
+          .order('name', { ascending: true });
         if (!error && data) set({ cities: data });
+      },
+
+      moveCityOrder: async (cityId, direction) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可调整城市排序');
+
+          const { error } = await supabase.rpc('swap_city_sort_order', {
+            p_city_id: cityId,
+            p_direction: direction,
+          });
+          if (error) throw error;
+
+          await get().fetchCities();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
       },
 
       fetchProducts: async () => {
@@ -454,8 +478,7 @@ export const useAppStore = create<AppState>()(
                 ? Number(p.inventory[0].min_quantity)
                 : undefined,
             };
-          })
-          .filter((p) => (user.role === 'distributor' ? p.city_id === user.city_id : true));
+          });
 
         set({ products: productsWithDetails });
       },
