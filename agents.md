@@ -183,11 +183,12 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
   - 旧商品可通过 `backfillBarcodes()` 批量补齐
   - 商品页管理员可查看条码（卡片 + 编辑弹窗）
 - **订单数量规则（重要）：**
-  - 所有订单商品数量必须是 **5 的倍数**
-  - 新建订单：+/- 按钮一次增减5件
-  - 支持直接输入数量，输入时自动清空输入框
-  - 确认下单时会验证，不满足5的倍数则提示具体商品
-  - 例外：Web 收款台扫码建单为线下收银场景，扫码每次加购 1 件，使用独立建单逻辑
+- 所有订单商品数量必须是 **5 的倍数**
+- 新建订单：+/- 按钮一次增减5件
+- 支持直接输入数量，输入时自动清空输入框
+- 确认下单时会验证，不满足5的倍数则提示具体商品
+- 样品行例外：分销订单中标记为样品的商品不受5倍数限制（通常按1件样品下单）
+- 例外：Web 收款台扫码建单为线下收银场景，扫码每次加购 1 件，使用独立建单逻辑
 
 ## WEB PAYMENT STATUS (TODO)
 
@@ -206,7 +207,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. storage-policies.sql
 
 **Upgrade v1->v2:**
 1. migrate-v2.sql -> 2-15 same as above
@@ -229,12 +230,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.9`
-- Current web baseline: `v1.2.9`
+- Current mobile baseline: `v2.1.10`
+- Current web baseline: `v1.2.10`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 商品动销率排行 + 利润报表导出与移动端口径对齐 + 订单自定义时间段筛选 + 单笔删除权限链路补齐
-- Latest mobile stabilization: 城市管理支持排序（上移/下移） + 分销商所属城市置顶并可浏览其他城市商品（只读） + 订单改为自定义时间段筛选
+- Latest web stabilization: 收款台支持管理员抹零 + 抹零备注落订单(payment_note) + 订单删除弹窗改为站内UI
+- Latest mobile stabilization: 分销下单支持同商品“商品行+样品行”并存 + 分销商视图折扣价优先展示
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:
