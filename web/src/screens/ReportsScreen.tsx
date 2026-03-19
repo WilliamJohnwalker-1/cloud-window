@@ -30,6 +30,7 @@ export const ReportsScreen: React.FC = () => {
       cityMap.set(cityName, (cityMap.get(cityName) || 0) + Number(order.total_discount_amount || 0));
 
       order.items.forEach((item) => {
+        if (item.is_sample) return;
         const key = item.product_name || item.product_id;
         const productIdKey = item.product_id;
         const itemQty = Number(item.quantity || 0);
@@ -80,6 +81,7 @@ export const ReportsScreen: React.FC = () => {
       discountPrice: number;
       discountRevenue: number;
       unitCostTotal: number;
+      sampleCostTotal: number;
       oneTimeCost: number;
     }> = {};
 
@@ -95,14 +97,19 @@ export const ReportsScreen: React.FC = () => {
             discountPrice: Number(item.discount_price || 0),
             discountRevenue: 0,
             unitCostTotal: 0,
+            sampleCostTotal: 0,
             oneTimeCost: Number(item.one_time_cost || 0),
           };
         }
 
         productProfit[key].quantity += Number(item.quantity || 0);
-        productProfit[key].retailRevenue += Number(item.quantity || 0) * Number(item.retail_price || 0);
-        productProfit[key].discountRevenue += Number(item.quantity || 0) * Number(item.discount_price || 0);
-        productProfit[key].unitCostTotal += Number(item.quantity || 0) * Number(item.unit_cost || 0);
+        if (item.is_sample) {
+          productProfit[key].sampleCostTotal += Number(item.quantity || 0) * Number(item.unit_cost || 0);
+        } else {
+          productProfit[key].retailRevenue += Number(item.quantity || 0) * Number(item.retail_price || 0);
+          productProfit[key].discountRevenue += Number(item.quantity || 0) * Number(item.discount_price || 0);
+          productProfit[key].unitCostTotal += Number(item.quantity || 0) * Number(item.unit_cost || 0);
+        }
         if (productProfit[key].oneTimeCost === 0) {
           productProfit[key].oneTimeCost = Number(item.one_time_cost || 0);
         }
@@ -111,7 +118,7 @@ export const ReportsScreen: React.FC = () => {
 
     const profitByProduct = Object.values(productProfit)
       .map((entry) => {
-        const cost = entry.unitCostTotal + entry.oneTimeCost;
+        const cost = entry.unitCostTotal + entry.sampleCostTotal + entry.oneTimeCost;
         return {
           name: entry.name,
           quantity: entry.quantity,

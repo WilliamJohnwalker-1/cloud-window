@@ -17,6 +17,7 @@ import type {
 interface CartCreateItem {
   productId: string;
   quantity: number;
+  isSample?: boolean;
 }
 
 interface ProfileRow {
@@ -42,6 +43,7 @@ interface OrderItemRow {
   discount_price?: number | string | null;
   unit_cost?: number | string | null;
   one_time_cost?: number | string | null;
+  is_sample?: boolean | null;
   products?: {
     name?: string;
     city_id?: string;
@@ -233,6 +235,7 @@ const mapOrder = (raw: OrderRow): Order => {
     product_id: it.product_id,
     product_name: it.products?.name,
     city_name: it.products?.cities?.name,
+    is_sample: Boolean(it.is_sample),
     quantity: it.quantity,
     retail_price: Number(it.retail_price || 0),
     discount_price: Number(it.discount_price || 0),
@@ -982,7 +985,11 @@ export const useAppStore = create<AppState>()(
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
             if (!product) throw new Error('商品不存在');
-            if (item.quantity <= 0 || item.quantity % 5 !== 0) {
+            const isSample = Boolean(item.isSample);
+            if (item.quantity <= 0) {
+              throw new Error(`${product.name} 数量必须大于0`);
+            }
+            if (!isSample && item.quantity % 5 !== 0) {
               throw new Error(`${product.name} 数量必须是5的倍数`);
             }
 
@@ -994,17 +1001,20 @@ export const useAppStore = create<AppState>()(
             const unitCost = Number(product.cost || 0);
             const oneTimeCost = Number(product.one_time_cost || 0);
 
-            totalRetail += retailPrice * item.quantity;
-            totalDiscount += discountPrice * item.quantity;
+            if (!isSample) {
+              totalRetail += retailPrice * item.quantity;
+              totalDiscount += discountPrice * item.quantity;
+            }
             orderCityId = product.city_id;
 
             return {
               product_id: product.id,
               quantity: item.quantity,
-              retail_price: retailPrice,
-              discount_price: discountPrice,
+              retail_price: isSample ? 0 : retailPrice,
+              discount_price: isSample ? 0 : discountPrice,
               unit_cost: unitCost,
               one_time_cost: oneTimeCost,
+              is_sample: isSample,
             };
           });
 

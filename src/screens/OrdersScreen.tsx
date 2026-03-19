@@ -23,8 +23,11 @@ import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import type { Order, ProductWithDetails } from '../types';
 
 interface CartItem {
+  cartKey: string;
+  lineType: 'sale' | 'sample';
   product: ProductWithDetails;
   quantity: number;
+  isSample: boolean;
 }
 
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
@@ -254,42 +257,59 @@ export default function OrdersScreen() {
     [cumulativeProductStats],
   );
 
-  const addToCart = (product: ProductWithDetails, addQty: number = 1) => {
+  const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
+  const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
+  const getCombinedQtyByProduct = (entries: Map<string, CartItem>, productId: string): number => {
+    let total = 0;
+    entries.forEach((item) => {
+      if (item.product.id === productId) total += item.quantity;
+    });
+    return total;
+  };
+
+  const addToCart = (product: ProductWithDetails, lineType: 'sale' | 'sample', addQty: number = getLineStep(lineType)) => {
     setCart((prev) => {
       const next = new Map(prev);
-      const existing = next.get(product.id);
+      const cartKey = getCartKey(product.id, lineType);
+      const existing = next.get(cartKey);
       const currentQty = existing?.quantity || 0;
       const newQty = currentQty + addQty;
-      if (newQty > (product.quantity || 0)) {
+      const combinedWithoutCurrent = getCombinedQtyByProduct(next, product.id) - currentQty;
+      const nextCombined = combinedWithoutCurrent + newQty;
+      if (nextCombined > (product.quantity || 0)) {
         Toast.show({ type: 'error', text1: '库存不足', text2: `${product.name} 当前库存仅 ${product.quantity || 0}` });
         return prev;
       }
-      next.set(product.id, { product, quantity: newQty });
+      next.set(cartKey, {
+        cartKey,
+        lineType,
+        product,
+        quantity: newQty,
+        isSample: lineType === 'sample',
+      });
       return next;
     });
   };
 
-  const addFiveToCart = (product: ProductWithDetails) => {
-    addToCart(product, 5);
-  };
-
-  const updateCartQuantity = (product: ProductWithDetails, qtyStr: string) => {
+  const updateCartQuantity = (cartKey: string, qtyStr: string) => {
     setQuantityInputMode((prev) => {
       const next = new Map(prev);
-      next.set(product.id, qtyStr);
+      next.set(cartKey, qtyStr);
       return next;
     });
   };
 
-  const confirmCartQuantity = (product: ProductWithDetails) => {
-    const qtyStr = quantityInputMode.get(product.id) || '';
-    const currentQty = cart.get(product.id)?.quantity || 0;
+  const confirmCartQuantity = (product: ProductWithDetails, lineType: 'sale' | 'sample') => {
+    const cartKey = getCartKey(product.id, lineType);
+    const qtyStr = quantityInputMode.get(cartKey) || '';
+    const currentItem = cart.get(cartKey);
+    const isSample = lineType === 'sample';
     
     // If empty, cancel edit mode
     if (!qtyStr.trim()) {
       setQuantityInputMode((prev) => {
         const next = new Map(prev);
-        next.delete(product.id);
+        next.delete(cartKey);
         return next;
       });
       setShowQuantityInput(null);
@@ -301,22 +321,30 @@ export default function OrdersScreen() {
       Toast.show({ type: 'error', text1: '错误', text2: '请输入有效数量' });
       return;
     }
-    if (qty % 5 !== 0) {
+    if (!isSample && qty % 5 !== 0) {
       Toast.show({ type: 'error', text1: '错误', text2: '数量必须是5的倍数' });
       return;
     }
-    if (qty > (product.quantity || 0)) {
+    const combinedWithoutCurrent = getCombinedQtyByProduct(cart, product.id) - (currentItem?.quantity || 0);
+    const nextCombined = combinedWithoutCurrent + qty;
+    if (nextCombined > (product.quantity || 0)) {
       Toast.show({ type: 'error', text1: '库存不足', text2: `${product.name} 当前库存仅 ${product.quantity || 0}` });
       return;
     }
     setCart((prev) => {
       const next = new Map(prev);
-      next.set(product.id, { product, quantity: qty });
+      next.set(cartKey, {
+        cartKey,
+        lineType,
+        product,
+        quantity: qty,
+        isSample,
+      });
       return next;
     });
     setQuantityInputMode((prev) => {
       const next = new Map(prev);
-      next.delete(product.id);
+      next.delete(cartKey);
       return next;
     });
     setShowQuantityInput(null);
@@ -327,7 +355,8 @@ export default function OrdersScreen() {
       const next = new Map(prev);
       const existing = next.get(productId);
       if (!existing) return prev;
-      const newQty = existing.quantity - 5;
+      const step = getLineStep(existing.lineType);
+      const newQty = existing.quantity - step;
       if (newQty <= 0) {
         next.delete(productId);
       } else {
@@ -339,16 +368,20 @@ export default function OrdersScreen() {
 
   const clearCart = () => setCart(new Map());
 
-  const cartItems = useMemo(() => Array.from(cart.values()), [cart]);
+  const cartItems = useMemo(
+    () => Array.from(cart.values()).sort((a, b) => a.product.name.localeCompare(b.product.name, 'zh-CN') || a.lineType.localeCompare(b.lineType)),
+    [cart],
+  );
   const cartRetailTotal = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.quantity * Number(item.product.price || 0), 0),
+    () => cartItems.reduce((sum, item) => (item.isSample ? sum : sum + item.quantity * Number(item.product.price || 0)), 0),
     [cartItems],
   );
   const cartDiscountTotal = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.quantity * Number(item.product.discount_price || item.product.price || 0), 0),
+    () => cartItems.reduce((sum, item) => (item.isSample ? sum : sum + item.quantity * Number(item.product.discount_price || item.product.price || 0)), 0),
     [cartItems],
   );
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
+  const sampleLineCount = useMemo(() => cartItems.filter((item) => item.isSample).length, [cartItems]);
 
   const handleSubmitOrder = async () => {
     if (cartItems.length === 0) {
@@ -357,7 +390,7 @@ export default function OrdersScreen() {
     }
 
     // Validate all items are multiples of 5
-    const invalidItems = cartItems.filter((item) => item.quantity % 5 !== 0);
+    const invalidItems = cartItems.filter((item) => !item.isSample && item.quantity % 5 !== 0);
     if (invalidItems.length > 0) {
       const invalidNames = invalidItems.map((item) => `${item.product.name}(${item.quantity})`).join(', ');
       Toast.show({ 
@@ -371,6 +404,7 @@ export default function OrdersScreen() {
     const items = cartItems.map((item) => ({
       productId: item.product.id,
       quantity: item.quantity,
+      isSample: item.isSample,
     }));
 
     const { error } = await createBatchOrders(items);
@@ -594,10 +628,14 @@ export default function OrdersScreen() {
   );
 
   const renderProductRow = ({ item }: { item: ProductWithDetails }) => {
-    const inCart = cart.get(item.id);
-    const qty = inCart?.quantity || 0;
-    const isEditingQty = showQuantityInput === item.id;
-    const inputValue = quantityInputMode.get(item.id) || '';
+    const saleKey = getCartKey(item.id, 'sale');
+    const sampleKey = getCartKey(item.id, 'sample');
+    const saleQty = cart.get(saleKey)?.quantity || 0;
+    const sampleQty = cart.get(sampleKey)?.quantity || 0;
+    const saleEditing = showQuantityInput === saleKey;
+    const sampleEditing = showQuantityInput === sampleKey;
+    const saleInputValue = quantityInputMode.get(saleKey) || '';
+    const sampleInputValue = quantityInputMode.get(sampleKey) || '';
 
     return (
       <View style={styles.productRow}>
@@ -612,47 +650,87 @@ export default function OrdersScreen() {
           <Text style={styles.productRowName} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.productRowMeta}>
             {item.city_name ? `${item.city_name} · ` : ''}
-            零售 {item.price}元 · 折 {item.discount_price}元
+            {user?.role === 'distributor'
+              ? `折 ${item.discount_price}元 · 零售 ${item.price}元`
+              : `零售 ${item.price}元 · 折 ${item.discount_price}元`}
           </Text>
         </View>
-        <View style={styles.productRowActions}>
-          {qty > 0 ? (
-            <>
-              <TouchableOpacity style={styles.qtyBtn} onPress={() => removeFromCart(item.id)}>
-                <Text style={styles.qtyBtnText}>-</Text>
-              </TouchableOpacity>
-              {isEditingQty ? (
-                <TextInput
-                  style={styles.qtyInput}
-                  value={inputValue}
-                  onChangeText={(text) => {
-                    // Auto-clear and only keep new input
-                    updateCartQuantity(item, text.replace(/[^0-9]/g, ''));
-                  }}
-                  onBlur={() => confirmCartQuantity(item)}
-                  onSubmitEditing={() => confirmCartQuantity(item)}
-                  keyboardType="number-pad"
-                  autoFocus
-                />
-              ) : (
-                <TouchableOpacity onPress={() => {
-                  setQuantityInputMode((prev) => {
-                    const next = new Map(prev);
-                    next.set(item.id, ''); // Start with empty for fresh input
-                    return next;
-                  });
-                  setShowQuantityInput(item.id);
-                }}>
-                  <Text style={styles.qtyValue}>{qty}</Text>
+        <View style={styles.productRowActionsMulti}>
+          <View style={styles.productLineRow}>
+            <Text style={styles.productLineLabel}>商品</Text>
+            {saleQty > 0 ? (
+              <>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => removeFromCart(saleKey)}>
+                  <Text style={styles.qtyBtnText}>-</Text>
                 </TouchableOpacity>
-              )}
-            </>
-          ) : null}
-          <TouchableOpacity onPress={() => addToCart(item, 5)} activeOpacity={0.85}>
-            <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qtyBtnAdd}>
-              <Text style={styles.qtyBtnAddText}>+</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+                {saleEditing ? (
+                  <TextInput
+                    style={styles.qtyInput}
+                    value={saleInputValue}
+                    onChangeText={(text) => updateCartQuantity(saleKey, text.replace(/[^0-9]/g, ''))}
+                    onBlur={() => confirmCartQuantity(item, 'sale')}
+                    onSubmitEditing={() => confirmCartQuantity(item, 'sale')}
+                    keyboardType="number-pad"
+                    autoFocus
+                  />
+                ) : (
+                  <TouchableOpacity onPress={() => {
+                    setQuantityInputMode((prev) => {
+                      const next = new Map(prev);
+                      next.set(saleKey, '');
+                      return next;
+                    });
+                    setShowQuantityInput(saleKey);
+                  }}>
+                    <Text style={styles.qtyValue}>{saleQty}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : <Text style={styles.qtyEmpty}>0</Text>}
+            <TouchableOpacity onPress={() => addToCart(item, 'sale')} activeOpacity={0.85}>
+              <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qtyBtnAdd}>
+                <Text style={styles.qtyBtnAddText}>+5</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.productLineRow}>
+            <Text style={styles.productLineLabelSample}>样品</Text>
+            {sampleQty > 0 ? (
+              <>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => removeFromCart(sampleKey)}>
+                  <Text style={styles.qtyBtnText}>-</Text>
+                </TouchableOpacity>
+                {sampleEditing ? (
+                  <TextInput
+                    style={styles.qtyInput}
+                    value={sampleInputValue}
+                    onChangeText={(text) => updateCartQuantity(sampleKey, text.replace(/[^0-9]/g, ''))}
+                    onBlur={() => confirmCartQuantity(item, 'sample')}
+                    onSubmitEditing={() => confirmCartQuantity(item, 'sample')}
+                    keyboardType="number-pad"
+                    autoFocus
+                  />
+                ) : (
+                  <TouchableOpacity onPress={() => {
+                    setQuantityInputMode((prev) => {
+                      const next = new Map(prev);
+                      next.set(sampleKey, '');
+                      return next;
+                    });
+                    setShowQuantityInput(sampleKey);
+                  }}>
+                    <Text style={styles.qtyValue}>{sampleQty}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : <Text style={styles.qtyEmpty}>0</Text>}
+            <TouchableOpacity onPress={() => addToCart(item, 'sample')} activeOpacity={0.85}>
+              <LinearGradient colors={['#22D3EE', '#3B82F6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qtyBtnAdd}>
+                <Text style={styles.qtyBtnAddText}>+1</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -884,6 +962,7 @@ export default function OrdersScreen() {
             {cartItems.length > 0 && (
               <View style={styles.cartSummary}>
                 <Text style={styles.cartLine}>件数：{cartCount}</Text>
+                <Text style={styles.cartLine}>样品行：{sampleLineCount}</Text>
                 <Text style={styles.cartLine}>零售总价：{cartRetailTotal.toFixed(2)}元</Text>
                 <Text style={styles.cartLine}>折扣总价：{cartDiscountTotal.toFixed(2)}元</Text>
               </View>
@@ -1015,10 +1094,13 @@ export default function OrdersScreen() {
                 <View style={styles.detailSection}>
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>商品明细</Text>
                   {detailOrder.items.map((orderItem) => (
-                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}>
-                      <Text style={[styles.detailItemName, { color: theme.textPrimary }]}>{orderItem.product_name || '未知商品'}</Text>
+                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}> 
+                      <Text style={[styles.detailItemName, { color: theme.textPrimary }]}>
+                        {orderItem.product_name || '未知商品'}
+                        {orderItem.is_sample ? '（样品）' : ''}
+                      </Text>
                       <Text style={[styles.detailItemQty, { color: theme.textSecondary }]}>x{orderItem.quantity}</Text>
-                      <Text style={styles.detailItemPrice}>{orderItem.discount_price}元</Text>
+                      <Text style={styles.detailItemPrice}>{orderItem.is_sample ? '样品' : `${orderItem.discount_price}元`}</Text>
                     </View>
                   ))}
                 </View>
@@ -1281,6 +1363,33 @@ const styles = StyleSheet.create({
   productRowName: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
   productRowMeta: { fontSize: 12, color: Colors.textTertiary, marginTop: 2 },
   productRowActions: { flexDirection: 'row', alignItems: 'center' },
+  productRowActionsMulti: { minWidth: 170 },
+  productLineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 4 },
+  productLineLabel: { width: 34, fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+  productLineLabelSample: { width: 34, fontSize: 11, color: Colors.blue, fontWeight: '700' },
+  qtyEmpty: { width: 32, textAlign: 'center', fontSize: 14, color: Colors.textTertiary },
+  sampleToggle: {
+    paddingHorizontal: 10,
+    height: 28,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surfaceSecondary,
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  sampleToggleActive: {
+    borderColor: Colors.blue,
+    backgroundColor: Colors.blueBg,
+  },
+  sampleToggleText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  sampleToggleTextActive: {
+    color: Colors.blue,
+  },
   qtyBtn: {
     width: 32,
     height: 32,

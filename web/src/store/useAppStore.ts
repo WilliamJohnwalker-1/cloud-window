@@ -53,6 +53,7 @@ interface OrderItemRow {
   discount_price?: number | string | null;
   unit_cost?: number | string | null;
   one_time_cost?: number | string | null;
+  is_sample?: boolean | null;
   product?: { name?: string; cities?: { name: string } | null } | null;
   products?: { name?: string; cities?: { name: string } | null } | null;
 }
@@ -67,6 +68,7 @@ interface OrderRow {
   order_kind?: Order['order_kind'] | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
+  payment_note?: string | null;
   product_id?: string | null;
   quantity?: number | string | null;
   unit_price?: number | string | null;
@@ -91,6 +93,7 @@ interface InventoryLogRow {
 interface CartCreateItem {
   productId: string;
   quantity: number;
+  isSample?: boolean;
 }
 
 interface CashierCreateItem {
@@ -103,7 +106,7 @@ interface RpcErrorLike {
   message?: string;
 }
 
-const requiredSchemaVersion = '3.5.0';
+const requiredSchemaVersion = '3.7.0';
 const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;
@@ -267,6 +270,7 @@ const mapOrder = (row: OrderRow): Order => {
     product_id: item.product_id,
     product_name: productInfo?.name,
     city_name: productInfo?.cities?.name,
+    is_sample: Boolean(item.is_sample),
     quantity: Number(item.quantity || 0),
     retail_price: Number(item.retail_price || 0),
     discount_price: Number(item.discount_price || 0),
@@ -289,6 +293,7 @@ const mapOrder = (row: OrderRow): Order => {
     order_kind: row.order_kind || 'distribution',
     total_retail_amount: Number(row.total_retail_amount || 0),
     total_discount_amount: Number(row.total_discount_amount || 0),
+    payment_note: row.payment_note ?? undefined,
     created_at: row.created_at,
     items: itemsFromRelation,
   };
@@ -546,7 +551,7 @@ export const useAppStore = create<AppState>()(
       fetchOrderDetail: async (orderId) => {
         const { data: orderRow, error: orderError } = await supabase
           .from('orders')
-          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
+          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_note, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
           .eq('id', orderId)
           .maybeSingle();
         if (orderError || !orderRow) return null;
@@ -556,7 +561,7 @@ export const useAppStore = create<AppState>()(
 
         const { data: itemRows, error: itemError } = await supabase
           .from('order_items')
-          .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost')
+          .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost, is_sample')
           .eq('order_id', orderId)
           .order('id', { ascending: true });
 
@@ -582,6 +587,7 @@ export const useAppStore = create<AppState>()(
               product_name: product?.name,
               city_name: product?.city || base.city_name,
               quantity: Number(item.quantity || 0),
+              is_sample: Boolean(item.is_sample),
               retail_price: Number(item.retail_price || 0),
               discount_price: Number(item.discount_price || 0),
               unit_cost: Number(item.unit_cost || 0),
@@ -858,7 +864,9 @@ export const useAppStore = create<AppState>()(
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
             if (!product) throw new Error('商品不存在');
-            if (item.quantity <= 0 || item.quantity % 5 !== 0) throw new Error(`${product.name} 数量必须是5的倍数`);
+            const isSample = Boolean(item.isSample);
+            if (item.quantity <= 0) throw new Error(`${product.name} 数量必须大于0`);
+            if (!isSample && item.quantity % 5 !== 0) throw new Error(`${product.name} 数量必须是5的倍数`);
 
             const available = Number(product.quantity || 0);
             if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
@@ -868,18 +876,21 @@ export const useAppStore = create<AppState>()(
             const unitCost = Number(product.cost || 0);
             const oneTimeCost = Number(product.one_time_cost || 0);
 
-            totalRetail += retailPrice * item.quantity;
-            totalDiscount += discountPrice * item.quantity;
+            if (!isSample) {
+              totalRetail += retailPrice * item.quantity;
+              totalDiscount += discountPrice * item.quantity;
+            }
             totalQuantity += item.quantity;
             orderCityId = product.city_id;
 
             return {
               product_id: product.id,
               quantity: item.quantity,
-              retail_price: retailPrice,
-              discount_price: discountPrice,
+              retail_price: isSample ? 0 : retailPrice,
+              discount_price: isSample ? 0 : discountPrice,
               unit_cost: unitCost,
               one_time_cost: oneTimeCost,
+              is_sample: isSample,
             };
           });
 

@@ -337,9 +337,11 @@ export default function ProductsScreen() {
           <Text style={[styles.productCity, { color: theme.textSecondary }]}>{item.city_name}</Text>
         </View>
         <View style={styles.priceRow}>
-          <Text style={styles.price}>售价: {item.price}元</Text>
+          <Text style={styles.price}>{isDistributor ? `折扣价: ${item.discount_price}元` : `售价: ${item.price}元`}</Text>
         </View>
-        <Text style={[styles.discountText, { color: theme.textTertiary }]}>折扣价: {item.discount_price}元</Text>
+        <Text style={[styles.discountText, { color: theme.textTertiary }]}>
+          {isDistributor ? `零售价: ${item.price}元` : `折扣价: ${item.discount_price}元`}
+        </Text>
         {!isDistributor && (
           <View style={styles.stockRow}>
             <View style={[styles.stockBadge, { backgroundColor: theme.surfaceSecondary }]}>

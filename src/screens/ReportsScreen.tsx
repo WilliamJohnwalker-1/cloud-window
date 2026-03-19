@@ -52,6 +52,7 @@ export default function ReportsScreen() {
     const productSalesAmt: { [key: string]: { name: string; amount: number } } = {};
     orders.forEach((order) => {
       order.items.forEach((it) => {
+        if (it.is_sample) return;
         const name = it.product_name || '未知';
         const key = it.product_id;
         // Quantity
@@ -145,6 +146,7 @@ export default function ReportsScreen() {
         discountPrice: number;
         discountRevenue: number;
         unitCostTotal: number;
+        sampleCostTotal: number;
         oneTimeCost: number;
       };
     } = {};
@@ -161,13 +163,18 @@ export default function ReportsScreen() {
             discountPrice: Number(it.discount_price || 0),
             discountRevenue: 0,
             unitCostTotal: 0,
+            sampleCostTotal: 0,
             oneTimeCost: Number(it.one_time_cost || 0),
           };
         }
         productProfit[key].quantity += it.quantity;
-        productProfit[key].retailRevenue += it.quantity * Number(it.retail_price || 0);
-        productProfit[key].discountRevenue += it.quantity * Number(it.discount_price || 0);
-        productProfit[key].unitCostTotal += it.quantity * Number(it.unit_cost || 0);
+        if (it.is_sample) {
+          productProfit[key].sampleCostTotal += it.quantity * Number(it.unit_cost || 0);
+        } else {
+          productProfit[key].retailRevenue += it.quantity * Number(it.retail_price || 0);
+          productProfit[key].discountRevenue += it.quantity * Number(it.discount_price || 0);
+          productProfit[key].unitCostTotal += it.quantity * Number(it.unit_cost || 0);
+        }
         if (productProfit[key].oneTimeCost === 0) {
           productProfit[key].oneTimeCost = Number(it.one_time_cost || 0);
         }
@@ -176,7 +183,7 @@ export default function ReportsScreen() {
 
     const profitByProduct = Object.values(productProfit)
       .map((v) => {
-        const cost = v.unitCostTotal + v.oneTimeCost;
+        const cost = v.unitCostTotal + v.sampleCostTotal + v.oneTimeCost;
         return {
           name: v.name,
           quantity: v.quantity,

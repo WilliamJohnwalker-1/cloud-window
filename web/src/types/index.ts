@@ -48,6 +48,7 @@ export interface OrderItem {
   product_id: string;
   product_name?: string;
   city_name?: string;
+  is_sample?: boolean;
   quantity: number;
   retail_price: number;
   discount_price: number;
@@ -66,6 +67,7 @@ export interface Order {
   status: OrderStatus;
   total_retail_amount: number;
   total_discount_amount: number;
+  payment_note?: string;
   created_at: string;
   items: OrderItem[];
 }
