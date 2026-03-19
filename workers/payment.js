@@ -310,21 +310,45 @@ export default {
       );
     }
 
-    if (url.pathname === '/mobile/download/latest.apk' && request.method === 'GET') {
+    if (
+      url.pathname === '/mobile/download/latest.apk'
+      && (request.method === 'GET' || request.method === 'HEAD')
+    ) {
       if (!env.MOBILE_APK_BUCKET) {
         return json({ ok: false, error: 'R2 bucket not configured' }, { status: 500 });
       }
 
       const payload = getMobileLatestPayload(env);
       const objectKey = payload.androidApkKey || 'latest.apk';
+
+      const fileVersion = payload.latestVersion || 'latest';
+      const fileName = `inventory-app-${fileVersion}.apk`;
+
+      if (request.method === 'HEAD') {
+        const metadata = await env.MOBILE_APK_BUCKET.head(objectKey);
+        if (!metadata) {
+          return json({ ok: false, error: 'APK not found in R2', key: objectKey }, { status: 404 });
+        }
+
+        const headers = {
+          'Content-Type': metadata.httpMetadata?.contentType || 'application/vnd.android.package-archive',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+          'Cache-Control': 'public, max-age=300',
+          ...(metadata.httpEtag ? { ETag: metadata.httpEtag } : {}),
+          ...(Number.isFinite(metadata.size) ? { 'Content-Length': String(metadata.size) } : {}),
+        };
+
+        return new Response(null, {
+          status: 200,
+          headers,
+        });
+      }
+
       const object = await env.MOBILE_APK_BUCKET.get(objectKey);
 
       if (!object) {
         return json({ ok: false, error: 'APK not found in R2', key: objectKey }, { status: 404 });
       }
-
-      const fileVersion = payload.latestVersion || 'latest';
-      const fileName = `inventory-app-${fileVersion}.apk`;
 
       return new Response(object.body, {
         status: 200,

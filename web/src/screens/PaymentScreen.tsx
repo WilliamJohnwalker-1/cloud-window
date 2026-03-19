@@ -9,6 +9,7 @@ import {
   validateAuthCode,
   type WebPaymentStatus,
 } from '../lib/payment';
+import { supabase } from '../lib/supabase';
 import { calculateRetailOrderTotals } from '../utils/orderPricing';
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => {
@@ -24,7 +25,8 @@ export const PaymentScreen: React.FC = () => {
   const [productScanCode, setProductScanCode] = useState('');
   const [paymentAuthCode, setPaymentAuthCode] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
-  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number } | null>(null);
+  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number } | null>(null);
+  const [manualAmountInput, setManualAmountInput] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
   const [status, setStatus] = useState<WebPaymentStatus>('pending');
@@ -41,6 +43,7 @@ export const PaymentScreen: React.FC = () => {
   const collectByCodeRef = useRef<(code: string) => Promise<void>>(async () => undefined);
 
   const canUseCashier = user?.role === 'admin' || user?.role === 'inventory_manager';
+  const canAdjustAmount = user?.role === 'admin';
 
   const productById = useMemo(() => {
     const byId = new Map<string, (typeof products)[number]>();
@@ -156,7 +159,7 @@ export const PaymentScreen: React.FC = () => {
     productInputRef.current?.focus();
   };
 
-  const resolveCreatedOrder = (amount: number): { id: string; amount: number } | null => {
+  const resolveCreatedOrder = (amount: number): { id: string; amount: number; originalAmount: number } | null => {
     const { orders } = useAppStore.getState();
     const now = Date.now();
     const recentOrders = [...orders].sort((left, right) => {
@@ -174,6 +177,7 @@ export const PaymentScreen: React.FC = () => {
     return {
       id: matched.id,
       amount: Number(matched.total_discount_amount || amount),
+      originalAmount: Number(matched.total_discount_amount || amount),
     };
   };
 
@@ -208,7 +212,7 @@ export const PaymentScreen: React.FC = () => {
         await fetchOrders();
       }
       const created = result.orderId
-        ? { id: result.orderId, amount: totalAmount }
+        ? { id: result.orderId, amount: totalAmount, originalAmount: totalAmount }
         : resolveCreatedOrder(totalAmount);
       if (!created) {
         setStatus('failed');
@@ -217,6 +221,7 @@ export const PaymentScreen: React.FC = () => {
       }
 
       setActiveOrder(created);
+      setManualAmountInput(created.amount.toFixed(2));
       setTransactionId('');
       setPaymentAuthCode('');
       setStatus('pending');
@@ -301,6 +306,55 @@ export const PaymentScreen: React.FC = () => {
       paymentInputRef.current?.focus();
     }
   }, [activeOrder, paymentAuthCode, pollUntilSettled]);
+
+  const applyManualAmount = (): void => {
+    if (!activeOrder || !canAdjustAmount) return;
+
+    const normalized = manualAmountInput.replace(/[^0-9.]/g, '');
+    if (!normalized) {
+      setStatus('failed');
+      setStatusMessage('请输入有效抹零金额');
+      return;
+    }
+
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setStatus('failed');
+      setStatusMessage('抹零后金额必须大于 0');
+      return;
+    }
+
+    if (parsed > activeOrder.originalAmount) {
+      setStatus('failed');
+      setStatusMessage(`抹零金额不能高于原订单金额 ¥${activeOrder.originalAmount.toFixed(2)}`);
+      return;
+    }
+
+    const nextAmount = Number(parsed.toFixed(2));
+    const diff = Number((activeOrder.originalAmount - nextAmount).toFixed(2));
+    const note = diff > 0
+      ? `收款台抹零：原金额¥${activeOrder.originalAmount.toFixed(2)}，实收¥${nextAmount.toFixed(2)}，抹零¥${diff.toFixed(2)}`
+      : null;
+
+    void (async () => {
+      const { error } = await supabase.rpc('set_order_payment_note_atomic', {
+        p_order_id: activeOrder.id,
+        p_payment_note: note,
+      });
+
+      if (error) {
+        setStatus('failed');
+        setStatusMessage(`抹零备注保存失败：${error.message}`);
+        return;
+      }
+
+      setActiveOrder({ ...activeOrder, amount: nextAmount });
+      setManualAmountInput(nextAmount.toFixed(2));
+      setStatus('pending');
+      setStatusMessage(diff > 0 ? `已应用抹零金额：¥${nextAmount.toFixed(2)}` : '已恢复原始金额');
+      await fetchOrders();
+    })();
+  };
 
   useEffect(() => {
     addProductByBarcodeRef.current = addProductByBarcode;
@@ -475,6 +529,28 @@ export const PaymentScreen: React.FC = () => {
             <p>应收金额：{activeOrder ? `¥${activeOrder.amount.toFixed(2)}` : '-'}</p>
             {transactionId && <p>交易号：{transactionId}</p>}
           </div>
+
+          {activeOrder && canAdjustAmount && (
+            <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 space-y-2">
+              <p className="text-xs text-white/60">管理员抹零（可手动改应收）</p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={manualAmountInput}
+                  onChange={(event) => setManualAmountInput(event.target.value)}
+                  placeholder="输入抹零后金额"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={applyManualAmount}
+                  className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm font-semibold"
+                >
+                  应用
+                </button>
+              </div>
+              <p className="text-[11px] text-white/40">原始订单金额：¥{activeOrder.originalAmount.toFixed(2)}（仅允许向下抹零）</p>
+            </div>
+          )}
 
           <input
             ref={paymentInputRef}

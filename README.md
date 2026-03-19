@@ -112,7 +112,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
 13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
 14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
-15. 执行 `supabase/storage-policies.sql`
+15. 执行 `supabase/migrate-v3.6-sample-order-items.sql`
+16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
+17. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -130,7 +132,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 12. 执行 `supabase/migrate-v3.3-city-sort-order.sql`
 13. 执行 `supabase/migrate-v3.4-admin-city-sort-and-safe-order-delete.sql`
 14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
-15. 执行 `supabase/storage-policies.sql`
+15. 执行 `supabase/migrate-v3.6-sample-order-items.sql`
+16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
+17. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -138,7 +142,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.9）
+### 5. 启动 Web 端（v1.2.10）
 
 ```bash
 npm run web:v2
@@ -307,6 +311,18 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.10 (2026-03-19) - 样品并行下单与分销价展示优先级优化
+
+- 分销订单建单支持“同一商品同时下商品行 + 样品行”（双行并存、独立数量控制）
+- 样品行继续遵循“减库存、计成本、不计收入利润”，普通商品行继续保持 5 倍数规则
+- 分销商移动端商品价格展示顺序调整为“折扣价优先，零售价次级显示”，降低一线下单认知成本
+
+### Web v1.2.10 (2026-03-19) - 收款台抹零备注与订单交互体验升级
+
+- 收款台支持管理员手动抹零（向下调整应收金额）后再发起客户付款
+- 新增订单 `payment_note` 备注链路：抹零会写入“原金额/实收/抹零差额”，便于对账审计
+- 订单删除从浏览器 `confirm/alert` 切换为站内弹窗与状态提示，交互与当前 UI 风格一致
 
 ### Mobile v2.1.9 (2026-03-16) - 城市排序管理与分销商跨城市浏览优化
 

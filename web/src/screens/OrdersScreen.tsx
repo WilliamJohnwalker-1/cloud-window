@@ -6,6 +6,13 @@ import { useAppStore } from '../store/useAppStore';
 type OrderFilter = 'all' | 'pending' | 'accepted';
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
 
+interface CartDraftItem {
+  quantity: number;
+  isSample: boolean;
+}
+
+type CartLineType = 'sale' | 'sample';
+
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, deleteOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
@@ -16,11 +23,13 @@ export const OrdersScreen: React.FC = () => {
   const [detailCache, setDetailCache] = useState<Record<string, (typeof orders)[number]>>({});
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [cart, setCart] = useState<Map<string, number>>(new Map());
+  const [cart, setCart] = useState<Map<string, CartDraftItem>>(new Map());
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
   const [rangeStartDate, setRangeStartDate] = useState('');
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<string | null>(null);
+  const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
@@ -112,22 +121,34 @@ export const OrdersScreen: React.FC = () => {
   }, [products, searchKeyword]);
 
   const cartItems = useMemo(() => {
+    const parseCartKey = (cartKey: string): { productId: string; lineType: CartLineType } => {
+      const splitIndex = cartKey.lastIndexOf(':');
+      if (splitIndex < 0) return { productId: cartKey, lineType: 'sale' };
+      const productId = cartKey.slice(0, splitIndex);
+      const lineTypeRaw = cartKey.slice(splitIndex + 1);
+      return {
+        productId,
+        lineType: lineTypeRaw === 'sample' ? 'sample' : 'sale',
+      };
+    };
+
     return Array.from(cart.entries())
-      .map(([productId, quantity]) => {
+      .map(([cartKey, draft]) => {
+        const { productId, lineType } = parseCartKey(cartKey);
         const product = products.find((item) => item.id === productId);
         if (!product) return null;
-        return { product, quantity };
+        return { cartKey, product, lineType, quantity: draft.quantity, isSample: draft.isSample };
       })
-      .filter((item): item is { product: (typeof products)[number]; quantity: number } => item !== null)
+      .filter((item): item is { cartKey: string; product: (typeof products)[number]; lineType: CartLineType; quantity: number; isSample: boolean } => item !== null)
       .filter((item) => item.quantity > 0);
   }, [cart, products]);
 
   const totalRetailAmount = useMemo(() => {
-    return cartItems.reduce((sum, item) => sum + Number(item.product.price || 0) * item.quantity, 0);
+    return cartItems.reduce((sum, item) => (item.isSample ? sum : sum + Number(item.product.price || 0) * item.quantity), 0);
   }, [cartItems]);
 
   const totalDiscountAmount = useMemo(() => {
-    return cartItems.reduce((sum, item) => sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity, 0);
+    return cartItems.reduce((sum, item) => (item.isSample ? sum : sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity), 0);
   }, [cartItems]);
 
   const detailOrder = detailOrderData;
@@ -238,32 +259,57 @@ export const OrdersScreen: React.FC = () => {
     XLSX.writeFile(workbook, `delivery-${targetOrder.id.slice(0, 8)}-${Date.now()}.xlsx`);
   };
 
-  const handleDeleteOrder = async (orderId: string): Promise<void> => {
-    const confirmed = window.confirm(`确定删除订单 #${orderId.slice(0, 8)} 吗？删除后会恢复库存。`);
-    if (!confirmed) return;
+  const requestDeleteOrder = (orderId: string): void => {
+    setDeleteConfirmOrderId(orderId);
+  };
 
+  const handleDeleteOrder = async (orderId: string): Promise<void> => {
     setDeletingOrderId(orderId);
     const { error } = await deleteOrder(orderId);
     setDeletingOrderId(null);
+    setDeleteConfirmOrderId(null);
 
     if (error) {
-      window.alert(`删除失败：${error.message}`);
+      setPageNotice({ type: 'error', text: `删除失败：${error.message}` });
       return;
     }
 
-    window.alert('订单已删除并恢复库存');
+    setPageNotice({ type: 'success', text: '订单已删除并恢复库存' });
     if (detailOrderId === orderId) {
       closeOrderDetail();
     }
   };
 
-  const setCartQuantity = (productId: string, quantity: number): void => {
+  const getCartKey = (productId: string, lineType: CartLineType): string => `${productId}:${lineType}`;
+  const getLineStep = (lineType: CartLineType): number => (lineType === 'sample' ? 1 : 5);
+
+  const getCombinedQtyByProduct = (entries: Map<string, CartDraftItem>, productId: string): number => {
+    let total = 0;
+    entries.forEach((draft, key) => {
+      if (key.startsWith(`${productId}:`)) total += draft.quantity;
+    });
+    return total;
+  };
+
+  const setCartQuantity = (productId: string, lineType: CartLineType, quantity: number): void => {
     setCart((prev) => {
       const next = new Map(prev);
+      const cartKey = getCartKey(productId, lineType);
+      const existing = next.get(cartKey);
+      const combinedWithoutCurrent = getCombinedQtyByProduct(next, productId) - (existing?.quantity || 0);
+      const available = Number(products.find((item) => item.id === productId)?.quantity || 0);
+
+      if (quantity > 0 && combinedWithoutCurrent + quantity > available) {
+        return prev;
+      }
+
       if (quantity <= 0) {
-        next.delete(productId);
+        next.delete(cartKey);
       } else {
-        next.set(productId, quantity);
+        next.set(cartKey, {
+          quantity,
+          isSample: lineType === 'sample',
+        });
       }
       return next;
     });
@@ -275,7 +321,7 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
-    const invalid = cartItems.find((item) => item.quantity % 5 !== 0);
+    const invalid = cartItems.find((item) => !item.isSample && item.quantity % 5 !== 0);
     if (invalid) {
       window.alert(`${invalid.product.name} 数量必须是5的倍数`);
       return;
@@ -285,6 +331,7 @@ export const OrdersScreen: React.FC = () => {
       cartItems.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,
+        isSample: item.isSample,
       })),
     );
     if (result.error) {
@@ -300,6 +347,21 @@ export const OrdersScreen: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {pageNotice && (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${pageNotice.type === 'success' ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200' : 'bg-red-500/10 border-red-400/30 text-red-200'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <span>{pageNotice.text}</span>
+            <button
+              type="button"
+              onClick={() => setPageNotice(null)}
+              className="text-white/60 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex space-x-2">
           {[
@@ -487,13 +549,13 @@ export const OrdersScreen: React.FC = () => {
                   <span>导出</span>
                 </button>
                 {(user?.role === 'admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleDeleteOrder(order.id);
-                    }}
-                    disabled={deletingOrderId === order.id}
-                    className="px-2.5 py-1.5 rounded-lg border border-red-400/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        requestDeleteOrder(order.id);
+                      }}
+                      disabled={deletingOrderId === order.id}
+                      className="px-2.5 py-1.5 rounded-lg border border-red-400/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     <Trash2 size={14} />
                     <span>{deletingOrderId === order.id ? '删除中' : '删除'}</span>
@@ -536,7 +598,10 @@ export const OrdersScreen: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
                 {filteredProducts.map((product) => {
-                  const qty = cart.get(product.id) || 0;
+                  const saleKey = getCartKey(product.id, 'sale');
+                  const sampleKey = getCartKey(product.id, 'sample');
+                  const saleQty = cart.get(saleKey)?.quantity || 0;
+                  const sampleQty = cart.get(sampleKey)?.quantity || 0;
                   return (
                     <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
                       <div className="flex items-center justify-between gap-3">
@@ -554,22 +619,68 @@ export const OrdersScreen: React.FC = () => {
                         <p className="text-sm text-accent font-bold">¥{product.discount_price}</p>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => setCartQuantity(product.id, Math.max(0, qty - 5))} className="px-3 py-1.5 rounded-lg bg-white/10">-5</button>
-                        <input
-                          value={qty > 0 ? String(qty) : ''}
-                          onChange={(event) => {
-                            const value = Number(event.target.value.replace(/[^0-9]/g, ''));
-                            if (Number.isNaN(value)) {
-                              setCartQuantity(product.id, 0);
-                              return;
-                            }
-                            setCartQuantity(product.id, value);
-                          }}
-                          placeholder="数量(5的倍数)"
-                          className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
-                        />
-                        <button type="button" onClick={() => setCartQuantity(product.id, qty + 5)} className="px-3 py-1.5 rounded-lg bg-white/10">+5</button>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs w-10 text-white/70">商品</span>
+                          <button
+                            type="button"
+                            onClick={() => setCartQuantity(product.id, 'sale', Math.max(0, saleQty - getLineStep('sale')))}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                          >
+                            -5
+                          </button>
+                          <input
+                            value={saleQty > 0 ? String(saleQty) : ''}
+                            onChange={(event) => {
+                              const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                              if (Number.isNaN(value)) {
+                                setCartQuantity(product.id, 'sale', 0);
+                                return;
+                              }
+                              setCartQuantity(product.id, 'sale', value);
+                            }}
+                            placeholder="数量(5的倍数)"
+                            className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCartQuantity(product.id, 'sale', saleQty + getLineStep('sale'))}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                          >
+                            +5
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs w-10 text-cyan-300">样品</span>
+                          <button
+                            type="button"
+                            onClick={() => setCartQuantity(product.id, 'sample', Math.max(0, sampleQty - getLineStep('sample')))}
+                            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/30"
+                          >
+                            -1
+                          </button>
+                          <input
+                            value={sampleQty > 0 ? String(sampleQty) : ''}
+                            onChange={(event) => {
+                              const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                              if (Number.isNaN(value)) {
+                                setCartQuantity(product.id, 'sample', 0);
+                                return;
+                              }
+                              setCartQuantity(product.id, 'sample', value);
+                            }}
+                            placeholder="样品数量(通常1)"
+                            className="w-40 bg-white/5 border border-cyan-400/20 rounded-lg px-3 py-1.5"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCartQuantity(product.id, 'sample', sampleQty + getLineStep('sample'))}
+                            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/30"
+                          >
+                            +1
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -580,12 +691,12 @@ export const OrdersScreen: React.FC = () => {
                 <h4 className="font-semibold mb-3">购物车</h4>
                 <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
                   {cartItems.map((item) => (
-                    <div key={item.product.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                    <div key={item.cartKey} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
                       <div>
                         <p className="text-sm font-medium">{item.product.name}</p>
-                        <p className="text-xs text-white/40">数量 {item.quantity}</p>
+                        <p className="text-xs text-white/40">数量 {item.quantity}{item.isSample ? ' · 样品' : ''}</p>
                       </div>
-                      <button type="button" onClick={() => setCartQuantity(item.product.id, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                      <button type="button" onClick={() => setCartQuantity(item.product.id, item.lineType, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
                     </div>
                   ))}
                   {cartItems.length === 0 && <p className="text-sm text-white/40">暂无商品</p>}
@@ -615,13 +726,14 @@ export const OrdersScreen: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">类型：</span>{getOrderKindLabel(detailOrder.order_kind)}</div>
-              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">状态：</span>{detailOrder.status}</div>
-              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
-              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
-              <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
-            </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">类型：</span>{getOrderKindLabel(detailOrder.order_kind)}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">状态：</span>{detailOrder.status}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
+                {detailOrder.payment_note && <div className="bg-white/5 rounded-xl px-4 py-3 col-span-2"><span className="text-white/50">收款备注：</span>{detailOrder.payment_note}</div>}
+              </div>
 
             <div className="border border-white/10 rounded-2xl overflow-hidden">
               {loadingDetail && <p className="px-4 py-3 text-sm text-white/50">正在加载订单详情...</p>}
@@ -638,7 +750,10 @@ export const OrdersScreen: React.FC = () => {
                 <tbody>
                   {detailOrder.items.map((item) => (
                     <tr key={item.id} className="border-t border-white/5">
-                      <td className="px-4 py-3">{resolveItemName(item.product_id, item.product_name)}</td>
+                      <td className="px-4 py-3">
+                        {resolveItemName(item.product_id, item.product_name)}
+                        {item.is_sample ? <span className="ml-2 text-[10px] text-cyan-300">样品</span> : null}
+                      </td>
                       <td className="px-4 py-3 text-right">{item.quantity}</td>
                       <td className="px-4 py-3 text-right">¥{item.retail_price}</td>
                       <td className="px-4 py-3 text-right">¥{item.discount_price}</td>
@@ -657,6 +772,39 @@ export const OrdersScreen: React.FC = () => {
             <div className="flex justify-end gap-6 text-sm">
               <p><span className="text-white/50">零售总额：</span>¥{detailOrder.total_retail_amount.toFixed(2)}</p>
               <p><span className="text-white/50">折扣总额：</span><span className="text-accent font-bold">¥{detailOrder.total_discount_amount.toFixed(2)}</span></p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmOrderId && (
+        <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">确认删除订单</h3>
+              <button type="button" onClick={() => setDeleteConfirmOrderId(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/60">
+              确定删除订单 #{deleteConfirmOrderId.slice(0, 8)} 吗？删除后会自动恢复对应库存。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOrderId(null)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleDeleteOrder(deleteConfirmOrderId); }}
+                disabled={deletingOrderId === deleteConfirmOrderId}
+                className="px-4 py-2 rounded-xl border border-red-400/30 bg-red-500/20 text-red-100 font-semibold disabled:opacity-60"
+              >
+                {deletingOrderId === deleteConfirmOrderId ? '删除中...' : '确认删除'}
+              </button>
             </div>
           </div>
         </div>
