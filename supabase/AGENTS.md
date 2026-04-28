@@ -23,6 +23,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v3.5-order-delete-permissions.sql`: align delete permissions with web/mobile single-order delete flow.
 - `migrate-v3.6-sample-order-items.sql`: sample order item flag + distribution 5x rule exemption for sample lines.
 - `migrate-v3.7-order-payment-note.sql`: order payment note + admin RPC for cashier manual rounding remark.
+- `migrate-v3.8-city-sort-index-guard.sql`: city sort_index de-dup + append-at-bottom insert guard + swap safety.
+- `migrate-v3.9-rls-optimization.sql`: RLS helper functions + policy optimization/hardening.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -44,7 +46,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 14. `migrate-v3.5-order-delete-permissions.sql`
 15. `migrate-v3.6-sample-order-items.sql`
 16. `migrate-v3.7-order-payment-note.sql`
-17. `storage-policies.sql`
+17. `migrate-v3.8-city-sort-index-guard.sql`
+18. `migrate-v3.9-rls-optimization.sql`
+19. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -63,7 +67,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 14. `migrate-v3.5-order-delete-permissions.sql`
 15. `migrate-v3.6-sample-order-items.sql`
 16. `migrate-v3.7-order-payment-note.sql`
-17. `storage-policies.sql`
+17. `migrate-v3.8-city-sort-index-guard.sql`
+18. `migrate-v3.9-rls-optimization.sql`
+19. `storage-policies.sql`
 
 ## TABLES
 

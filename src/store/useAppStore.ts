@@ -558,7 +558,20 @@ export const useAppStore = create<AppState>()(
 
       addCity: async (name: string) => {
         try {
-          const { error } = await supabase.from('cities').insert({ name });
+          const { data: lastCity, error: lastCityError } = await supabase
+            .from('cities')
+            .select('sort_index')
+            .order('sort_index', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastCityError) throw lastCityError;
+
+          const nextSortIndex = Number(lastCity?.sort_index || 0) + 1;
+
+          const { error } = await supabase.from('cities').insert({
+            name,
+            sort_index: nextSortIndex,
+          });
           if (error) throw error;
           await get().fetchCities();
           return { error: null };

@@ -114,7 +114,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
 15. 执行 `supabase/migrate-v3.6-sample-order-items.sql`
 16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
-17. 执行 `supabase/storage-policies.sql`
+17. 执行 `supabase/migrate-v3.8-city-sort-index-guard.sql`
+18. 执行 `supabase/migrate-v3.9-rls-optimization.sql`
+19. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -134,7 +136,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 14. 执行 `supabase/migrate-v3.5-order-delete-permissions.sql`
 15. 执行 `supabase/migrate-v3.6-sample-order-items.sql`
 16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
-17. 执行 `supabase/storage-policies.sql`
+17. 执行 `supabase/migrate-v3.8-city-sort-index-guard.sql`
+18. 执行 `supabase/migrate-v3.9-rls-optimization.sql`
+19. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -311,6 +315,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.11 (2026-03-19) - 城市排序冲突修复与稳定性加固
+
+- 修复新建城市后 `sort_index` 冲突导致无法继续调整城市排序的问题
+- 新建城市默认追加到排序末尾，保证后续扩展时排序行为稳定且可预测
+- 增加数据库侧排序防护迁移：去重历史 `sort_index`、插入自动分配末尾、并发场景下保持唯一性
 
 ### Mobile v2.1.10 (2026-03-19) - 样品并行下单与分销价展示优先级优化
 
