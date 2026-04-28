@@ -207,10 +207,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-15 same as above
+1. migrate-v2.sql -> 2-19 same as above
 
 ## GOTCHAS
 
@@ -230,12 +230,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.10`
+- Current mobile baseline: `v2.1.11`
 - Current web baseline: `v1.2.10`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 收款台支持管理员抹零 + 抹零备注落订单(payment_note) + 订单删除弹窗改为站内UI
-- Latest mobile stabilization: 分销下单支持同商品“商品行+样品行”并存 + 分销商视图折扣价优先展示
+- Latest mobile stabilization: 新建城市默认追加到排序末尾 + sort_index 冲突防护与城市排序稳定性修复
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:
