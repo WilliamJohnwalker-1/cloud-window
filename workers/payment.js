@@ -116,8 +116,8 @@ async function readJsonSafely(response) {
 }
 
 async function postWechatRequest(env, method, pathWithQuery, payload = null) {
-  const mchId = String(env.WECHAT_MCH_ID || '').trim();
-  const serialNo = String(env.WECHAT_SERIAL_NO || '').trim();
+  const mchId = String(env.WECHAT_MCH_ID || '').replace(/[\r\n]/g, '').trim();
+  const serialNo = String(env.WECHAT_SERIAL_NO || '').replace(/[\r\n]/g, '').trim();
   const privateKey = env.WECHAT_PRIVATE_KEY;
   const gateway = String(env.WECHAT_GATEWAY || 'https://api.mch.weixin.qq.com').trim().replace(/\/$/, '');
 
@@ -130,7 +130,10 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signMessage = `${method}\n${pathWithQuery}\n${timestamp}\n${nonce}\n${body}\n`;
   const signature = await rsa2Sign(signMessage, privateKey);
-  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${mchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${serialNo}\",signature=\"${signature}\"`;
+  const safeMchId = mchId.replace(/"/g, '');
+  const safeSerialNo = serialNo.replace(/"/g, '');
+  const safeSignature = String(signature || '').replace(/[\r\n"]/g, '');
+  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${safeMchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${safeSerialNo}\",signature=\"${safeSignature}\"`;
 
   const response = await fetch(`${gateway}${pathWithQuery}`, {
     method,

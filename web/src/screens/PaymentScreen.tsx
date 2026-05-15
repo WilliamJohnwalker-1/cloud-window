@@ -16,7 +16,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
 });
 
-const scanResetThresholdMs = 300;
+const scanResetThresholdMs = 180;
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
 const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
@@ -527,6 +527,7 @@ export const PaymentScreen: React.FC = () => {
             value={productScanCode}
             onChange={(event) => setProductScanCode(event.target.value.replace(/\D/g, '').slice(0, 13))}
             onKeyDown={(event) => {
+              event.stopPropagation();
               if (event.key === 'Enter') {
                 event.preventDefault();
                 handleProductScanSubmit();
@@ -635,6 +636,7 @@ export const PaymentScreen: React.FC = () => {
               }
             }}
             onKeyDown={(event) => {
+              event.stopPropagation();
               if (event.key === 'Enter') {
                 event.preventDefault();
                 void handleCollect();
