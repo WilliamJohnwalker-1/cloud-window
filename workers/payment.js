@@ -319,6 +319,18 @@ function buildPaymentEventKey({ channel, eventType, outTradeNo, notifyId, tradeN
   return [channel, eventType, outTradeNo || '-', notifyId || '-', tradeNo || '-'].join(':');
 }
 
+function toWechatOutTradeNo(orderId) {
+  return String(orderId || '').replace(/-/g, '').trim();
+}
+
+function maybeUuidFromOutTradeNo(outTradeNo) {
+  const normalized = String(outTradeNo || '').trim().toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(normalized)) {
+    return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20)}`;
+  }
+  return normalized;
+}
+
 function getMissingEnv(env, keys) {
   return keys.filter((key) => {
     const value = env[key];
@@ -630,11 +642,12 @@ export default {
           payment_amount: amount,
         });
 
+        const wechatOutTradeNo = toWechatOutTradeNo(orderId);
         const wechatCollectPayload = {
           appid: String(env.WECHAT_APP_ID || '').trim(),
           mchid: String(env.WECHAT_MCH_ID || '').trim(),
           description: subject,
-          out_trade_no: orderId,
+          out_trade_no: wechatOutTradeNo,
           notify_url: env.WECHAT_NOTIFY_URL || undefined,
           amount: {
             total: Math.round(amount * 100),
@@ -671,7 +684,7 @@ export default {
               status: 'failed',
               error: `微信收款请求异常：${message}`,
               orderId,
-              outTradeNo: orderId,
+              outTradeNo: wechatOutTradeNo,
             }, { status: 500 });
           }
         }
@@ -695,11 +708,11 @@ export default {
           idempotency_key: buildPaymentEventKey({
             channel: 'wechat',
             eventType: 'collect',
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             tradeNo: wechatTransactionId,
           }),
           channel: 'wechat',
-          out_trade_no: orderId,
+          out_trade_no: wechatOutTradeNo,
           transaction_id: wechatTransactionId,
           notify_id: null,
           event_type: 'collect',
@@ -714,7 +727,7 @@ export default {
             success: true,
             status: 'pending',
             orderId,
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
           });
         }
@@ -724,7 +737,7 @@ export default {
             success: true,
             status: 'paid',
             orderId,
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
           });
         }
@@ -742,7 +755,7 @@ export default {
             return `${base}${requestIdSuffix}`;
           })(),
           orderId,
-          outTradeNo: orderId,
+          outTradeNo: wechatOutTradeNo,
           transactionId: wechatTransactionId || undefined,
         }, { status: 400 });
       }
@@ -877,7 +890,8 @@ export default {
       }
 
       if (order.payment_method === 'wechat') {
-        const queryPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderId)}?mchid=${encodeURIComponent(String(env.WECHAT_MCH_ID || '').trim())}`;
+        const wechatOutTradeNo = toWechatOutTradeNo(orderId);
+        const queryPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(wechatOutTradeNo)}?mchid=${encodeURIComponent(String(env.WECHAT_MCH_ID || '').trim())}`;
         let queryResult;
         try {
           queryResult = await postWechatRequest(env, 'GET', queryPath, null);
@@ -898,11 +912,11 @@ export default {
           idempotency_key: buildPaymentEventKey({
             channel: 'wechat',
             eventType: 'query',
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             tradeNo: transactionId,
           }),
           channel: 'wechat',
-          out_trade_no: orderId,
+          out_trade_no: wechatOutTradeNo,
           transaction_id: transactionId,
           notify_id: null,
           event_type: 'query',
@@ -1001,6 +1015,7 @@ export default {
         const decrypted = await decryptWechatNotifyResource(payload.resource, env.WECHAT_API_V3_KEY);
 
         const outTradeNo = String(decrypted.out_trade_no || '').trim();
+        const resolvedOrderId = maybeUuidFromOutTradeNo(outTradeNo);
         const transactionId = String(decrypted.transaction_id || '').trim() || null;
         const tradeState = String(decrypted.trade_state || '').trim();
         const appid = String(decrypted.appid || '').trim();
@@ -1034,7 +1049,7 @@ export default {
           return wechatNotifyResponse('SUCCESS', 'OK', 200);
         }
 
-        const order = await getOrderById(env, outTradeNo);
+        const order = await getOrderById(env, resolvedOrderId);
         if (!order) {
           await upsertPaymentEvent(env, {
             idempotency_key: idempotencyKey,
@@ -1068,7 +1083,7 @@ export default {
           return wechatNotifyResponse('FAIL', 'amount mismatch', 400);
         }
 
-        await patchOrderPayment(env, outTradeNo, {
+        await patchOrderPayment(env, resolvedOrderId, {
           payment_method: 'wechat',
           payment_status: status,
           payment_amount: totalAmount,
