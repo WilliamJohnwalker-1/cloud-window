@@ -617,20 +617,33 @@ export default {
           payment_amount: amount,
         });
 
-        const collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', {
-          appid: String(env.WECHAT_APP_ID || '').trim(),
-          mchid: String(env.WECHAT_MCH_ID || '').trim(),
-          description: subject,
-          out_trade_no: orderId,
-          notify_url: env.WECHAT_NOTIFY_URL || undefined,
-          amount: {
-            total: Math.round(amount * 100),
-            currency: 'CNY',
-          },
-          payer: {
-            auth_code: authCode,
-          },
-        });
+        let collectResult;
+        try {
+          collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', {
+            appid: String(env.WECHAT_APP_ID || '').trim(),
+            mchid: String(env.WECHAT_MCH_ID || '').trim(),
+            description: subject,
+            out_trade_no: orderId,
+            notify_url: env.WECHAT_NOTIFY_URL || undefined,
+            amount: {
+              total: Math.round(amount * 100),
+              currency: 'CNY',
+            },
+            payer: {
+              auth_code: authCode,
+            },
+          });
+        } catch (error) {
+          await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+          const message = error instanceof Error ? error.message : 'wechat request failed';
+          return json({
+            success: false,
+            status: 'failed',
+            error: `微信收款请求异常：${message}`,
+            orderId,
+            outTradeNo: orderId,
+          }, { status: 500 });
+        }
 
         const wechatTransactionId = collectResult.data?.transaction_id || null;
         const finalStatus = collectResult.ok ? collectResult.status : mapWechatErrorCodeToStatus(collectResult.code);
@@ -826,7 +839,13 @@ export default {
 
       if (order.payment_method === 'wechat') {
         const queryPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderId)}?mchid=${encodeURIComponent(String(env.WECHAT_MCH_ID || '').trim())}`;
-        const queryResult = await postWechatRequest(env, 'GET', queryPath, null);
+        let queryResult;
+        try {
+          queryResult = await postWechatRequest(env, 'GET', queryPath, null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'wechat query failed';
+          return json({ status: 'failed', error: `微信查单异常：${message}` }, { status: 500 });
+        }
         const status = queryResult.ok ? queryResult.status : mapWechatErrorCodeToStatus(queryResult.code);
         const transactionId = queryResult.data?.transaction_id || null;
 
