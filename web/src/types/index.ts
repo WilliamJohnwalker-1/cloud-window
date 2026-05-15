@@ -67,6 +67,11 @@ export interface Order {
   status: OrderStatus;
   total_retail_amount: number;
   total_discount_amount: number;
+  payment_amount?: number;
+  payment_status?: string;
+  payment_method?: string;
+  payment_transaction_id?: string;
+  payment_paid_at?: string;
   payment_note?: string;
   created_at: string;
   items: OrderItem[];

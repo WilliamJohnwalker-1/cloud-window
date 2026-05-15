@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.11）
+### 5. 启动 Web 端（v1.2.15）
 
 ```bash
 npm run web:v2
@@ -326,6 +326,31 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.15 (2026-05-15) - 订单详情展示与退款入口可达性修复
+
+- 订单详情商品名称缺失时不再回退显示系统 ID，统一显示业务文案“云窗文创”
+- `fetchOrderDetail` 补齐支付字段查询（`payment_status/payment_method/payment_transaction_id`），确保退款入口判断正确
+- 订单卡片补充显式“退款”按钮（admin / inventory_manager 且已支付零售单），提升入口可发现性
+
+### Web v1.2.14 (2026-05-15) - Web 收款退款闭环上线
+
+- Worker 新增统一退款接口（`/api/payment/refund`），按订单支付渠道自动路由微信/支付宝退款
+- 订单详情新增支付状态/渠道/交易号展示，管理员与库存管理员可直接发起全额退款
+- 退款事件写入 `payment_events`，订单支付状态回写为 `refunded` / `refund_pending`
+
+### Web v1.2.13 (2026-05-15) - 收款后退款能力补齐
+
+- Worker 新增统一退款接口：按订单支付渠道自动路由到微信/支付宝退款并写入退款事件
+- Web 订单详情新增支付状态/渠道/交易号展示，并支持管理员与库存管理员发起全额退款
+- 退款后订单支付状态回写为 `refunded` / `refund_pending`，便于前端与对账口径一致
+
+### Web v1.2.12 (2026-05-15) - 微信收款联调兼容性修复
+
+- 修复微信付款码收款 `out_trade_no` 超长问题（UUID 去连字符后按 32 字节发送）
+- 修复微信签名头构造鲁棒性（清洗序列号/签名中的非法换行字符）并增强错误诊断
+- 修复微信收款接口字段兼容问题：按最小字段集发送并兼容网关端点差异
+- 修复收银台扫码枪重复触发导致“一次扫码加购两件”的问题，优化扫码输入节流阈值
 
 ### Web v1.2.11 (2026-05-15) - 收银台双通道与微信回调补齐
 

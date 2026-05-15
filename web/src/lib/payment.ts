@@ -140,19 +140,31 @@ export async function runPaymentReadinessPrecheck(): Promise<PaymentReadinessRes
 }
 
 export async function collectByAuthCode(params: PaymentCollectParams): Promise<PaymentResult> {
-  const response = await fetch(withApiBase('/api/payment/collect'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  let response: Response;
+  try {
+    response = await fetch(withApiBase('/api/payment/collect'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        orderId: params.orderId,
+        amount: params.amount,
+        paymentMethod: params.paymentMethod,
+        authCode: params.authCode,
+        subject: params.subject || `订单收款-${params.orderId.slice(0, 8)}`,
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知网络错误';
+    return {
+      success: false,
+      status: 'failed',
+      error: `支付网关连接失败（${paymentApiUrl}）：${message}`,
       orderId: params.orderId,
-      amount: params.amount,
-      paymentMethod: params.paymentMethod,
-      authCode: params.authCode,
-      subject: params.subject || `订单收款-${params.orderId.slice(0, 8)}`,
-    }),
-  });
+      outTradeNo: params.orderId,
+    };
+  }
 
   const data = await response.json();
   const status = String(data.status || 'failed') as WebPaymentStatus;
@@ -187,9 +199,16 @@ export async function collectAlipayByAuthCode(params: Omit<PaymentCollectParams,
 }
 
 export async function queryPaymentStatus(orderId: string): Promise<{ status: WebPaymentStatus; transactionId?: string }> {
-  const response = await fetch(withApiBase(`/api/payment/status/${encodeURIComponent(orderId)}`), {
-    method: 'GET',
-  });
+  let response: Response;
+  try {
+    response = await fetch(withApiBase(`/api/payment/status/${encodeURIComponent(orderId)}`), {
+      method: 'GET',
+    });
+  } catch {
+    return {
+      status: 'failed',
+    };
+  }
 
   const data = await response.json();
   const status = String(data.status || 'failed') as WebPaymentStatus;

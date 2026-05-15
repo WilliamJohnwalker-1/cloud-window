@@ -68,6 +68,11 @@ interface OrderRow {
   order_kind?: Order['order_kind'] | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
+  payment_amount?: number | string | null;
+  payment_status?: string | null;
+  payment_method?: string | null;
+  payment_transaction_id?: string | null;
+  payment_paid_at?: string | null;
   payment_note?: string | null;
   product_id?: string | null;
   quantity?: number | string | null;
@@ -293,6 +298,11 @@ const mapOrder = (row: OrderRow): Order => {
     order_kind: row.order_kind || 'distribution',
     total_retail_amount: Number(row.total_retail_amount || 0),
     total_discount_amount: Number(row.total_discount_amount || 0),
+    payment_amount: row.payment_amount !== undefined && row.payment_amount !== null ? Number(row.payment_amount) : undefined,
+    payment_status: row.payment_status ?? undefined,
+    payment_method: row.payment_method ?? undefined,
+    payment_transaction_id: row.payment_transaction_id ?? undefined,
+    payment_paid_at: row.payment_paid_at ?? undefined,
     payment_note: row.payment_note ?? undefined,
     created_at: row.created_at,
     items: itemsFromRelation,
@@ -551,7 +561,7 @@ export const useAppStore = create<AppState>()(
       fetchOrderDetail: async (orderId) => {
         const { data: orderRow, error: orderError } = await supabase
           .from('orders')
-          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_note, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
+          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
           .eq('id', orderId)
           .maybeSingle();
         if (orderError || !orderRow) return null;

@@ -26,6 +26,13 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
+function normalizeWechatSerial(input) {
+  return String(input || '')
+    .replace(/[\r\n\s:]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
 function pemToArrayBuffer(pem) {
   const lines = pem
     .replace(/-----BEGIN PRIVATE KEY-----/g, '')
@@ -116,8 +123,8 @@ async function readJsonSafely(response) {
 }
 
 async function postWechatRequest(env, method, pathWithQuery, payload = null) {
-  const mchId = String(env.WECHAT_MCH_ID || '').trim();
-  const serialNo = String(env.WECHAT_SERIAL_NO || '').trim();
+  const mchId = String(env.WECHAT_MCH_ID || '').replace(/[\r\n]/g, '').trim();
+  const serialNo = normalizeWechatSerial(env.WECHAT_SERIAL_NO);
   const privateKey = env.WECHAT_PRIVATE_KEY;
   const gateway = String(env.WECHAT_GATEWAY || 'https://api.mch.weixin.qq.com').trim().replace(/\/$/, '');
 
@@ -130,13 +137,17 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signMessage = `${method}\n${pathWithQuery}\n${timestamp}\n${nonce}\n${body}\n`;
   const signature = await rsa2Sign(signMessage, privateKey);
-  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${mchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${serialNo}\",signature=\"${signature}\"`;
+  const safeMchId = mchId.replace(/"/g, '');
+  const safeSerialNo = serialNo.replace(/"/g, '');
+  const safeSignature = String(signature || '').replace(/[\r\n"]/g, '');
+  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${safeMchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${safeSerialNo}\",signature=\"${safeSignature}\"`;
 
   const response = await fetch(`${gateway}${pathWithQuery}`, {
     method,
     headers: {
       Accept: 'application/json',
       Authorization: authorization,
+      'User-Agent': 'cloud-window-worker/1.0',
       ...(payload === null ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(payload === null ? {} : { body }),
@@ -149,11 +160,13 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
 
   const errorCode = String(data.code || '').trim();
   const errorMessage = String(data.message || data.raw || `微信请求失败（HTTP ${response.status}）`).trim();
+  const requestId = String(response.headers.get('Request-ID') || response.headers.get('request-id') || '').trim();
   return {
     ok: false,
     status: mapWechatErrorCodeToStatus(errorCode),
     code: errorCode,
     error: errorMessage,
+    requestId,
     data,
     httpStatus: response.status,
   };
@@ -209,6 +222,59 @@ async function postAlipayRequest(env, method, bizContent) {
     ok: false,
     status: 'failed',
     error: methodPayload.sub_msg || methodPayload.msg || '支付宝请求失败',
+    code: methodPayload.code,
+    signContent,
+    raw: payload,
+  };
+}
+
+async function postAlipayRefundRequest(env, bizContent) {
+  const appId = env.ALIPAY_APP_ID;
+  const privateKey = env.ALIPAY_PRIVATE_KEY;
+  const gateway = env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do';
+
+  if (!appId || !privateKey) {
+    return { ok: false, status: 'failed', error: '支付宝配置不完整（缺少 ALIPAY_APP_ID/ALIPAY_PRIVATE_KEY）' };
+  }
+
+  const method = 'alipay.trade.refund';
+  const requestParams = {
+    app_id: appId,
+    method,
+    format: 'JSON',
+    charset: 'utf-8',
+    sign_type: 'RSA2',
+    timestamp: toAlipayTimestamp(),
+    version: '1.0',
+    biz_content: JSON.stringify(bizContent),
+  };
+
+  const signContent = buildAlipayRequestSignContent(requestParams);
+  const sign = await rsa2Sign(signContent, privateKey);
+
+  const form = new URLSearchParams({ ...requestParams, sign });
+  const response = await fetch(gateway, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+    body: form,
+  });
+
+  const payload = await response.json();
+  const methodPayload = payload.alipay_trade_refund_response;
+
+  if (!methodPayload) {
+    return { ok: false, status: 'failed', error: '支付宝退款响应格式异常', raw: payload };
+  }
+
+  if (methodPayload.code === '10000') {
+    const status = String(methodPayload.fund_change || '').toUpperCase() === 'Y' ? 'refunded' : 'refund_pending';
+    return { ok: true, status, data: methodPayload };
+  }
+
+  return {
+    ok: false,
+    status: 'failed',
+    error: methodPayload.sub_msg || methodPayload.msg || '支付宝退款请求失败',
     code: methodPayload.code,
     signContent,
     raw: payload,
@@ -304,6 +370,18 @@ async function decryptWechatNotifyResource(resource, apiV3Key) {
 
 function buildPaymentEventKey({ channel, eventType, outTradeNo, notifyId, tradeNo }) {
   return [channel, eventType, outTradeNo || '-', notifyId || '-', tradeNo || '-'].join(':');
+}
+
+function toWechatOutTradeNo(orderId) {
+  return String(orderId || '').replace(/-/g, '').trim();
+}
+
+function maybeUuidFromOutTradeNo(outTradeNo) {
+  const normalized = String(outTradeNo || '').trim().toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(normalized)) {
+    return `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20)}`;
+  }
+  return normalized;
 }
 
 function getMissingEnv(env, keys) {
@@ -617,12 +695,13 @@ export default {
           payment_amount: amount,
         });
 
-        const collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', {
+        const wechatOutTradeNo = toWechatOutTradeNo(orderId);
+        const storeId = String(env.WECHAT_STORE_ID || 'STORE-001').trim().slice(0, 32);
+        const wechatCollectPayload = {
           appid: String(env.WECHAT_APP_ID || '').trim(),
           mchid: String(env.WECHAT_MCH_ID || '').trim(),
           description: subject,
-          out_trade_no: orderId,
-          notify_url: env.WECHAT_NOTIFY_URL || undefined,
+          out_trade_no: wechatOutTradeNo,
           amount: {
             total: Math.round(amount * 100),
             currency: 'CNY',
@@ -630,7 +709,43 @@ export default {
           payer: {
             auth_code: authCode,
           },
-        });
+          scene_info: {
+            store_info: {
+              id: storeId,
+            },
+          },
+        };
+
+        let collectResult;
+        try {
+          collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', wechatCollectPayload);
+        } catch (error) {
+          await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+          const message = error instanceof Error ? error.message : 'wechat request failed';
+          return json({
+            success: false,
+            status: 'failed',
+            error: `微信收款请求异常：${message}`,
+            orderId,
+            outTradeNo: orderId,
+          }, { status: 500 });
+        }
+
+        if (!collectResult.ok && collectResult.httpStatus === 404) {
+          try {
+            collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/codepay', wechatCollectPayload);
+          } catch (error) {
+            await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+            const message = error instanceof Error ? error.message : 'wechat codepay request failed';
+            return json({
+              success: false,
+              status: 'failed',
+              error: `微信收款请求异常：${message}`,
+              orderId,
+              outTradeNo: wechatOutTradeNo,
+            }, { status: 500 });
+          }
+        }
 
         const wechatTransactionId = collectResult.data?.transaction_id || null;
         const finalStatus = collectResult.ok ? collectResult.status : mapWechatErrorCodeToStatus(collectResult.code);
@@ -651,11 +766,11 @@ export default {
           idempotency_key: buildPaymentEventKey({
             channel: 'wechat',
             eventType: 'collect',
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             tradeNo: wechatTransactionId,
           }),
           channel: 'wechat',
-          out_trade_no: orderId,
+          out_trade_no: wechatOutTradeNo,
           transaction_id: wechatTransactionId,
           notify_id: null,
           event_type: 'collect',
@@ -670,7 +785,7 @@ export default {
             success: true,
             status: 'pending',
             orderId,
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
           });
         }
@@ -680,7 +795,7 @@ export default {
             success: true,
             status: 'paid',
             orderId,
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
           });
         }
@@ -688,9 +803,17 @@ export default {
         return json({
           success: false,
           status: finalStatus,
-          error: collectResult.error || '微信付款码收款失败',
+          error: (() => {
+            const code = String(collectResult.code || '').toUpperCase();
+            const base = collectResult.error || '微信付款码收款失败';
+            const requestIdSuffix = collectResult.requestId ? `（Request-ID: ${collectResult.requestId}）` : '';
+            if (code === 'SIGN_ERROR') {
+              return `微信签名验证不通过，请核对 WECHAT_PRIVATE_KEY 与 WECHAT_SERIAL_NO 是否同一商户证书，且与商户平台当前证书一致${requestIdSuffix}`;
+            }
+            return `${base}${requestIdSuffix}`;
+          })(),
           orderId,
-          outTradeNo: orderId,
+          outTradeNo: wechatOutTradeNo,
           transactionId: wechatTransactionId || undefined,
         }, { status: 400 });
       }
@@ -808,6 +931,158 @@ export default {
       });
     }
 
+    if (url.pathname === '/api/payment/refund' && request.method === 'POST') {
+      const body = await request.json();
+      const orderId = String(body.orderId || '').trim();
+      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
+
+      if (!orderId) {
+        return json({ success: false, status: 'failed', error: 'missing order id' }, { status: 400 });
+      }
+
+      const order = await getOrderById(env, orderId);
+      if (!order) {
+        return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
+      }
+
+      if (String(order.payment_status || '').toLowerCase() !== 'paid') {
+        return json({ success: false, status: 'failed', error: '仅已支付订单可退款' }, { status: 400 });
+      }
+
+      const totalAmount = Number(order.payment_amount || order.total_retail_amount || 0);
+      const inputAmount = Number(body.amount || totalAmount);
+      if (!Number.isFinite(inputAmount) || inputAmount <= 0) {
+        return json({ success: false, status: 'failed', error: '退款金额无效' }, { status: 400 });
+      }
+
+      const refundAmount = Number(inputAmount.toFixed(2));
+      if (refundAmount - totalAmount > 0.000001) {
+        return json({ success: false, status: 'failed', error: `退款金额不能大于已支付金额 ${totalAmount.toFixed(2)}` }, { status: 400 });
+      }
+
+      if (order.payment_method === 'wechat') {
+        const missing = getMissingEnv(env, [
+          'WECHAT_MCH_ID',
+          'WECHAT_SERIAL_NO',
+          'WECHAT_PRIVATE_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        const outTradeNo = toWechatOutTradeNo(orderId);
+        const outRefundNo = `R${outTradeNo.slice(0, 20)}${Date.now().toString().slice(-12)}`;
+        const refundPayload = {
+          out_trade_no: outTradeNo,
+          out_refund_no: outRefundNo,
+          reason,
+          notify_url: env.WECHAT_REFUND_NOTIFY_URL || undefined,
+          amount: {
+            refund: Math.round(refundAmount * 100),
+            total: Math.round(totalAmount * 100),
+            currency: 'CNY',
+          },
+        };
+
+        const refundResult = await postWechatRequest(env, 'POST', '/v3/refund/domestic/refunds', refundPayload);
+        if (!refundResult.ok) {
+          const requestIdSuffix = refundResult.requestId ? `（Request-ID: ${refundResult.requestId}）` : '';
+          return json({ success: false, status: 'failed', error: `${refundResult.error || '微信退款失败'}${requestIdSuffix}` }, { status: 400 });
+        }
+
+        const refundState = String(refundResult.data?.status || '').toUpperCase();
+        const paymentStatus = refundState === 'SUCCESS' ? 'refunded' : 'refund_pending';
+
+        await patchOrderPayment(env, orderId, {
+          payment_status: paymentStatus,
+        });
+
+        await upsertPaymentEvent(env, {
+          idempotency_key: buildPaymentEventKey({
+            channel: 'wechat',
+            eventType: 'refund',
+            outTradeNo,
+            tradeNo: order.payment_transaction_id || null,
+          }),
+          channel: 'wechat',
+          out_trade_no: outTradeNo,
+          transaction_id: order.payment_transaction_id || null,
+          notify_id: null,
+          event_type: 'refund',
+          status: paymentStatus,
+          amount: refundAmount,
+          processed: true,
+          payload: refundResult.data,
+        });
+
+        return json({
+          success: true,
+          status: paymentStatus,
+          orderId,
+          refundAmount,
+          refundNo: outRefundNo,
+        });
+      }
+
+      if (order.payment_method === 'alipay') {
+        const missing = getMissingEnv(env, [
+          'ALIPAY_APP_ID',
+          'ALIPAY_PRIVATE_KEY',
+          'ALIPAY_PUBLIC_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        const outRequestNo = `R${orderId.slice(0, 8)}${Date.now()}`;
+        const refundResult = await postAlipayRefundRequest(env, {
+          out_trade_no: orderId,
+          trade_no: order.payment_transaction_id || undefined,
+          refund_amount: refundAmount.toFixed(2),
+          refund_reason: reason,
+          out_request_no: outRequestNo,
+        });
+
+        if (!refundResult.ok) {
+          return json({ success: false, status: 'failed', error: refundResult.error || '支付宝退款失败' }, { status: 400 });
+        }
+
+        const paymentStatus = refundResult.status === 'refunded' ? 'refunded' : 'refund_pending';
+
+        await patchOrderPayment(env, orderId, {
+          payment_status: paymentStatus,
+        });
+
+        await upsertPaymentEvent(env, {
+          idempotency_key: buildPaymentEventKey({
+            channel: 'alipay',
+            eventType: 'refund',
+            outTradeNo: orderId,
+            tradeNo: order.payment_transaction_id || null,
+          }),
+          channel: 'alipay',
+          out_trade_no: orderId,
+          transaction_id: order.payment_transaction_id || null,
+          notify_id: null,
+          event_type: 'refund',
+          status: paymentStatus,
+          amount: refundAmount,
+          processed: true,
+          payload: refundResult.data,
+        });
+
+        return json({
+          success: true,
+          status: paymentStatus,
+          orderId,
+          refundAmount,
+          refundNo: outRequestNo,
+        });
+      }
+
+      return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });
+    }
+
     if (url.pathname.startsWith('/api/payment/status/') && request.method === 'GET') {
       const orderId = url.pathname.split('/').pop();
       if (!orderId) return json({ error: 'missing order id' }, { status: 400 });
@@ -825,8 +1100,15 @@ export default {
       }
 
       if (order.payment_method === 'wechat') {
-        const queryPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderId)}?mchid=${encodeURIComponent(String(env.WECHAT_MCH_ID || '').trim())}`;
-        const queryResult = await postWechatRequest(env, 'GET', queryPath, null);
+        const wechatOutTradeNo = toWechatOutTradeNo(orderId);
+        const queryPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(wechatOutTradeNo)}?mchid=${encodeURIComponent(String(env.WECHAT_MCH_ID || '').trim())}`;
+        let queryResult;
+        try {
+          queryResult = await postWechatRequest(env, 'GET', queryPath, null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'wechat query failed';
+          return json({ status: 'failed', error: `微信查单异常：${message}` }, { status: 500 });
+        }
         const status = queryResult.ok ? queryResult.status : mapWechatErrorCodeToStatus(queryResult.code);
         const transactionId = queryResult.data?.transaction_id || null;
 
@@ -840,11 +1122,11 @@ export default {
           idempotency_key: buildPaymentEventKey({
             channel: 'wechat',
             eventType: 'query',
-            outTradeNo: orderId,
+            outTradeNo: wechatOutTradeNo,
             tradeNo: transactionId,
           }),
           channel: 'wechat',
-          out_trade_no: orderId,
+          out_trade_no: wechatOutTradeNo,
           transaction_id: transactionId,
           notify_id: null,
           event_type: 'query',
@@ -854,7 +1136,17 @@ export default {
           payload: queryResult.data || { code: queryResult.code, error: queryResult.error },
         });
 
-        return json({ status, transactionId: transactionId || undefined, error: queryResult.ok ? undefined : queryResult.error });
+        const queryError = (() => {
+          if (queryResult.ok) return undefined;
+          const code = String(queryResult.code || '').toUpperCase();
+          const requestIdSuffix = queryResult.requestId ? `（Request-ID: ${queryResult.requestId}）` : '';
+          if (code === 'SIGN_ERROR') {
+            return `微信查单签名验证不通过，请核对 WECHAT_PRIVATE_KEY 与 WECHAT_SERIAL_NO${requestIdSuffix}`;
+          }
+          return `${queryResult.error || '微信查单失败'}${requestIdSuffix}`;
+        })();
+
+        return json({ status, transactionId: transactionId || undefined, error: queryError });
       }
 
       const queryResult = await postAlipayRequest(env, 'alipay.trade.query', {
@@ -933,6 +1225,7 @@ export default {
         const decrypted = await decryptWechatNotifyResource(payload.resource, env.WECHAT_API_V3_KEY);
 
         const outTradeNo = String(decrypted.out_trade_no || '').trim();
+        const resolvedOrderId = maybeUuidFromOutTradeNo(outTradeNo);
         const transactionId = String(decrypted.transaction_id || '').trim() || null;
         const tradeState = String(decrypted.trade_state || '').trim();
         const appid = String(decrypted.appid || '').trim();
@@ -966,7 +1259,7 @@ export default {
           return wechatNotifyResponse('SUCCESS', 'OK', 200);
         }
 
-        const order = await getOrderById(env, outTradeNo);
+        const order = await getOrderById(env, resolvedOrderId);
         if (!order) {
           await upsertPaymentEvent(env, {
             idempotency_key: idempotencyKey,
@@ -1000,7 +1293,7 @@ export default {
           return wechatNotifyResponse('FAIL', 'amount mismatch', 400);
         }
 
-        await patchOrderPayment(env, outTradeNo, {
+        await patchOrderPayment(env, resolvedOrderId, {
           payment_method: 'wechat',
           payment_status: status,
           payment_amount: totalAmount,
