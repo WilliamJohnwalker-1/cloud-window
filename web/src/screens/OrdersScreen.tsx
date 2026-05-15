@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import { getPaymentApiEndpoint } from '../lib/payment';
 
 type OrderFilter = 'all' | 'pending' | 'accepted';
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
@@ -14,7 +15,7 @@ interface CartDraftItem {
 type CartLineType = 'sale' | 'sample';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, deleteOrder } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -28,6 +29,7 @@ export const OrdersScreen: React.FC = () => {
   const [rangeStartDate, setRangeStartDate] = useState('');
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -199,6 +201,58 @@ export const OrdersScreen: React.FC = () => {
     setDetailOrderId(null);
     setDetailOrderData(null);
     setLoadingDetail(false);
+  };
+
+  const canRefundOrder = (order: (typeof orders)[number]): boolean => {
+    const canOperate = user?.role === 'admin' || user?.role === 'inventory_manager';
+    if (!canOperate) return false;
+    if (order.order_kind !== 'retail') return false;
+    if (String(order.payment_status || '').toLowerCase() !== 'paid') return false;
+    if (order.payment_method !== 'wechat' && order.payment_method !== 'alipay') return false;
+    return true;
+  };
+
+  const handleRefundOrder = async (order: (typeof orders)[number]): Promise<void> => {
+    if (!canRefundOrder(order) || refundingOrderId) return;
+
+    setRefundingOrderId(order.id);
+    try {
+      const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          amount: Number(order.payment_amount || order.total_discount_amount || 0),
+          reason: '收银台退款',
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setPageNotice({ type: 'error', text: `退款失败：${String(payload.error || '未知错误')}` });
+        return;
+      }
+
+      setPageNotice({
+        type: 'success',
+        text: payload.status === 'refunded'
+          ? `退款成功：¥${Number(payload.refundAmount || 0).toFixed(2)}`
+          : `退款申请已提交，状态：${String(payload.status || 'refund_pending')}`,
+      });
+
+      await fetchOrders();
+      const latest = await fetchOrderDetail(order.id);
+      if (latest) {
+        setDetailCache((prev) => ({ ...prev, [order.id]: latest }));
+        setDetailOrderData(latest);
+      }
+    } catch (error) {
+      setPageNotice({ type: 'error', text: `退款异常：${error instanceof Error ? error.message : '未知错误'}` });
+    } finally {
+      setRefundingOrderId(null);
+    }
   };
 
   const exportOrdersXlsx = async (): Promise<void> => {
@@ -729,11 +783,29 @@ export const OrdersScreen: React.FC = () => {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">类型：</span>{getOrderKindLabel(detailOrder.order_kind)}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">状态：</span>{detailOrder.status}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">支付状态：</span>{detailOrder.payment_status || '-'}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">支付渠道：</span>{detailOrder.payment_method || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">交易号：</span>{detailOrder.payment_transaction_id || '-'}</div>
                 {detailOrder.payment_note && <div className="bg-white/5 rounded-xl px-4 py-3 col-span-2"><span className="text-white/50">收款备注：</span>{detailOrder.payment_note}</div>}
               </div>
+
+            {canRefundOrder(detailOrder) && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleRefundOrder(detailOrder);
+                  }}
+                  disabled={refundingOrderId === detailOrder.id}
+                  className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
+                >
+                  {refundingOrderId === detailOrder.id ? '退款处理中...' : '全额退款'}
+                </button>
+              </div>
+            )}
 
             <div className="border border-white/10 rounded-2xl overflow-hidden">
               {loadingDetail && <p className="px-4 py-3 text-sm text-white/50">正在加载订单详情...</p>}

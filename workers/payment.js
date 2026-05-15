@@ -228,6 +228,59 @@ async function postAlipayRequest(env, method, bizContent) {
   };
 }
 
+async function postAlipayRefundRequest(env, bizContent) {
+  const appId = env.ALIPAY_APP_ID;
+  const privateKey = env.ALIPAY_PRIVATE_KEY;
+  const gateway = env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do';
+
+  if (!appId || !privateKey) {
+    return { ok: false, status: 'failed', error: '支付宝配置不完整（缺少 ALIPAY_APP_ID/ALIPAY_PRIVATE_KEY）' };
+  }
+
+  const method = 'alipay.trade.refund';
+  const requestParams = {
+    app_id: appId,
+    method,
+    format: 'JSON',
+    charset: 'utf-8',
+    sign_type: 'RSA2',
+    timestamp: toAlipayTimestamp(),
+    version: '1.0',
+    biz_content: JSON.stringify(bizContent),
+  };
+
+  const signContent = buildAlipayRequestSignContent(requestParams);
+  const sign = await rsa2Sign(signContent, privateKey);
+
+  const form = new URLSearchParams({ ...requestParams, sign });
+  const response = await fetch(gateway, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+    body: form,
+  });
+
+  const payload = await response.json();
+  const methodPayload = payload.alipay_trade_refund_response;
+
+  if (!methodPayload) {
+    return { ok: false, status: 'failed', error: '支付宝退款响应格式异常', raw: payload };
+  }
+
+  if (methodPayload.code === '10000') {
+    const status = String(methodPayload.fund_change || '').toUpperCase() === 'Y' ? 'refunded' : 'refund_pending';
+    return { ok: true, status, data: methodPayload };
+  }
+
+  return {
+    ok: false,
+    status: 'failed',
+    error: methodPayload.sub_msg || methodPayload.msg || '支付宝退款请求失败',
+    code: methodPayload.code,
+    signContent,
+    raw: payload,
+  };
+}
+
 function parseTradeStatus(tradeStatus) {
   if (tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED') return 'paid';
   if (tradeStatus === 'WAIT_BUYER_PAY') return 'pending';
@@ -876,6 +929,158 @@ export default {
         outTradeNo: alipayResult.data.out_trade_no || orderId,
         transactionId: alipayResult.data.trade_no,
       });
+    }
+
+    if (url.pathname === '/api/payment/refund' && request.method === 'POST') {
+      const body = await request.json();
+      const orderId = String(body.orderId || '').trim();
+      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
+
+      if (!orderId) {
+        return json({ success: false, status: 'failed', error: 'missing order id' }, { status: 400 });
+      }
+
+      const order = await getOrderById(env, orderId);
+      if (!order) {
+        return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
+      }
+
+      if (String(order.payment_status || '').toLowerCase() !== 'paid') {
+        return json({ success: false, status: 'failed', error: '仅已支付订单可退款' }, { status: 400 });
+      }
+
+      const totalAmount = Number(order.payment_amount || order.total_retail_amount || 0);
+      const inputAmount = Number(body.amount || totalAmount);
+      if (!Number.isFinite(inputAmount) || inputAmount <= 0) {
+        return json({ success: false, status: 'failed', error: '退款金额无效' }, { status: 400 });
+      }
+
+      const refundAmount = Number(inputAmount.toFixed(2));
+      if (refundAmount - totalAmount > 0.000001) {
+        return json({ success: false, status: 'failed', error: `退款金额不能大于已支付金额 ${totalAmount.toFixed(2)}` }, { status: 400 });
+      }
+
+      if (order.payment_method === 'wechat') {
+        const missing = getMissingEnv(env, [
+          'WECHAT_MCH_ID',
+          'WECHAT_SERIAL_NO',
+          'WECHAT_PRIVATE_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        const outTradeNo = toWechatOutTradeNo(orderId);
+        const outRefundNo = `R${outTradeNo.slice(0, 20)}${Date.now().toString().slice(-12)}`;
+        const refundPayload = {
+          out_trade_no: outTradeNo,
+          out_refund_no: outRefundNo,
+          reason,
+          notify_url: env.WECHAT_REFUND_NOTIFY_URL || undefined,
+          amount: {
+            refund: Math.round(refundAmount * 100),
+            total: Math.round(totalAmount * 100),
+            currency: 'CNY',
+          },
+        };
+
+        const refundResult = await postWechatRequest(env, 'POST', '/v3/refund/domestic/refunds', refundPayload);
+        if (!refundResult.ok) {
+          const requestIdSuffix = refundResult.requestId ? `（Request-ID: ${refundResult.requestId}）` : '';
+          return json({ success: false, status: 'failed', error: `${refundResult.error || '微信退款失败'}${requestIdSuffix}` }, { status: 400 });
+        }
+
+        const refundState = String(refundResult.data?.status || '').toUpperCase();
+        const paymentStatus = refundState === 'SUCCESS' ? 'refunded' : 'refund_pending';
+
+        await patchOrderPayment(env, orderId, {
+          payment_status: paymentStatus,
+        });
+
+        await upsertPaymentEvent(env, {
+          idempotency_key: buildPaymentEventKey({
+            channel: 'wechat',
+            eventType: 'refund',
+            outTradeNo,
+            tradeNo: order.payment_transaction_id || null,
+          }),
+          channel: 'wechat',
+          out_trade_no: outTradeNo,
+          transaction_id: order.payment_transaction_id || null,
+          notify_id: null,
+          event_type: 'refund',
+          status: paymentStatus,
+          amount: refundAmount,
+          processed: true,
+          payload: refundResult.data,
+        });
+
+        return json({
+          success: true,
+          status: paymentStatus,
+          orderId,
+          refundAmount,
+          refundNo: outRefundNo,
+        });
+      }
+
+      if (order.payment_method === 'alipay') {
+        const missing = getMissingEnv(env, [
+          'ALIPAY_APP_ID',
+          'ALIPAY_PRIVATE_KEY',
+          'ALIPAY_PUBLIC_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        const outRequestNo = `R${orderId.slice(0, 8)}${Date.now()}`;
+        const refundResult = await postAlipayRefundRequest(env, {
+          out_trade_no: orderId,
+          trade_no: order.payment_transaction_id || undefined,
+          refund_amount: refundAmount.toFixed(2),
+          refund_reason: reason,
+          out_request_no: outRequestNo,
+        });
+
+        if (!refundResult.ok) {
+          return json({ success: false, status: 'failed', error: refundResult.error || '支付宝退款失败' }, { status: 400 });
+        }
+
+        const paymentStatus = refundResult.status === 'refunded' ? 'refunded' : 'refund_pending';
+
+        await patchOrderPayment(env, orderId, {
+          payment_status: paymentStatus,
+        });
+
+        await upsertPaymentEvent(env, {
+          idempotency_key: buildPaymentEventKey({
+            channel: 'alipay',
+            eventType: 'refund',
+            outTradeNo: orderId,
+            tradeNo: order.payment_transaction_id || null,
+          }),
+          channel: 'alipay',
+          out_trade_no: orderId,
+          transaction_id: order.payment_transaction_id || null,
+          notify_id: null,
+          event_type: 'refund',
+          status: paymentStatus,
+          amount: refundAmount,
+          processed: true,
+          payload: refundResult.data,
+        });
+
+        return json({
+          success: true,
+          status: paymentStatus,
+          orderId,
+          refundAmount,
+          refundNo: outRequestNo,
+        });
+      }
+
+      return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });
     }
 
     if (url.pathname.startsWith('/api/payment/status/') && request.method === 'GET') {

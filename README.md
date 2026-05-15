@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.12）
+### 5. 启动 Web 端（v1.2.14）
 
 ```bash
 npm run web:v2
@@ -326,6 +326,18 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.14 (2026-05-15) - Web 收款退款闭环上线
+
+- Worker 新增统一退款接口（`/api/payment/refund`），按订单支付渠道自动路由微信/支付宝退款
+- 订单详情新增支付状态/渠道/交易号展示，管理员与库存管理员可直接发起全额退款
+- 退款事件写入 `payment_events`，订单支付状态回写为 `refunded` / `refund_pending`
+
+### Web v1.2.13 (2026-05-15) - 收款后退款能力补齐
+
+- Worker 新增统一退款接口：按订单支付渠道自动路由到微信/支付宝退款并写入退款事件
+- Web 订单详情新增支付状态/渠道/交易号展示，并支持管理员与库存管理员发起全额退款
+- 退款后订单支付状态回写为 `refunded` / `refund_pending`，便于前端与对账口径一致
 
 ### Web v1.2.12 (2026-05-15) - 微信收款联调兼容性修复
 
