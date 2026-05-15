@@ -650,13 +650,11 @@ export default {
         ).split(',')[0].trim();
         const clientIp = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(rawClientIp) ? rawClientIp : '127.0.0.1';
         const storeId = String(env.WECHAT_STORE_ID || 'STORE-001').trim().slice(0, 32);
-        const storeName = String(env.WECHAT_STORE_NAME || 'WebCashier').trim().slice(0, 64);
         const wechatCollectPayload = {
           appid: String(env.WECHAT_APP_ID || '').trim(),
           mchid: String(env.WECHAT_MCH_ID || '').trim(),
           description: subject,
           out_trade_no: wechatOutTradeNo,
-          notify_url: env.WECHAT_NOTIFY_URL || undefined,
           amount: {
             total: Math.round(amount * 100),
             currency: 'CNY',
@@ -666,10 +664,8 @@ export default {
           },
           scene_info: {
             payer_client_ip: clientIp,
-            device_id: 'WEB-CASHIER',
             store_info: {
               id: storeId,
-              name: storeName,
             },
           },
         };
