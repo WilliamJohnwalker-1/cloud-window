@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.14）
+### 5. 启动 Web 端（v1.2.15）
 
 ```bash
 npm run web:v2
@@ -326,6 +326,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.15 (2026-05-15) - 订单详情展示与退款入口可达性修复
+
+- 订单详情商品名称缺失时不再回退显示系统 ID，统一显示业务文案“云窗文创”
+- `fetchOrderDetail` 补齐支付字段查询（`payment_status/payment_method/payment_transaction_id`），确保退款入口判断正确
+- 订单卡片补充显式“退款”按钮（admin / inventory_manager 且已支付零售单），提升入口可发现性
 
 ### Web v1.2.14 (2026-05-15) - Web 收款退款闭环上线
 

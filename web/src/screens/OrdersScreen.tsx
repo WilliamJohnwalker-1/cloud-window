@@ -13,6 +13,7 @@ interface CartDraftItem {
 }
 
 type CartLineType = 'sale' | 'sample';
+const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder } = useAppStore();
@@ -164,7 +165,7 @@ export const OrdersScreen: React.FC = () => {
   }, [products]);
 
   const resolveItemName = (productId: string, productName?: string): string => {
-    return productName || productNameMap.get(productId) || productId;
+    return productName || productNameMap.get(productId) || fallbackProductName;
   };
 
   const getResolvedOrder = (orderId: string): (typeof orders)[number] | null => {
@@ -602,6 +603,18 @@ export const OrdersScreen: React.FC = () => {
                   <Download size={14} />
                   <span>导出</span>
                 </button>
+                {canRefundOrder(order) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRefundOrder(order);
+                    }}
+                    disabled={refundingOrderId === order.id}
+                    className="px-2.5 py-1.5 rounded-lg border border-amber-400/30 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60"
+                  >
+                    <span>{refundingOrderId === order.id ? '退款中' : '退款'}</span>
+                  </button>
+                )}
                 {(user?.role === 'admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
                     <button
                       type="button"

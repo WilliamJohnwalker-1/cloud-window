@@ -561,7 +561,7 @@ export const useAppStore = create<AppState>()(
       fetchOrderDetail: async (orderId) => {
         const { data: orderRow, error: orderError } = await supabase
           .from('orders')
-          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_note, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
+          .select('id, distributor_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, created_at, profiles:distributor_id(email,store_name), cities(name), product_id, quantity, unit_price, total_amount')
           .eq('id', orderId)
           .maybeSingle();
         if (orderError || !orderRow) return null;
