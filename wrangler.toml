@@ -16,19 +16,27 @@ bucket_name = "cloud-window-apk-prod"
 # Variables should be set via Cloudflare Dashboard or secrets
 # PAYMENT_MOCK = "true"
 # WECHAT_MCH_ID = ""
-# WECHAT_API_KEY = ""
 # WECHAT_APP_ID = ""
+# WECHAT_SERIAL_NO = ""
+# WECHAT_PRIVATE_KEY = ""
+# WECHAT_API_V3_KEY = ""
+# WECHAT_PLATFORM_PUBLIC_KEY = ""
+# WECHAT_NOTIFY_URL = "https://pay.yunchuang888888.com/api/payment/wechat/notify"
+# WECHAT_GATEWAY = "https://api.mch.weixin.qq.com"
 # ALIPAY_APP_ID = ""
 # ALIPAY_PRIVATE_KEY = ""
 # ALIPAY_PUBLIC_KEY = ""
+# ALIPAY_NOTIFY_URL = "https://pay.yunchuang888888.com/api/payment/alipay/notify"
 # MOBILE_LATEST_VERSION = "2.1.6"
 # MOBILE_ANDROID_APK_KEY = "inventory-app-2.1.6.apk"
 # MOBILE_ANDROID_APK_URL = "" # Optional: if empty, /mobile/latest.json will use /mobile/download/latest.apk
 
 # Secrets (set via: wrangler secret put)
 # wrangler secret put WECHAT_MCH_ID
-# wrangler secret put WECHAT_API_KEY
 # wrangler secret put WECHAT_APP_ID
+# wrangler secret put WECHAT_SERIAL_NO
+# wrangler secret put WECHAT_PRIVATE_KEY
+# wrangler secret put WECHAT_API_V3_KEY
 # wrangler secret put ALIPAY_APP_ID
 # wrangler secret put ALIPAY_PRIVATE_KEY
 # wrangler secret put ALIPAY_PUBLIC_KEY

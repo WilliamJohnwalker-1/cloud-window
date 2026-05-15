@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CreditCard, ScanLine } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import {
-  collectAlipayByAuthCode,
+  collectByAuthCode,
   runPaymentReadinessPrecheck,
   isPaymentMockMode,
   queryPaymentStatus,
@@ -19,6 +19,14 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
 const scanResetThresholdMs = 300;
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
+const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
+  const digits = normalizeDigits(input).slice(0, 24);
+  if (digits.length < 16 || digits.length > 24) return null;
+  const prefix = Number(digits.slice(0, 2));
+  if (prefix >= 10 && prefix <= 15) return 'wechat';
+  if (prefix >= 25 && prefix <= 30) return 'alipay';
+  return null;
+};
 
 export const PaymentScreen: React.FC = () => {
   const { user, products, createRetailOrders, fetchOrders } = useAppStore();
@@ -33,6 +41,7 @@ export const PaymentScreen: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState('等待创建订单');
   const [transactionId, setTransactionId] = useState('');
   const [configMessage, setConfigMessage] = useState('检查支付配置中...');
+  const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('alipay');
   const [scanTarget, setScanTarget] = useState<'product' | 'payment'>('product');
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
@@ -96,6 +105,22 @@ export const PaymentScreen: React.FC = () => {
           return;
         }
 
+        if (readiness.config.channels) {
+          const wechatReady = Boolean(readiness.config.channels.wechat?.liveReady);
+          const alipayReady = Boolean(readiness.config.channels.alipay?.liveReady);
+          const missingWechat = readiness.config.channels.wechat?.missing || [];
+          const missingAlipay = readiness.config.channels.alipay?.missing || [];
+
+          if (!wechatReady && !alipayReady) {
+            const missing = Array.from(new Set([...missingWechat, ...missingAlipay]));
+            setConfigMessage(`真实收款未就绪，微信/支付宝都缺少变量：${missing.join(', ')} · 网关 ${readiness.endpoint}`);
+            return;
+          }
+
+          setConfigMessage(`真实收款通道状态：微信${wechatReady ? '已就绪' : '未就绪'}，支付宝${alipayReady ? '已就绪' : '未就绪'} · 网关 ${readiness.endpoint}`);
+          return;
+        }
+
         if (!readiness.config.liveReady) {
           setConfigMessage(`真实收款未就绪，缺少变量：${readiness.config.missing.join(', ')} · 网关 ${readiness.endpoint}`);
           return;
@@ -125,10 +150,18 @@ export const PaymentScreen: React.FC = () => {
   const addProductByBarcode = useCallback((rawCode: string): void => {
     const digits = normalizeDigits(rawCode.trim());
     if (digits.length >= 16 && digits.length <= 24) {
+      const detectedMethod = detectPaymentMethodByAuthCode(digits);
       setScanTarget('payment');
       setPaymentAuthCode(digits.slice(0, 24));
+      if (detectedMethod) {
+        setPaymentMethod(detectedMethod);
+      }
       setStatus('failed');
-      setStatusMessage('检测到付款码（16-24位），已切换到付款码扫码目标');
+      setStatusMessage(
+        detectedMethod
+          ? `检测到付款码（16-24位），已切换到付款码扫码目标，并推荐${detectedMethod === 'wechat' ? '微信' : '支付宝'}通道`
+          : '检测到付款码（16-24位），已切换到付款码扫码目标，请确认支付通道',
+      );
       paymentInputRef.current?.focus();
       return;
     }
@@ -270,11 +303,18 @@ export const PaymentScreen: React.FC = () => {
       return;
     }
 
+    const detectedMethod = detectPaymentMethodByAuthCode(authCode);
+    const resolvedPaymentMethod = detectedMethod || paymentMethod;
+    if (detectedMethod && detectedMethod !== paymentMethod) {
+      setPaymentMethod(detectedMethod);
+    }
+
     setIsCollecting(true);
     try {
-      const result = await collectAlipayByAuthCode({
+      const result = await collectByAuthCode({
         orderId: activeOrder.id,
         amount: activeOrder.amount,
+        paymentMethod: resolvedPaymentMethod,
         authCode,
       });
 
@@ -305,7 +345,7 @@ export const PaymentScreen: React.FC = () => {
       setPaymentAuthCode('');
       paymentInputRef.current?.focus();
     }
-  }, [activeOrder, paymentAuthCode, pollUntilSettled]);
+  }, [activeOrder, paymentAuthCode, paymentMethod, pollUntilSettled]);
 
   const applyManualAmount = (): void => {
     if (!activeOrder || !canAdjustAmount) return;
@@ -395,10 +435,18 @@ export const PaymentScreen: React.FC = () => {
         if (scanTarget === 'product') {
           const normalizedDigits = normalizeDigits(scanned);
           if (normalizedDigits.length >= 16 && normalizedDigits.length <= 24) {
+            const detectedMethod = detectPaymentMethodByAuthCode(normalizedDigits);
             setScanTarget('payment');
             setPaymentAuthCode(normalizedDigits.slice(0, 24));
+            if (detectedMethod) {
+              setPaymentMethod(detectedMethod);
+            }
             setStatus('failed');
-            setStatusMessage('检测到付款码（16-24位），已切换到付款码扫码目标');
+            setStatusMessage(
+              detectedMethod
+                ? `检测到付款码（16-24位），已切换到付款码扫码目标，并推荐${detectedMethod === 'wechat' ? '微信' : '支付宝'}通道`
+                : '检测到付款码（16-24位），已切换到付款码扫码目标，请确认支付通道',
+            );
             setProductScanCode('');
             paymentInputRef.current?.focus();
             return;
@@ -414,6 +462,10 @@ export const PaymentScreen: React.FC = () => {
 
         const authCode = scanned.replace(/\D/g, '').slice(0, 24);
         setPaymentAuthCode(authCode);
+        const detectedMethod = detectPaymentMethodByAuthCode(authCode);
+        if (detectedMethod) {
+          setPaymentMethod(detectedMethod);
+        }
         if (authCode.length >= 16 && authCode.length <= 24) {
           void collectByCodeRef.current(authCode);
         }
@@ -439,7 +491,7 @@ export const PaymentScreen: React.FC = () => {
       <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex items-start justify-between gap-4">
         <div>
           <h3 className="text-xl font-bold">扫码收款台（Web）</h3>
-          <p className="text-sm text-white/50 mt-1">流程：扫商品条码建单 → 扫客户付款码收款（支付宝条码）</p>
+          <p className="text-sm text-white/50 mt-1">流程：扫商品条码建单 → 扫客户付款码收款（支持微信/支付宝）</p>
           <p className="text-xs text-white/40 mt-2">{configMessage}</p>
         </div>
         <span className={`px-3 py-1 rounded-full border text-xs font-bold ${isPaymentMockMode ? 'text-orange-300 border-orange-400/40 bg-orange-500/10' : 'text-green-300 border-green-400/40 bg-green-500/10'}`}>
@@ -524,6 +576,23 @@ export const PaymentScreen: React.FC = () => {
             <h4 className="font-semibold">2) 扫描客户付款码收款</h4>
           </div>
 
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('alipay')}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${paymentMethod === 'alipay' ? 'bg-sky-500/20 border-sky-400/40 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            >
+              支付宝付款码
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('wechat')}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${paymentMethod === 'wechat' ? 'bg-emerald-500/20 border-emerald-400/40 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            >
+              微信付款码
+            </button>
+          </div>
+
           <div className="bg-white/5 rounded-xl p-3 text-sm space-y-1">
             <p>订单号：{activeOrder ? `#${activeOrder.id.slice(0, 8)}` : '未创建'}</p>
             <p>应收金额：{activeOrder ? `¥${activeOrder.amount.toFixed(2)}` : '-'}</p>
@@ -555,14 +624,23 @@ export const PaymentScreen: React.FC = () => {
           <input
             ref={paymentInputRef}
             value={paymentAuthCode}
-            onChange={(event) => setPaymentAuthCode(event.target.value.replace(/\D/g, '').slice(0, 24))}
+            onChange={(event) => {
+              const nextCode = event.target.value.replace(/\D/g, '').slice(0, 24);
+              setPaymentAuthCode(nextCode);
+              const detectedMethod = detectPaymentMethodByAuthCode(nextCode);
+              if (detectedMethod && detectedMethod !== paymentMethod) {
+                setPaymentMethod(detectedMethod);
+                setStatus('pending');
+                setStatusMessage(`已根据付款码自动推荐${detectedMethod === 'wechat' ? '微信' : '支付宝'}通道`);
+              }
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
                 void handleCollect();
               }
             }}
-            placeholder="扫描客户付款码（16-24位）"
+            placeholder={`扫描${paymentMethod === 'wechat' ? '微信' : '支付宝'}付款码（16-24位）`}
             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
           />
 

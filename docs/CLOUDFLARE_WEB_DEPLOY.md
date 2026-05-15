@@ -28,7 +28,7 @@ npm run web:build
 
 - `PAYMENT_MOCK=true`（联调）
 - 生产时改为 `PAYMENT_MOCK=false`，并配置：
-  - 微信：`WECHAT_MCH_ID`, `WECHAT_APP_ID`, `WECHAT_API_V3_KEY`, `WECHAT_SERIAL_NO`, `WECHAT_PRIVATE_KEY`
+  - 微信付款码：`WECHAT_MCH_ID`, `WECHAT_APP_ID`, `WECHAT_SERIAL_NO`, `WECHAT_PRIVATE_KEY`, `WECHAT_API_V3_KEY`, `WECHAT_PLATFORM_PUBLIC_KEY`, `WECHAT_NOTIFY_URL`（可选 `WECHAT_GATEWAY`）
   - 支付宝：`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, `ALIPAY_GATEWAY`, `ALIPAY_NOTIFY_URL`
   - 移动端安装包更新清单：
     - `MOBILE_LATEST_VERSION`（例如 `2.1.6`）
@@ -39,7 +39,8 @@ npm run web:build
 ```bash
 curl https://pay.yunchuang888888.com/api/payment/config-check
 
-# 建议回调地址（支付宝）
+# 建议回调地址
+# WECHAT_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/wechat/notify
 # ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify
 ```
 
@@ -153,13 +154,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 5) 微信 / 支付宝正式接入要点（官方约束）
 
-### 微信 Native 支付（API v3）
+### 微信付款码支付（API v3 Micropay）
 
-- 下单接口：`POST /v3/pay/transactions/native`
-- 必填：`appid`, `mchid`, `description`, `out_trade_no`, `notify_url`, `amount.total(分)`
+- 收款接口：`POST /v3/pay/transactions/micropay`
+- 必填：`appid`, `mchid`, `description`, `out_trade_no`, `payer.auth_code`, `amount.total(分)`
 - 请求签名：`WECHATPAY2-SHA256-RSA2048`（商户私钥）
-- 回调验签：使用微信平台公钥验证 `Wechatpay-*` 头签名
-- 回调报文解密：`AES-256-GCM` + APIv3 Key
+- 结果查询：`GET /v3/pay/transactions/out-trade-no/{out_trade_no}?mchid=...`
+- 异步回调：`/api/payment/wechat/notify`（验签 + 回调密文解密 + 金额校验 + 幂等落账）
 
 ### 支付宝当面付（付款码条码支付）
 
@@ -173,5 +174,5 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 6) 当前代码状态
 
-- 前端已支持：订单购物车支持扫码商品条码入车，按零售价计算后扫码买家付款码执行支付宝收款
-- Worker 已支持 mock + 支付宝条码支付主流程；微信仍为占位待接入
+- 前端已支持：订单购物车支持扫码商品条码入车，按零售价计算后扫码买家付款码收款（支付宝/微信双通道 + 自动推荐）
+- Worker 已支持 mock + 微信/支付宝双通道收款；微信含 micropay 主流程、主动查单与回调落账链路

@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.10）
+### 5. 启动 Web 端（v1.2.11）
 
 ```bash
 npm run web:v2
@@ -240,6 +240,17 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 支付与下载相关 Worker 变量建议：
 
+- `WECHAT_MCH_ID=<微信支付商户号>`
+- `WECHAT_APP_ID=<微信支付关联 appid>`
+- `WECHAT_SERIAL_NO=<商户证书序列号>`
+- `WECHAT_PRIVATE_KEY=<商户 API 证书私钥 PEM>`
+- `WECHAT_API_V3_KEY=<微信支付 APIv3 32位密钥>`
+- `WECHAT_PLATFORM_PUBLIC_KEY=<微信支付平台公钥 PEM>`
+- `WECHAT_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/wechat/notify`
+- `WECHAT_GATEWAY=https://api.mch.weixin.qq.com`（可选）
+- `ALIPAY_APP_ID=<支付宝应用ID>`
+- `ALIPAY_PRIVATE_KEY=<支付宝应用私钥>`
+- `ALIPAY_PUBLIC_KEY=<支付宝公钥>`
 - `ALIPAY_NOTIFY_URL=https://pay.yunchuang888888.com/api/payment/alipay/notify`
 - `MOBILE_ANDROID_APK_URL=https://yunchuang888888.com/mobile/download/latest.apk`
 
@@ -308,13 +319,19 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 后续规划
 
-- [ ] 直营店 Web 收款正式接入：微信 Native 支付 + 支付宝当面付（含签名、回调验签、幂等、对账）
+- [ ] 直营店 Web 收款生产加固：微信付款码支付（签名、幂等、对账、异常补偿）
 - [ ] Cloudflare Worker 支付生产配置（商户密钥、回调地址白名单、监控告警）
 - [ ] 通知链路自动化测试（store 层）
 - [ ] 推送通知接入（FCM/APNs）
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.11 (2026-05-15) - 收银台双通道与微信回调补齐
+
+- 收银台支持支付宝/微信付款码双通道切换，支持按付款码前缀自动推荐支付通道
+- Worker 新增微信付款码收款主流程（micropay）与主动查单，并保留支付宝链路
+- 新增微信支付回调落账链路：验签、解密、金额校验、幂等事件落库与订单状态更新
 
 ### Mobile v2.1.11 (2026-03-19) - 城市排序冲突修复与稳定性加固
 
