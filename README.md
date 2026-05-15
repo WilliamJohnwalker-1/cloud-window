@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.11）
+### 5. 启动 Web 端（v1.2.12）
 
 ```bash
 npm run web:v2
@@ -326,6 +326,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.12 (2026-05-15) - 微信收款联调兼容性修复
+
+- 修复微信付款码收款 `out_trade_no` 超长问题（UUID 去连字符后按 32 字节发送）
+- 修复微信签名头构造鲁棒性（清洗序列号/签名中的非法换行字符）并增强错误诊断
+- 修复微信收款接口字段兼容问题：按最小字段集发送并兼容网关端点差异
+- 修复收银台扫码枪重复触发导致“一次扫码加购两件”的问题，优化扫码输入节流阈值
 
 ### Web v1.2.11 (2026-05-15) - 收银台双通道与微信回调补齐
 
