@@ -3,6 +3,7 @@ export type WebPaymentStatus = 'pending' | 'paid' | 'failed' | 'timeout';
 interface PaymentCollectParams {
   orderId: string;
   amount: number;
+  paymentMethod: 'wechat' | 'alipay';
   authCode: string;
   subject?: string;
 }
@@ -21,6 +22,10 @@ interface PaymentConfigCheckResult {
   mock: boolean;
   liveReady: boolean;
   missing: string[];
+  channels?: {
+    wechat?: { liveReady: boolean; missing: string[] };
+    alipay?: { liveReady: boolean; missing: string[] };
+  };
 }
 
 interface PaymentHealthCheckResult {
@@ -102,6 +107,22 @@ export async function fetchPaymentConfigCheck(): Promise<PaymentConfigCheckResul
     mock: Boolean(data.mock),
     liveReady: Boolean(data.liveReady),
     missing: Array.isArray(data.missing) ? data.missing.map((item: unknown) => String(item)) : [],
+    channels: data.channels && typeof data.channels === 'object'
+      ? {
+        wechat: data.channels.wechat
+          ? {
+            liveReady: Boolean(data.channels.wechat.liveReady),
+            missing: Array.isArray(data.channels.wechat.missing) ? data.channels.wechat.missing.map((item: unknown) => String(item)) : [],
+          }
+          : undefined,
+        alipay: data.channels.alipay
+          ? {
+            liveReady: Boolean(data.channels.alipay.liveReady),
+            missing: Array.isArray(data.channels.alipay.missing) ? data.channels.alipay.missing.map((item: unknown) => String(item)) : [],
+          }
+          : undefined,
+      }
+      : undefined,
   };
 }
 
@@ -118,7 +139,7 @@ export async function runPaymentReadinessPrecheck(): Promise<PaymentReadinessRes
   };
 }
 
-export async function collectAlipayByAuthCode(params: PaymentCollectParams): Promise<PaymentResult> {
+export async function collectByAuthCode(params: PaymentCollectParams): Promise<PaymentResult> {
   const response = await fetch(withApiBase('/api/payment/collect'), {
     method: 'POST',
     headers: {
@@ -127,7 +148,7 @@ export async function collectAlipayByAuthCode(params: PaymentCollectParams): Pro
     body: JSON.stringify({
       orderId: params.orderId,
       amount: params.amount,
-      paymentMethod: 'alipay',
+      paymentMethod: params.paymentMethod,
       authCode: params.authCode,
       subject: params.subject || `订单收款-${params.orderId.slice(0, 8)}`,
     }),
@@ -155,6 +176,14 @@ export async function collectAlipayByAuthCode(params: PaymentCollectParams): Pro
     outTradeNo: data.outTradeNo ? String(data.outTradeNo) : undefined,
     transactionId: data.transactionId ? String(data.transactionId) : undefined,
   };
+}
+
+export async function collectWechatByAuthCode(params: Omit<PaymentCollectParams, 'paymentMethod'>): Promise<PaymentResult> {
+  return collectByAuthCode({ ...params, paymentMethod: 'wechat' });
+}
+
+export async function collectAlipayByAuthCode(params: Omit<PaymentCollectParams, 'paymentMethod'>): Promise<PaymentResult> {
+  return collectByAuthCode({ ...params, paymentMethod: 'alipay' });
 }
 
 export async function queryPaymentStatus(orderId: string): Promise<{ status: WebPaymentStatus; transactionId?: string }> {

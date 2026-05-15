@@ -231,10 +231,10 @@ Before committing:
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.11`
-- Current web baseline: `v1.2.10`
+- Current web baseline: `v1.2.11`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 收款台支持管理员抹零 + 抹零备注落订单(payment_note) + 订单删除弹窗改为站内UI
+- Latest web stabilization: 收款台支持支付宝/微信双通道与付款码自动推荐 + 微信回调验签解密落账
 - Latest mobile stabilization: 新建城市默认追加到排序末尾 + sort_index 冲突防护与城市排序稳定性修复
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
