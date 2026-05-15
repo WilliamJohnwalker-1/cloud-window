@@ -26,6 +26,13 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
+function normalizeWechatSerial(input) {
+  return String(input || '')
+    .replace(/[\r\n\s:]/g, '')
+    .trim()
+    .toUpperCase();
+}
+
 function pemToArrayBuffer(pem) {
   const lines = pem
     .replace(/-----BEGIN PRIVATE KEY-----/g, '')
@@ -117,7 +124,7 @@ async function readJsonSafely(response) {
 
 async function postWechatRequest(env, method, pathWithQuery, payload = null) {
   const mchId = String(env.WECHAT_MCH_ID || '').replace(/[\r\n]/g, '').trim();
-  const serialNo = String(env.WECHAT_SERIAL_NO || '').replace(/[\r\n]/g, '').trim();
+  const serialNo = normalizeWechatSerial(env.WECHAT_SERIAL_NO);
   const privateKey = env.WECHAT_PRIVATE_KEY;
   const gateway = String(env.WECHAT_GATEWAY || 'https://api.mch.weixin.qq.com').trim().replace(/\/$/, '');
 
@@ -140,6 +147,7 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
     headers: {
       Accept: 'application/json',
       Authorization: authorization,
+      'User-Agent': 'cloud-window-worker/1.0',
       ...(payload === null ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(payload === null ? {} : { body }),
@@ -152,11 +160,13 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
 
   const errorCode = String(data.code || '').trim();
   const errorMessage = String(data.message || data.raw || `微信请求失败（HTTP ${response.status}）`).trim();
+  const requestId = String(response.headers.get('Request-ID') || response.headers.get('request-id') || '').trim();
   return {
     ok: false,
     status: mapWechatErrorCodeToStatus(errorCode),
     code: errorCode,
     error: errorMessage,
+    requestId,
     data,
     httpStatus: response.status,
   };
@@ -722,7 +732,15 @@ export default {
         return json({
           success: false,
           status: finalStatus,
-          error: collectResult.error || '微信付款码收款失败',
+          error: (() => {
+            const code = String(collectResult.code || '').toUpperCase();
+            const base = collectResult.error || '微信付款码收款失败';
+            const requestIdSuffix = collectResult.requestId ? `（Request-ID: ${collectResult.requestId}）` : '';
+            if (code === 'SIGN_ERROR') {
+              return `微信签名验证不通过，请核对 WECHAT_PRIVATE_KEY 与 WECHAT_SERIAL_NO 是否同一商户证书，且与商户平台当前证书一致${requestIdSuffix}`;
+            }
+            return `${base}${requestIdSuffix}`;
+          })(),
           orderId,
           outTradeNo: orderId,
           transactionId: wechatTransactionId || undefined,
@@ -894,7 +912,17 @@ export default {
           payload: queryResult.data || { code: queryResult.code, error: queryResult.error },
         });
 
-        return json({ status, transactionId: transactionId || undefined, error: queryResult.ok ? undefined : queryResult.error });
+        const queryError = (() => {
+          if (queryResult.ok) return undefined;
+          const code = String(queryResult.code || '').toUpperCase();
+          const requestIdSuffix = queryResult.requestId ? `（Request-ID: ${queryResult.requestId}）` : '';
+          if (code === 'SIGN_ERROR') {
+            return `微信查单签名验证不通过，请核对 WECHAT_PRIVATE_KEY 与 WECHAT_SERIAL_NO${requestIdSuffix}`;
+          }
+          return `${queryResult.error || '微信查单失败'}${requestIdSuffix}`;
+        })();
+
+        return json({ status, transactionId: transactionId || undefined, error: queryError });
       }
 
       const queryResult = await postAlipayRequest(env, 'alipay.trade.query', {
