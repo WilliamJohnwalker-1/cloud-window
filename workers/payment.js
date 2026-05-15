@@ -643,12 +643,6 @@ export default {
         });
 
         const wechatOutTradeNo = toWechatOutTradeNo(orderId);
-        const rawClientIp = String(
-          request.headers.get('CF-Connecting-IP')
-          || request.headers.get('X-Forwarded-For')
-          || '',
-        ).split(',')[0].trim();
-        const clientIp = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(rawClientIp) ? rawClientIp : '127.0.0.1';
         const storeId = String(env.WECHAT_STORE_ID || 'STORE-001').trim().slice(0, 32);
         const wechatCollectPayload = {
           appid: String(env.WECHAT_APP_ID || '').trim(),
@@ -663,7 +657,6 @@ export default {
             auth_code: authCode,
           },
           scene_info: {
-            payer_client_ip: clientIp,
             store_info: {
               id: storeId,
             },
