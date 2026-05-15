@@ -31,6 +31,9 @@ export const OrdersScreen: React.FC = () => {
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
+  const [refundModalOrderId, setRefundModalOrderId] = useState<string | null>(null);
+  const [refundAmountInput, setRefundAmountInput] = useState('');
+  const [refundReasonInput, setRefundReasonInput] = useState('收银台退款');
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -208,13 +211,32 @@ export const OrdersScreen: React.FC = () => {
     const canOperate = user?.role === 'admin' || user?.role === 'inventory_manager';
     if (!canOperate) return false;
     if (order.order_kind !== 'retail') return false;
-    if (String(order.payment_status || '').toLowerCase() !== 'paid') return false;
+    const paymentStatus = String(order.payment_status || '').toLowerCase();
+    if (!['paid', 'partial_refunded'].includes(paymentStatus)) return false;
     if (order.payment_method !== 'wechat' && order.payment_method !== 'alipay') return false;
     return true;
   };
 
-  const handleRefundOrder = async (order: (typeof orders)[number]): Promise<void> => {
+  const openRefundModal = (order: (typeof orders)[number]): void => {
+    const paidAmount = Number(order.payment_amount || order.total_discount_amount || 0);
+    setRefundModalOrderId(order.id);
+    setRefundAmountInput(paidAmount > 0 ? paidAmount.toFixed(2) : '');
+    setRefundReasonInput('收银台退款');
+  };
+
+  const closeRefundModal = (): void => {
+    setRefundModalOrderId(null);
+    setRefundAmountInput('');
+    setRefundReasonInput('收银台退款');
+  };
+
+  const handleRefundOrder = async (order: (typeof orders)[number], amount: number, reason: string): Promise<void> => {
     if (!canRefundOrder(order) || refundingOrderId) return;
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPageNotice({ type: 'error', text: '退款金额必须大于 0' });
+      return;
+    }
 
     setRefundingOrderId(order.id);
     try {
@@ -225,8 +247,8 @@ export const OrdersScreen: React.FC = () => {
         },
         body: JSON.stringify({
           orderId: order.id,
-          amount: Number(order.payment_amount || order.total_discount_amount || 0),
-          reason: '收银台退款',
+          amount,
+          reason: reason.trim() || '收银台退款',
         }),
       });
 
@@ -240,7 +262,7 @@ export const OrdersScreen: React.FC = () => {
         type: 'success',
         text: payload.status === 'refunded'
           ? `退款成功：¥${Number(payload.refundAmount || 0).toFixed(2)}`
-          : `退款申请已提交，状态：${String(payload.status || 'refund_pending')}`,
+          : `退款申请已提交，状态：${String(payload.status || 'refund_pending')}，本次退款 ¥${Number(payload.refundAmount || 0).toFixed(2)}`,
       });
 
       await fetchOrders();
@@ -249,6 +271,7 @@ export const OrdersScreen: React.FC = () => {
         setDetailCache((prev) => ({ ...prev, [order.id]: latest }));
         setDetailOrderData(latest);
       }
+      closeRefundModal();
     } catch (error) {
       setPageNotice({ type: 'error', text: `退款异常：${error instanceof Error ? error.message : '未知错误'}` });
     } finally {
@@ -606,9 +629,7 @@ export const OrdersScreen: React.FC = () => {
                 {canRefundOrder(order) && (
                   <button
                     type="button"
-                    onClick={() => {
-                      void handleRefundOrder(order);
-                    }}
+                    onClick={() => openRefundModal(order)}
                     disabled={refundingOrderId === order.id}
                     className="px-2.5 py-1.5 rounded-lg border border-amber-400/30 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 text-xs font-bold inline-flex items-center gap-1 disabled:opacity-60"
                   >
@@ -810,7 +831,7 @@ export const OrdersScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    void handleRefundOrder(detailOrder);
+                    openRefundModal(detailOrder);
                   }}
                   disabled={refundingOrderId === detailOrder.id}
                   className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
@@ -889,6 +910,60 @@ export const OrdersScreen: React.FC = () => {
                 className="px-4 py-2 rounded-xl border border-red-400/30 bg-red-500/20 text-red-100 font-semibold disabled:opacity-60"
               >
                 {deletingOrderId === deleteConfirmOrderId ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {refundModalOrderId && (
+        <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">确认退款</h3>
+              <button type="button" onClick={closeRefundModal} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/60">订单 #{refundModalOrderId.slice(0, 8)} 支持部分退款，请确认退款金额与原因。</p>
+            <div className="space-y-2">
+              <label className="text-xs text-white/50">退款金额</label>
+              <input
+                value={refundAmountInput}
+                onChange={(event) => setRefundAmountInput(event.target.value.replace(/[^0-9.]/g, ''))}
+                placeholder="输入退款金额"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-white/50">退款原因</label>
+              <input
+                value={refundReasonInput}
+                onChange={(event) => setRefundReasonInput(event.target.value)}
+                placeholder="退款原因"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeRefundModal}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const order = getResolvedOrder(refundModalOrderId);
+                  if (!order) return;
+                  const amount = Number(refundAmountInput);
+                  void handleRefundOrder(order, amount, refundReasonInput);
+                }}
+                disabled={refundingOrderId === refundModalOrderId}
+                className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
+              >
+                {refundingOrderId === refundModalOrderId ? '退款处理中...' : '确认退款'}
               </button>
             </div>
           </div>

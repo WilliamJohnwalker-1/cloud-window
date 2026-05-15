@@ -146,7 +146,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.15）
+### 5. 启动 Web 端（v1.2.16）
 
 ```bash
 npm run web:v2
@@ -326,6 +326,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.16 (2026-05-15) - 退款确认与部分退款支持
+
+- 退款操作新增二次确认弹窗，提交前需确认“退款金额 + 退款原因”
+- 支持部分退款：前端可输入任意有效金额，后端按剩余可退金额做严格校验
+- 多次退款幂等增强：退款事件键改为带 `out_refund_no/out_request_no`，避免事件冲突
 
 ### Web v1.2.15 (2026-05-15) - 订单详情展示与退款入口可达性修复
 
