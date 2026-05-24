@@ -207,10 +207,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-19 same as above
+1. migrate-v2.sql -> 2-20 same as above
 
 ## GOTCHAS
 
@@ -230,12 +230,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.12`
+- Current mobile baseline: `v2.1.13`
 - Current web baseline: `v1.2.16`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 退款确认弹窗上线 + 部分退款支持 + 退款事件幂等键增强
-- Latest mobile stabilization: 条形码数字显示兼容性微调（安全边距 + 字号行高字距优化 + 自适应缩放）
+- Latest mobile stabilization: 注册档案自愈修复（profiles 缺失自动补建）+ 登录报错诊断增强
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

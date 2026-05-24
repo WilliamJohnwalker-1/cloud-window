@@ -25,6 +25,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v3.7-order-payment-note.sql`: order payment note + admin RPC for cashier manual rounding remark.
 - `migrate-v3.8-city-sort-index-guard.sql`: city sort_index de-dup + append-at-bottom insert guard + swap safety.
 - `migrate-v3.9-rls-optimization.sql`: RLS helper functions + policy optimization/hardening.
+- `migrate-v3.10-profiles-self-heal.sql`: allow users to self-heal missing distributor profile rows.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -48,7 +49,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 16. `migrate-v3.7-order-payment-note.sql`
 17. `migrate-v3.8-city-sort-index-guard.sql`
 18. `migrate-v3.9-rls-optimization.sql`
-19. `storage-policies.sql`
+19. `migrate-v3.10-profiles-self-heal.sql`
+20. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -69,7 +71,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 16. `migrate-v3.7-order-payment-note.sql`
 17. `migrate-v3.8-city-sort-index-guard.sql`
 18. `migrate-v3.9-rls-optimization.sql`
-19. `storage-policies.sql`
+19. `migrate-v3.10-profiles-self-heal.sql`
+20. `storage-policies.sql`
 
 ## TABLES
 

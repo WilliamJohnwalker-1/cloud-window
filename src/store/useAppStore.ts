@@ -91,11 +91,76 @@ interface RpcErrorLike {
   message?: string;
 }
 
+interface DetailedErrorLike {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+}
+
+interface AuthUserLike {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}
+
 const SESSION_GRACE_WINDOW_MS = 20_000;
 const SESSION_RETRY_DELAY_MS = 600;
 const SESSION_RETRY_TIMES = 2;
+const UUID_LIKE_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let sessionGuardGraceUntil = 0;
+
+const isUuidLike = (value: string): boolean => UUID_LIKE_REGEX.test(value);
+
+const normalizeError = (error: unknown): Error => {
+  if (error instanceof Error) return error;
+  return new Error(typeof error === 'string' ? error : '未知错误');
+};
+
+const formatSupabaseError = (error: unknown): Error => {
+  const fallbackError = normalizeError(error);
+  const raw = error as DetailedErrorLike | null;
+  const message = raw?.message ?? fallbackError.message;
+  const code = raw?.code ? ` [${raw.code}]` : '';
+  const details = raw?.details ? ` ${raw.details}` : '';
+  const hint = raw?.hint ? ` 提示: ${raw.hint}` : '';
+  return new Error(`${message}${code}${details}${hint}`.trim());
+};
+
+const ensureProfileForAuthUser = async (authUser: AuthUserLike): Promise<ProfileRow> => {
+  const { data: existingProfile, error: existingError } = await supabase
+    .from('profiles')
+    .select('*, cities(name)')
+    .eq('id', authUser.id)
+    .maybeSingle();
+
+  if (existingError) throw formatSupabaseError(existingError);
+  if (existingProfile) return existingProfile;
+
+  const metadata = authUser.user_metadata || {};
+  const cityIdRaw = typeof metadata.city_id === 'string' ? metadata.city_id.trim() : '';
+  const storeNameRaw = typeof metadata.store_name === 'string' ? metadata.store_name.trim() : '';
+
+  if (!isUuidLike(cityIdRaw) || !storeNameRaw) {
+    throw new Error('账号资料不完整，无法自动创建档案。请联系管理员处理该账号。');
+  }
+
+  const { data: insertedProfile, error: insertError } = await supabase
+    .from('profiles')
+    .insert({
+      id: authUser.id,
+      email: authUser.email || '',
+      role: 'distributor',
+      city_id: cityIdRaw,
+      store_name: storeNameRaw,
+    })
+    .select('*, cities(name)')
+    .single();
+
+  if (insertError) throw formatSupabaseError(insertError);
+  return insertedProfile;
+};
 
 const setSessionGuardGraceWindow = (): void => {
   sessionGuardGraceUntil = Date.now() + SESSION_GRACE_WINDOW_MS;
@@ -316,13 +381,7 @@ export const useAppStore = create<AppState>()(
           if (error) throw error;
 
           if (data.user) {
-            const { data: profile, error: profileError } = await supabase
-              .from('profiles')
-              .select('*, cities(name)')
-              .eq('id', data.user.id)
-              .single();
-
-            if (profileError) throw profileError;
+            const profile = await ensureProfileForAuthUser(data.user);
             set({ user: mapProfile(profile) });
 
             const { error: activateError } = await supabase.rpc('activate_current_session');
@@ -351,9 +410,15 @@ export const useAppStore = create<AppState>()(
       ) => {
         set({ isLoading: true });
         try {
+          const normalizedCityId = cityId?.trim();
+          const normalizedStoreName = storeName?.trim();
+
           if (role === 'distributor') {
-            if (!cityId) throw new Error('请选择归属城市');
-            if (!storeName?.trim()) throw new Error('请输入店面名称');
+            if (!normalizedCityId) throw new Error('请选择归属城市');
+            if (!isUuidLike(normalizedCityId)) {
+              throw new Error('城市数据格式异常，请联系管理员检查城市配置');
+            }
+            if (!normalizedStoreName) throw new Error('请输入店面名称');
           }
 
           const { data, error } = await supabase.auth.signUp({
@@ -362,21 +427,16 @@ export const useAppStore = create<AppState>()(
             options: {
               data: {
                 role,
-                city_id: cityId,
-                store_name: storeName?.trim(),
+                city_id: normalizedCityId,
+                store_name: normalizedStoreName,
               },
             },
           });
-          if (error) throw error;
+          if (error) throw formatSupabaseError(error);
 
           if (data.session && data.user) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*, cities(name)')
-              .eq('id', data.user.id)
-              .single();
-
-            if (profile) set({ user: mapProfile(profile) });
+            const profile = await ensureProfileForAuthUser(data.user);
+            set({ user: mapProfile(profile) });
 
             const { error: activateError } = await supabase.rpc('activate_current_session');
             if (activateError && !isMissingRpcFunction(activateError)) {
@@ -389,7 +449,7 @@ export const useAppStore = create<AppState>()(
 
           return { error: null };
         } catch (error) {
-          return { error: error as Error };
+          return { error: normalizeError(error) };
         } finally {
           set({ isLoading: false });
         }
