@@ -28,15 +28,17 @@ import type { ProductWithDetails } from '../types';
 
 function BarcodeSvg({ value, height = 50, barWidth = 1.5 }: { value: string; height?: number; barWidth?: number }) {
   const { bars, totalWidth } = encodeEAN13Bars(value, barWidth);
+  const horizontalPadding = 2;
+  const svgWidth = totalWidth + horizontalPadding * 2;
   if (bars.length === 0) return <Text style={{ color: Colors.textTertiary, fontSize: 12 }}>{value}</Text>;
   return (
-    <View style={{ alignItems: 'center' }}>
-      <Svg width={totalWidth} height={height}>
+    <View style={styles.barcodeSvgContainer}>
+      <Svg width={svgWidth} height={height}>
         {bars.map((bar) => (
-          <Rect key={`${bar.x}-${bar.w}`} x={bar.x} y={0} width={bar.w} height={height} fill="#2D2D3F" />
+          <Rect key={`${bar.x}-${bar.w}`} x={bar.x + horizontalPadding} y={0} width={bar.w} height={height} fill="#2D2D3F" />
         ))}
       </Svg>
-      <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 3, letterSpacing: 2, fontVariant: ['tabular-nums'] }}>{value}</Text>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={styles.barcodeValueText}>{value}</Text>
     </View>
   );
 }
@@ -588,7 +590,7 @@ export default function ProductsScreen() {
               {editingProduct?.barcode ? (
                 <View style={[styles.barcodeSection, { backgroundColor: theme.surfaceSecondary }]}>
                   <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>商品条码</Text>
-                  <BarcodeSvg value={editingProduct.barcode} height={60} barWidth={1.5} />
+                  <BarcodeSvg value={editingProduct.barcode} height={64} barWidth={1.6} />
                 </View>
               ) : null}
 
@@ -872,6 +874,20 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
+  barcodeSvgContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  barcodeValueText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: Colors.textSecondary,
+    marginTop: 6,
+    letterSpacing: 1.2,
+    fontVariant: ['tabular-nums'],
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1009,7 +1025,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: Radius.lg,
     paddingVertical: 12,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     alignItems: 'center',
     marginBottom: 15,
     ...Shadow.soft,
