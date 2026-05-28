@@ -18,14 +18,18 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
-import type { ProductWithDetails } from '../types';
+import type { ProductWithDetails, StoreInventory } from '../types';
 
 export default function InventoryScreen() {
   const {
     products,
     cities,
+    stores,
+    storeInventory,
     fetchProducts,
     fetchCities,
+    fetchStores,
+    fetchStoreInventory,
     updateInventory,
     updateInventorySettings,
     findProductByBarcode,
@@ -35,8 +39,12 @@ export default function InventoryScreen() {
     useShallow((state) => ({
       products: state.products,
       cities: state.cities,
+      stores: state.stores,
+      storeInventory: state.storeInventory,
       fetchProducts: state.fetchProducts,
       fetchCities: state.fetchCities,
+      fetchStores: state.fetchStores,
+      fetchStoreInventory: state.fetchStoreInventory,
       updateInventory: state.updateInventory,
       updateInventorySettings: state.updateInventorySettings,
       findProductByBarcode: state.findProductByBarcode,
@@ -58,6 +66,8 @@ export default function InventoryScreen() {
   const [inboundProduct, setInboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [viewMode, setViewMode] = useState<'main' | 'store'>('main');
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
@@ -66,11 +76,30 @@ export default function InventoryScreen() {
   useEffect(() => {
     fetchProducts();
     fetchCities();
-  }, [fetchProducts, fetchCities]);
+    if (isAdminOrManager) {
+      fetchStores();
+    }
+  }, [fetchProducts, fetchCities, fetchStores, isAdminOrManager]);
+
+  useEffect(() => {
+    if (viewMode === 'store' && selectedStoreId) {
+      fetchStoreInventory(selectedStoreId);
+    }
+  }, [viewMode, selectedStoreId, fetchStoreInventory]);
+
+  useEffect(() => {
+    if (viewMode === 'store' && !selectedStoreId && stores.length > 0) {
+      setSelectedStoreId(stores[0].id);
+    }
+  }, [viewMode, selectedStoreId, stores]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchProducts();
+    if (viewMode === 'main') {
+      await fetchProducts();
+    } else if (viewMode === 'store' && selectedStoreId) {
+      await fetchStoreInventory(selectedStoreId);
+    }
     setRefreshing(false);
   };
 
@@ -88,6 +117,11 @@ export default function InventoryScreen() {
     if (filter === 'low') return p.quantity !== undefined && p.quantity < (p.min_quantity ?? 10);
     if (filter === 'normal') return p.quantity === undefined || p.quantity >= (p.min_quantity ?? 10);
     return true;
+  });
+
+  const filteredStoreInventory = storeInventory.filter((item) => {
+    if (!searchText.trim()) return true;
+    return item.product_name?.toLowerCase().includes(searchText.toLowerCase());
   });
 
   const handleUpdateStock = (product: ProductWithDetails, adjustment: number) => {
@@ -279,6 +313,24 @@ export default function InventoryScreen() {
     );
   };
 
+  const renderStoreInventoryItem = ({ item }: { item: StoreInventory }) => {
+    return (
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        <View style={styles.cardHeader}>
+          <Text style={[styles.productName, { color: theme.textPrimary }]}>{item.product_name}</Text>
+        </View>
+        <View style={styles.stockInfo}>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>店铺库存</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary }]}>
+              {item.quantity ?? 0}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   const totalStock = cityFilteredProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
   const lowStockCount = lowStockProducts.length;
 
@@ -317,109 +369,185 @@ export default function InventoryScreen() {
         ) : null}
       </View>
 
-      <View style={styles.cityFilterSpacer} />
+      <View style={[styles.cityFilterSpacer, isAdminOrManager && { height: 58 + 48 }]} />
 
       <View style={styles.cityFilterOverlay}>
+        {isAdminOrManager && (
+          <View style={[styles.viewModeContainer, { backgroundColor: theme.surface }]}>
+            <TouchableOpacity
+              style={[styles.viewModeButton, viewMode === 'main' && { backgroundColor: theme.surfaceSecondary }]}
+              onPress={() => setViewMode('main')}
+            >
+              <Text style={[styles.viewModeText, viewMode === 'main' && [styles.viewModeTextActive, { color: theme.textPrimary }]]}>总仓库存</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewModeButton, viewMode === 'store' && { backgroundColor: theme.surfaceSecondary }]}
+              onPress={() => setViewMode('store')}
+            >
+              <Text style={[styles.viewModeText, viewMode === 'store' && [styles.viewModeTextActive, { color: theme.textPrimary }]]}>店铺库存</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.cityFilterRow}
+          style={[styles.cityFilterRow, { backgroundColor: theme.surface, borderTopColor: theme.border }]}
           contentContainerStyle={styles.cityFilterContent}
         >
-          <TouchableOpacity
-            style={[styles.cityFilterItem, filterCityId === null && styles.cityFilterItemActive]}
-            onPress={() => setFilterCityId(null)}
-          >
-            <LinearGradient
-               colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.cityGradientChip}
-            >
-              <Text
-                style={[styles.cityFilterText, filterCityId === null && styles.cityFilterTextActive]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
+          {viewMode === 'main' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.cityFilterItem, filterCityId === null && styles.cityFilterItemActive]}
+                onPress={() => setFilterCityId(null)}
               >
-                全部城市
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          {cities.map((city) => (
-            <TouchableOpacity
-              key={city.id}
-              style={[styles.cityFilterItem, filterCityId === city.id && styles.cityFilterItemActive]}
-              onPress={() => setFilterCityId(city.id)}
-            >
-              <LinearGradient
-                 colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.cityGradientChip}
-              >
-                <Text
-                  style={[styles.cityFilterText, filterCityId === city.id && styles.cityFilterTextActive]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
+                <LinearGradient
+                   colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cityGradientChip}
                 >
-                  {city.name}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
+                  <Text
+                    style={[styles.cityFilterText, filterCityId === null && styles.cityFilterTextActive]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    全部城市
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              {cities.map((city) => (
+                <TouchableOpacity
+                  key={city.id}
+                  style={[styles.cityFilterItem, filterCityId === city.id && styles.cityFilterItemActive]}
+                  onPress={() => setFilterCityId(city.id)}
+                >
+                  <LinearGradient
+                     colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.cityGradientChip}
+                  >
+                    <Text
+                      style={[styles.cityFilterText, filterCityId === city.id && styles.cityFilterTextActive]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {city.name}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </>
+          ) : (
+            stores.map((store) => (
+              <TouchableOpacity
+                key={store.id}
+                style={[styles.cityFilterItem, selectedStoreId === store.id && styles.cityFilterItemActive]}
+                onPress={() => setSelectedStoreId(store.id)}
+              >
+                <LinearGradient
+                   colors={selectedStoreId === store.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cityGradientChip}
+                >
+                  <Text
+                    style={[styles.cityFilterText, selectedStoreId === store.id && styles.cityFilterTextActive]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {store.name}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            ))
+          )}
         </ScrollView>
       </View>
 
-      <View style={[styles.summary, { backgroundColor: theme.surface, borderTopColor: theme.border }] }>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryValue}>{cityFilteredProducts.length}</Text>
-          <Text style={styles.summaryLabel}>商品种类</Text>
-        </View>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryValue}>{totalStock}</Text>
-          <Text style={styles.summaryLabel}>总库存</Text>
-        </View>
-        <View style={[styles.summaryItem, lowStockCount > 0 && styles.warningItem]}>
-          <Text style={[styles.summaryValue, lowStockCount > 0 && styles.warningValue]}>
-            {lowStockCount}
-          </Text>
-          <Text style={styles.summaryLabel}>库存不足</Text>
-        </View>
-      </View>
-
-      <View style={[styles.filterRow, { backgroundColor: theme.surface }]}>
-        {renderFilterButton('all', '全部')}
-        {renderFilterButton('low', '库存不足')}
-        {renderFilterButton('normal', '库存正常')}
-      </View>
-
-      <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
-        <Search size={18} color={theme.textTertiary} />
-        <TextInput
-          style={[styles.searchInput, { color: theme.textPrimary }]}
-          placeholder="搜索商品..."
-          placeholderTextColor={theme.textTertiary}
-          value={searchText}
-          onChangeText={setSearchText}
-          textAlignVertical="center"
-        />
-      </View>
-
-      <FlatList
-        data={filteredProducts}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <PackageOpen size={48} color={theme.textTertiary} strokeWidth={1.5} />
-            <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>暂无数据</Text>
+      {viewMode === 'main' ? (
+        <>
+          <View style={[styles.summary, { backgroundColor: theme.surface, borderTopColor: theme.border }] }>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>{cityFilteredProducts.length}</Text>
+              <Text style={styles.summaryLabel}>商品种类</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>{totalStock}</Text>
+              <Text style={styles.summaryLabel}>总库存</Text>
+            </View>
+            <View style={[styles.summaryItem, lowStockCount > 0 && styles.warningItem]}>
+              <Text style={[styles.summaryValue, lowStockCount > 0 && styles.warningValue]}>
+                {lowStockCount}
+              </Text>
+              <Text style={styles.summaryLabel}>库存不足</Text>
+            </View>
           </View>
-        }
-      />
+
+          <View style={[styles.filterRow, { backgroundColor: theme.surface }]}>
+            {renderFilterButton('all', '全部')}
+            {renderFilterButton('low', '库存不足')}
+            {renderFilterButton('normal', '库存正常')}
+          </View>
+
+          <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
+            <Search size={18} color={theme.textTertiary} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.textPrimary }]}
+              placeholder="搜索商品..."
+              placeholderTextColor={theme.textTertiary}
+              value={searchText}
+              onChangeText={setSearchText}
+              textAlignVertical="center"
+            />
+          </View>
+
+          <FlatList
+            data={filteredProducts}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <PackageOpen size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>暂无数据</Text>
+              </View>
+            }
+          />
+        </>
+      ) : (
+        <>
+          <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary, marginTop: 10 }] }>
+            <Search size={18} color={theme.textTertiary} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.textPrimary }]}
+              placeholder="搜索店铺商品..."
+              placeholderTextColor={theme.textTertiary}
+              value={searchText}
+              onChangeText={setSearchText}
+              textAlignVertical="center"
+            />
+          </View>
+          <FlatList
+            data={filteredStoreInventory}
+            keyExtractor={(item) => item.id}
+            renderItem={renderStoreInventoryItem}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <PackageOpen size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>暂无店铺库存数据</Text>
+              </View>
+            }
+          />
+        </>
+      )}
 
       <Modal visible={editModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -577,6 +705,27 @@ const styles = StyleSheet.create({
   },
   cityFilterSpacer: {
     height: 58,
+  },
+  viewModeContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    height: 48,
+  },
+  viewModeButton: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.md,
+  },
+  viewModeText: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  viewModeTextActive: {
+    fontWeight: '700',
   },
   cityFilterOverlay: {
     position: 'absolute',
