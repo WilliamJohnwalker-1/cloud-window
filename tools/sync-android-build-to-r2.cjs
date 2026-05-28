@@ -44,6 +44,7 @@ const parseArgs = () => {
     appVersion: pick('--version', env.MOBILE_VERSION || ''),
     bucket: pick('--bucket', env.R2_BUCKET_NAME || 'cloud-window-apk-prod'),
     workerEnv: pick('--worker-env', ''),
+    secretMode: pick('--secret-mode', env.MOBILE_SECRET_MODE || 'classic'),
     workerName: pick('--worker-name', env.WORKER_NAME || 'cloud-window'),
     apiBaseUrl: pick('--api-base-url', env.MOBILE_APK_BASE_URL || 'https://yunchuang888888.com'),
   };
@@ -202,14 +203,21 @@ const main = () => {
   console.log(`☁️ Uploading APK to R2: ${opts.bucket}/${apkKey}`);
   run('npx', ['wrangler', 'r2', 'object', 'put', `${opts.bucket}/${apkKey}`, '--file', artifactFile, '--remote']);
 
-  console.log('🔐 Updating Worker secrets (versioned)');
-  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
-  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
-  run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
+  if (String(opts.secretMode).toLowerCase() === 'versioned') {
+    console.log('🔐 Updating Worker secrets (versioned)');
+    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
+    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
+    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
 
-  const latestVersionId = getLatestWorkerVersionId(opts.workerName, envArgs);
-  console.log(`🚚 Deploying worker version ${latestVersionId}`);
-  run('npx', ['wrangler', 'versions', 'deploy', '--name', opts.workerName, '--version-id', latestVersionId, '--yes', ...envArgs]);
+    const latestVersionId = getLatestWorkerVersionId(opts.workerName, envArgs);
+    console.log(`🚚 Deploying worker version ${latestVersionId}`);
+    run('npx', ['wrangler', 'versions', 'deploy', '--name', opts.workerName, '--version-id', latestVersionId, '--yes', ...envArgs]);
+  } else {
+    console.log('🔐 Updating Worker secrets (classic, non-destructive)');
+    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
+    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
+    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
+  }
 
   writeFileSync(
     join(artifactDir, `sync-result-${appVersion}.json`),
@@ -221,12 +229,13 @@ const main = () => {
       bucket: opts.bucket,
       workerName: opts.workerName,
       workerEnv: opts.workerEnv || 'default',
+      secretMode: String(opts.secretMode).toLowerCase() === 'versioned' ? 'versioned' : 'classic',
       artifactUrl,
       syncedAt: new Date().toISOString(),
     }, null, 2),
   );
 
-  console.log('✅ R2 上传与 Worker 变量回写完成（仅更新 APK 相关变量并已部署）');
+  console.log('✅ R2 上传与 Worker 变量回写完成（仅更新 APK 相关变量，不会清空其他变量）');
 };
 
 try {

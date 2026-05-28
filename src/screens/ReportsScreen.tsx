@@ -24,13 +24,17 @@ type ReportType = 'sales' | 'inventory' | 'profit';
 const CHART_COLORS = ['#FF6B9D', '#5B8DEF', '#C77DFF', '#4ECDC4', '#FFB347'];
 
 export default function ReportsScreen() {
-  const { user, products, orders, fetchProducts, fetchOrders } = useAppStore(
+  const { user, products, orders, stores, storeInventory, fetchProducts, fetchOrders, fetchStores, fetchStoreInventory } = useAppStore(
     useShallow((state) => ({
       user: state.user,
       products: state.products,
       orders: state.orders,
+      stores: state.stores,
+      storeInventory: state.storeInventory,
       fetchProducts: state.fetchProducts,
       fetchOrders: state.fetchOrders,
+      fetchStores: state.fetchStores,
+      fetchStoreInventory: state.fetchStoreInventory,
     })),
   );
   const [reportType, setReportType] = useState<ReportType>('sales');
@@ -39,18 +43,32 @@ export default function ReportsScreen() {
 
   const isDistributor = user?.role === 'distributor';
 
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchProducts();
     fetchOrders();
-  }, [fetchOrders, fetchProducts]);
+    fetchStores();
+  }, [fetchOrders, fetchProducts, fetchStores]);
+
+  useEffect(() => {
+    if (selectedStoreId) {
+      fetchStoreInventory(selectedStoreId);
+    }
+  }, [selectedStoreId, fetchStoreInventory]);
+
+  const filteredOrders = useMemo(() => {
+    if (!selectedStoreId) return orders;
+    return orders.filter(o => o.store_id === selectedStoreId);
+  }, [orders, selectedStoreId]);
 
   const salesData = useMemo(() => {
-    const totalRetailSales = orders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
-    const totalOrders = orders.length;
+    const totalRetailSales = filteredOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
+    const totalOrders = filteredOrders.length;
 
     const productSalesQty: { [key: string]: { name: string; quantity: number } } = {};
     const productSalesAmt: { [key: string]: { name: string; amount: number } } = {};
-    orders.forEach((order) => {
+    filteredOrders.forEach((order) => {
       order.items.forEach((it) => {
         if (it.is_sample) return;
         const name = it.product_name || '未知';
@@ -80,18 +98,34 @@ export default function ReportsScreen() {
 
     // Calculate velocity (turnover rate) = sales quantity / current inventory
     const productVelocity: { [key: string]: { name: string; velocity: number; quantity: number; inventory: number } } = {};
-    products.forEach((p) => {
-      const key = p.id;
-      const qty = productSalesQty[key]?.quantity || 0;
-      const inventory = p.quantity || 0;
-      const velocity = inventory > 0 ? qty / inventory : 0;
-      productVelocity[key] = {
-        name: p.name,
-        velocity,
-        quantity: qty,
-        inventory,
-      };
-    });
+    
+    if (selectedStoreId) {
+      storeInventory.forEach((p) => {
+        const key = p.product_id;
+        const qty = productSalesQty[key]?.quantity || 0;
+        const inventory = p.quantity || 0;
+        const velocity = inventory > 0 ? qty / inventory : 0;
+        productVelocity[key] = {
+          name: p.product_name || '未知',
+          velocity,
+          quantity: qty,
+          inventory,
+        };
+      });
+    } else {
+      products.forEach((p) => {
+        const key = p.id;
+        const qty = productSalesQty[key]?.quantity || 0;
+        const inventory = p.quantity || 0;
+        const velocity = inventory > 0 ? qty / inventory : 0;
+        productVelocity[key] = {
+          name: p.name,
+          velocity,
+          quantity: qty,
+          inventory,
+        };
+      });
+    }
 
     const topProductsVelocity = Object.values(productVelocity)
       .map((item) => ({ 
@@ -105,20 +139,41 @@ export default function ReportsScreen() {
       .slice(0, 5);
 
     const citySales: { [key: string]: number } = {};
-    orders.forEach((order) => {
+    const storeSales: { [key: string]: number } = {};
+    
+    filteredOrders.forEach((order) => {
       const city = order.city_name || '未知';
       citySales[city] = (citySales[city] || 0) + Number(order.total_discount_amount || 0);
+      
+      const storeName = order.store_name || '未知店铺/历史订单';
+      storeSales[storeName] = (storeSales[storeName] || 0) + Number(order.total_discount_amount || 0);
     });
 
     const salesByCity = Object.entries(citySales)
       .map(([city, total]) => ({ city, total }))
       .sort((a, b) => b.total - a.total);
+      
+    const salesByStore = Object.entries(storeSales)
+      .map(([store, total]) => ({ store, total }))
+      .sort((a, b) => b.total - a.total);
 
-    return { totalRetailSales, totalOrders, topProductsQty, topProductsAmt, topProductsVelocity, salesByCity };
-  }, [orders, products]);
+    return { totalRetailSales, totalOrders, topProductsQty, topProductsAmt, topProductsVelocity, salesByCity, salesByStore };
+  }, [filteredOrders, products, storeInventory, selectedStoreId]);
 
   const inventoryData = useMemo(() => {
+    if (selectedStoreId) {
+      const totalProducts = storeInventory.length;
+      const totalQuantity = storeInventory.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const lowStockItems = storeInventory.filter(item => {
+         const globalProduct = products.find(p => p.id === item.product_id);
+         const minQty = globalProduct?.min_quantity ?? 10;
+         return (item.quantity || 0) < minQty;
+      });
+      return { totalProducts, totalQuantity, lowStockItems, inventoryByCity: [], isStore: true };
+    }
+
     const totalProducts = products.length;
+    const totalQuantity = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
     const lowStockItems = products.filter(
       (p) => p.quantity !== undefined && p.quantity < (p.min_quantity ?? 10),
     );
@@ -133,8 +188,8 @@ export default function ReportsScreen() {
       .map(([city, quantity]) => ({ city, quantity }))
       .sort((a, b) => b.quantity - a.quantity);
 
-    return { totalProducts, lowStockItems, inventoryByCity };
-  }, [products]);
+    return { totalProducts, totalQuantity, lowStockItems, inventoryByCity, isStore: false };
+  }, [products, storeInventory, selectedStoreId]);
 
   const profitData = useMemo(() => {
     const productProfit: {
@@ -151,7 +206,7 @@ export default function ReportsScreen() {
       };
     } = {};
 
-    orders.forEach((order) => {
+    filteredOrders.forEach((order) => {
       order.items.forEach((it) => {
         const key = it.product_id;
         if (!productProfit[key]) {
@@ -208,7 +263,7 @@ export default function ReportsScreen() {
       totalProfit: totalDiscountRevenue - totalCost,
       profitByProduct,
     };
-  }, [orders]);
+  }, [filteredOrders]);
 
   const exportProfitExcel = async () => {
     try {
@@ -472,6 +527,40 @@ export default function ReportsScreen() {
           </View>
         </View>
       )}
+
+      {!selectedStoreId && salesData.salesByStore.length > 0 && (
+        <View style={[styles.card, { backgroundColor: theme.surface }] }>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>店铺销售分布</Text>
+          <View style={styles.pieContainer}>
+            <PieChart
+              data={salesData.salesByStore.map((item, index) => ({
+                value: item.total,
+                color: CHART_COLORS[index % CHART_COLORS.length],
+              }))}
+              donut
+              radius={70}
+              innerRadius={40}
+               innerCircleColor={theme.surface}
+               centerLabelComponent={() => (
+                 <View style={{ alignItems: 'center' }}>
+                   <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
+                     {salesData.salesByStore.reduce((s, c) => s + c.total, 0).toFixed(0)}
+                   </Text>
+                   <Text style={{ fontSize: 10, color: theme.textSecondary }}>总额</Text>
+                 </View>
+               )}
+            />
+            <View style={styles.legendContainer}>
+              {salesData.salesByStore.map((item, index) => (
+                <View key={item.store} style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
+                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.store}: {item.total.toFixed(0)}元</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 
@@ -485,7 +574,7 @@ export default function ReportsScreen() {
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>商品种类</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{products.reduce((sum, p) => sum + (p.quantity || 0), 0)}</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{inventoryData.totalQuantity}</Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总库存</Text>
           </View>
           <View style={styles.statItem}>
@@ -565,6 +654,36 @@ export default function ReportsScreen() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>数据报表</Text>
       </View>
+
+      {!isDistributor && stores.length > 0 && (
+        <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderBottomColor: theme.divider }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+            <TouchableOpacity
+              style={[
+                styles.filterChip, 
+                { backgroundColor: theme.background, borderColor: theme.divider },
+                !selectedStoreId && { backgroundColor: Colors.blue, borderColor: Colors.blue }
+              ]}
+              onPress={() => setSelectedStoreId(null)}
+            >
+              <Text style={[styles.filterChipText, { color: theme.textSecondary }, !selectedStoreId && styles.filterChipTextActive]}>全部店铺</Text>
+            </TouchableOpacity>
+            {stores.map(store => (
+              <TouchableOpacity
+                key={store.id}
+                style={[
+                  styles.filterChip, 
+                  { backgroundColor: theme.background, borderColor: theme.divider },
+                  selectedStoreId === store.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }
+                ]}
+                onPress={() => setSelectedStoreId(store.id)}
+              >
+                <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedStoreId === store.id && styles.filterChipTextActive]}>{store.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       <View style={[styles.tabBar, { backgroundColor: theme.surface }]}>
         {renderTabButton('sales', '销售报表')}
@@ -664,4 +783,9 @@ const styles = StyleSheet.create({
   velocityUnhealthyBg: { backgroundColor: 'rgba(248, 113, 113, 0.05)' },
   alertIcon: { marginRight: 6 },
   velocityMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  filterContainer: { paddingVertical: 10, borderBottomWidth: 1 },
+  filterScroll: { paddingHorizontal: 15, gap: 10 },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: Radius.pill, borderWidth: 1 },
+  filterChipText: { fontSize: 13 },
+  filterChipTextActive: { color: '#fff', fontWeight: '600' },
 });

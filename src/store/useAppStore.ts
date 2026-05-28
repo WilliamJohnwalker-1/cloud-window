@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { generateEAN13 } from '../utils/barcode';
+import { resolvePrice } from '../utils/priceResolver';
 import type {
   Profile,
   City,
@@ -12,6 +13,9 @@ import type {
   OrderItem,
   ProductWithDetails,
   Notification,
+  Store,
+  StoreInventory,
+  StoreProductPrice,
 } from '../types';
 
 interface CartCreateItem {
@@ -54,9 +58,11 @@ interface OrderItemRow {
 interface OrderRow {
   id: string;
   distributor_id: string;
-  profiles?: { email?: string; store_name?: string | null } | null;
-  city_id?: string;
-  cities?: { name: string } | null;
+  profiles?: { email?: string; store_name?: string | null } | Array<{ email?: string; store_name?: string | null }> | null;
+  store_id?: string | null;
+  stores?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  city_id?: string | null;
+  cities?: { name: string } | Array<{ name: string }> | null;
   status?: Order['status'];
   order_kind?: Order['order_kind'] | null;
   total_retail_amount?: number | string | null;
@@ -81,9 +87,61 @@ interface ProductRow {
   inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
 }
 
+interface StoreRow {
+  id: string;
+  name: string;
+  city_id: string;
+  distributor_id?: string | null;
+  discount_rate?: number | string | null;
+  address?: string | null;
+  phone?: string | null;
+  status?: Store['status'] | null;
+  created_at: string;
+  updated_at: string;
+  cities?: { name: string } | Array<{ name: string }> | null;
+  profiles?: { email?: string } | Array<{ email?: string }> | null;
+}
+
+interface StoreInventoryRow {
+  id: string;
+  store_id: string;
+  product_id: string;
+  quantity?: number | string | null;
+  updated_at: string;
+  products?: { name?: string } | Array<{ name?: string }> | null;
+}
+
+interface StoreProductPriceRow {
+  id: string;
+  store_id: string;
+  product_id: string;
+  override_price?: number | string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface DistributorProductPriceRow {
   product_id: string;
   discount_price: number | string;
+}
+
+interface StoreCreateInput {
+  name: string;
+  city_id: string;
+  distributor_id?: string | null;
+  discount_rate?: number;
+  address?: string;
+  phone?: string;
+}
+
+interface StoreUpdateInput {
+  name?: string;
+  city_id?: string;
+  distributor_id?: string | null;
+  discount_rate?: number;
+  address?: string;
+  phone?: string;
+  status?: Store['status'];
 }
 
 interface RpcErrorLike {
@@ -91,11 +149,76 @@ interface RpcErrorLike {
   message?: string;
 }
 
+interface DetailedErrorLike {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+}
+
+interface AuthUserLike {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}
+
 const SESSION_GRACE_WINDOW_MS = 20_000;
 const SESSION_RETRY_DELAY_MS = 600;
 const SESSION_RETRY_TIMES = 2;
+const UUID_LIKE_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let sessionGuardGraceUntil = 0;
+
+const isUuidLike = (value: string): boolean => UUID_LIKE_REGEX.test(value);
+
+const normalizeError = (error: unknown): Error => {
+  if (error instanceof Error) return error;
+  return new Error(typeof error === 'string' ? error : '未知错误');
+};
+
+const formatSupabaseError = (error: unknown): Error => {
+  const fallbackError = normalizeError(error);
+  const raw = error as DetailedErrorLike | null;
+  const message = raw?.message ?? fallbackError.message;
+  const code = raw?.code ? ` [${raw.code}]` : '';
+  const details = raw?.details ? ` ${raw.details}` : '';
+  const hint = raw?.hint ? ` 提示: ${raw.hint}` : '';
+  return new Error(`${message}${code}${details}${hint}`.trim());
+};
+
+const ensureProfileForAuthUser = async (authUser: AuthUserLike): Promise<ProfileRow> => {
+  const { data: existingProfile, error: existingError } = await supabase
+    .from('profiles')
+    .select('*, cities(name)')
+    .eq('id', authUser.id)
+    .maybeSingle();
+
+  if (existingError) throw formatSupabaseError(existingError);
+  if (existingProfile) return existingProfile;
+
+  const metadata = authUser.user_metadata || {};
+  const cityIdRaw = typeof metadata.city_id === 'string' ? metadata.city_id.trim() : '';
+  const storeNameRaw = typeof metadata.store_name === 'string' ? metadata.store_name.trim() : '';
+
+  if (!isUuidLike(cityIdRaw) || !storeNameRaw) {
+    throw new Error('账号资料不完整，无法自动创建档案。请联系管理员处理该账号。');
+  }
+
+  const { data: insertedProfile, error: insertError } = await supabase
+    .from('profiles')
+    .insert({
+      id: authUser.id,
+      email: authUser.email || '',
+      role: 'distributor',
+      city_id: cityIdRaw,
+      store_name: storeNameRaw,
+    })
+    .select('*, cities(name)')
+    .single();
+
+  if (insertError) throw formatSupabaseError(insertError);
+  return insertedProfile;
+};
 
 const setSessionGuardGraceWindow = (): void => {
   sessionGuardGraceUntil = Date.now() + SESSION_GRACE_WINDOW_MS;
@@ -146,6 +269,9 @@ interface AppState {
   inventory: Inventory[];
   orders: Order[];
   distributors: Profile[];
+  stores: Store[];
+  storeInventory: StoreInventory[];
+  storeProductPrices: StoreProductPrice[];
   notifications: Notification[];
   isLoading: boolean;
   isOfflineMode: boolean;
@@ -173,10 +299,16 @@ interface AppState {
   fetchInventory: () => Promise<void>;
   fetchOrders: () => Promise<void>;
   fetchDistributors: () => Promise<void>;
+  fetchStores: () => Promise<void>;
+  fetchStoreInventory: (storeId: string) => Promise<void>;
+  fetchStoreProductPrices: (storeId: string) => Promise<void>;
   fetchAllData: () => Promise<void>;
 
   addCity: (name: string) => Promise<{ error: Error | null }>;
   deleteCity: (id: string) => Promise<{ error: Error | null }>;
+  addStore: (store: StoreCreateInput) => Promise<{ error: Error | null }>;
+  updateStore: (id: string, updates: StoreUpdateInput) => Promise<{ error: Error | null }>;
+  deactivateStore: (id: string) => Promise<{ error: Error | null }>;
   updateDistributorProfile: (id: string, cityId: string, storeName?: string) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
   updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
@@ -193,6 +325,7 @@ interface AppState {
     productId: string,
     discountPrice: number,
   ) => Promise<{ error: Error | null }>;
+  setStoreProductPrice: (storeId: string, productId: string, price: number) => Promise<{ error: Error | null }>;
 
   updateInventory: (
     productId: string,
@@ -210,10 +343,16 @@ interface AppState {
 
   backfillBarcodes: () => Promise<{ count: number; error: Error | null }>;
 
-  createBatchOrders: (items: CartCreateItem[]) => Promise<{ error: Error | null }>;
+  createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
+  modifyDistributionOrder: (orderId: string, items: { order_item_id: string; new_quantity: number }[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
   uploadProductImage: (uri: string) => Promise<{ publicUrl: string | null; error: Error | null }>;
 }
+
+const pickFirstRelation = <T>(value: T | T[] | null | undefined): T | null => {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+};
 
 const mapProfile = (raw: ProfileRow): Profile => ({
   id: raw.id,
@@ -228,7 +367,52 @@ const mapProfile = (raw: ProfileRow): Profile => ({
   updated_at: raw.updated_at,
 });
 
+const mapStore = (raw: StoreRow): Store => {
+  const cityData = pickFirstRelation(raw.cities);
+  const distributorData = pickFirstRelation(raw.profiles);
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    city_id: raw.city_id,
+    city_name: cityData?.name,
+    distributor_id: raw.distributor_id ?? null,
+    distributor_email: distributorData?.email ?? null,
+    discount_rate: Number(raw.discount_rate ?? 1),
+    address: raw.address ?? undefined,
+    phone: raw.phone ?? undefined,
+    status: raw.status || 'active',
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  };
+};
+
+const mapStoreInventory = (raw: StoreInventoryRow): StoreInventory => {
+  const productData = pickFirstRelation(raw.products);
+
+  return {
+    id: raw.id,
+    store_id: raw.store_id,
+    product_id: raw.product_id,
+    product_name: productData?.name,
+    quantity: Number(raw.quantity || 0),
+    updated_at: raw.updated_at,
+  };
+};
+
+const mapStoreProductPrice = (raw: StoreProductPriceRow): StoreProductPrice => ({
+  id: raw.id,
+  store_id: raw.store_id,
+  product_id: raw.product_id,
+  override_price: Number(raw.override_price || 0),
+  created_at: raw.created_at,
+  updated_at: raw.updated_at,
+});
+
 const mapOrder = (raw: OrderRow): Order => {
+  const profileData = pickFirstRelation(raw.profiles);
+  const cityData = pickFirstRelation(raw.cities);
+  const storeData = pickFirstRelation(raw.stores);
   const items: OrderItem[] = (raw.order_items || []).map((it) => ({
     id: it.id,
     order_id: it.order_id,
@@ -246,10 +430,12 @@ const mapOrder = (raw: OrderRow): Order => {
   return {
     id: raw.id,
     distributor_id: raw.distributor_id,
-    distributor_email: raw.profiles?.email,
-    distributor_store: raw.profiles?.store_name ?? undefined,
-    city_id: raw.city_id,
-    city_name: raw.cities?.name,
+    distributor_email: profileData?.email,
+    distributor_store: profileData?.store_name ?? undefined,
+    store_id: raw.store_id ?? null,
+    store_name: storeData?.name ?? null,
+    city_id: raw.city_id ?? undefined,
+    city_name: cityData?.name,
     status: raw.status || 'pending',
     order_kind: raw.order_kind || 'distribution',
     total_retail_amount: Number(raw.total_retail_amount || 0),
@@ -268,6 +454,9 @@ export const useAppStore = create<AppState>()(
       inventory: [],
       orders: [],
       distributors: [],
+      stores: [],
+      storeInventory: [],
+      storeProductPrices: [],
       notifications: [],
       isLoading: false,
       isOfflineMode: false,
@@ -316,13 +505,7 @@ export const useAppStore = create<AppState>()(
           if (error) throw error;
 
           if (data.user) {
-            const { data: profile, error: profileError } = await supabase
-              .from('profiles')
-              .select('*, cities(name)')
-              .eq('id', data.user.id)
-              .single();
-
-            if (profileError) throw profileError;
+            const profile = await ensureProfileForAuthUser(data.user);
             set({ user: mapProfile(profile) });
 
             const { error: activateError } = await supabase.rpc('activate_current_session');
@@ -351,9 +534,15 @@ export const useAppStore = create<AppState>()(
       ) => {
         set({ isLoading: true });
         try {
+          const normalizedCityId = cityId?.trim();
+          const normalizedStoreName = storeName?.trim();
+
           if (role === 'distributor') {
-            if (!cityId) throw new Error('请选择归属城市');
-            if (!storeName?.trim()) throw new Error('请输入店面名称');
+            if (!normalizedCityId) throw new Error('请选择归属城市');
+            if (!isUuidLike(normalizedCityId)) {
+              throw new Error('城市数据格式异常，请联系管理员检查城市配置');
+            }
+            if (!normalizedStoreName) throw new Error('请输入店面名称');
           }
 
           const { data, error } = await supabase.auth.signUp({
@@ -362,21 +551,16 @@ export const useAppStore = create<AppState>()(
             options: {
               data: {
                 role,
-                city_id: cityId,
-                store_name: storeName?.trim(),
+                city_id: normalizedCityId,
+                store_name: normalizedStoreName,
               },
             },
           });
-          if (error) throw error;
+          if (error) throw formatSupabaseError(error);
 
           if (data.session && data.user) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*, cities(name)')
-              .eq('id', data.user.id)
-              .single();
-
-            if (profile) set({ user: mapProfile(profile) });
+            const profile = await ensureProfileForAuthUser(data.user);
+            set({ user: mapProfile(profile) });
 
             const { error: activateError } = await supabase.rpc('activate_current_session');
             if (activateError && !isMissingRpcFunction(activateError)) {
@@ -389,7 +573,7 @@ export const useAppStore = create<AppState>()(
 
           return { error: null };
         } catch (error) {
-          return { error: error as Error };
+          return { error: normalizeError(error) };
         } finally {
           set({ isLoading: false });
         }
@@ -406,6 +590,9 @@ export const useAppStore = create<AppState>()(
             inventory: [],
             orders: [],
             distributors: [],
+            stores: [],
+            storeInventory: [],
+            storeProductPrices: [],
             notifications: [],
           });
         }
@@ -463,7 +650,9 @@ export const useAppStore = create<AppState>()(
         const productRows = data as ProductRow[];
         const productsWithDetails: ProductWithDetails[] = productRows
           .map((p) => {
-            const baseDiscount = Number(p.discount_price || p.price || 0);
+            const baseDiscount = p.discount_price !== null && p.discount_price !== undefined
+              ? Number(p.discount_price)
+              : Number(p.price || 0);
             const distributorDiscount = priceMap.get(p.id);
             return {
               ...p,
@@ -509,6 +698,7 @@ export const useAppStore = create<AppState>()(
             *,
             cities(name),
             profiles:distributor_id(email,store_name),
+            stores(name),
             order_items(
               *,
               products(name, city_id, cities(name))
@@ -521,6 +711,71 @@ export const useAppStore = create<AppState>()(
 
         const mapped = data.map(mapOrder).filter((o) => (user.role === 'distributor' ? o.distributor_id === user.id : true));
         set({ orders: mapped });
+      },
+
+      fetchStores: async () => {
+        const { user } = get();
+        if (!user) {
+          set({ stores: [] });
+          return;
+        }
+
+        let query = supabase
+          .from('stores')
+          .select('*, cities(name), profiles:distributor_id(email)')
+          .order('created_at', { ascending: false });
+
+        if (user.role === 'distributor') {
+          query = query.eq('status', 'active');
+        }
+
+        const { data, error } = await query;
+        if (error || !data) {
+          set({ stores: [] });
+          return;
+        }
+
+        set({ stores: (data as StoreRow[]).map(mapStore) });
+      },
+
+      fetchStoreInventory: async (storeId) => {
+        if (!storeId) {
+          set({ storeInventory: [] });
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('store_inventory')
+          .select('*, products(name)')
+          .eq('store_id', storeId)
+          .order('updated_at', { ascending: false });
+
+        if (error || !data) {
+          set({ storeInventory: [] });
+          return;
+        }
+
+        set({ storeInventory: (data as StoreInventoryRow[]).map(mapStoreInventory) });
+      },
+
+      fetchStoreProductPrices: async (storeId) => {
+        if (!storeId) {
+          set({ storeProductPrices: [] });
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('store_product_prices')
+          .select('*')
+          .eq('store_id', storeId)
+          .order('updated_at', { ascending: false });
+
+        if (error || !data) {
+          set({ storeProductPrices: [] });
+          return;
+        }
+
+        set({ storeProductPrices: (data as StoreProductPriceRow[]).map(mapStoreProductPrice) });
       },
 
       fetchDistributors: async () => {
@@ -551,6 +806,7 @@ export const useAppStore = create<AppState>()(
           get().fetchInventory(),
           get().fetchOrders(),
           get().fetchDistributors(),
+          get().fetchStores(),
           get().fetchNotifications(),
         ]);
         set({ isLoading: false });
@@ -585,6 +841,79 @@ export const useAppStore = create<AppState>()(
           const { error } = await supabase.from('cities').delete().eq('id', id);
           if (error) throw error;
           await get().fetchCities();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      addStore: async (store) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可创建店铺');
+
+          const payload = {
+            name: store.name.trim(),
+            city_id: store.city_id,
+            distributor_id: store.distributor_id || null,
+            discount_rate: store.discount_rate !== undefined ? Number(store.discount_rate) : 1,
+            address: store.address?.trim() || null,
+            phone: store.phone?.trim() || null,
+            status: 'active' as const,
+          };
+
+          const { error } = await supabase.from('stores').insert(payload);
+          if (error) throw error;
+
+          await get().fetchStores();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateStore: async (id, updates) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可编辑店铺');
+
+          const payload: Record<string, string | number | null> = {
+            updated_at: new Date().toISOString(),
+          };
+
+          if (updates.name !== undefined) payload.name = updates.name.trim();
+          if (updates.city_id !== undefined) payload.city_id = updates.city_id;
+          if (updates.distributor_id !== undefined) payload.distributor_id = updates.distributor_id || null;
+          if (updates.discount_rate !== undefined) payload.discount_rate = Number(updates.discount_rate);
+          if (updates.address !== undefined) payload.address = updates.address.trim() || null;
+          if (updates.phone !== undefined) payload.phone = updates.phone.trim() || null;
+          if (updates.status !== undefined) payload.status = updates.status;
+
+          const { error } = await supabase.from('stores').update(payload).eq('id', id);
+          if (error) throw error;
+
+          await get().fetchStores();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      deactivateStore: async (id) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可停用店铺');
+
+          const { error } = await supabase
+            .from('stores')
+            .update({ status: 'inactive', updated_at: new Date().toISOString() })
+            .eq('id', id);
+          if (error) throw error;
+
+          await get().fetchStores();
           return { error: null };
         } catch (error) {
           return { error: error as Error };
@@ -808,6 +1137,32 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      setStoreProductPrice: async (storeId, productId, price) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'admin') throw new Error('仅管理员可设置店铺定价');
+
+          const { error } = await supabase
+            .from('store_product_prices')
+            .upsert(
+              {
+                store_id: storeId,
+                product_id: productId,
+                override_price: Number(price),
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: 'store_id,product_id' },
+            );
+          if (error) throw error;
+
+          await get().fetchStoreProductPrices(storeId);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
       updateInventory: async (productId, quantity, options) => {
         try {
           const { error } = await supabase
@@ -975,25 +1330,43 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      createBatchOrders: async (items) => {
-        const { user, products } = get();
+      createBatchOrders: async (items, storeId = null) => {
+        const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
         const sessionError = await get().ensureActiveSession();
         if (sessionError) return { error: sessionError };
 
         try {
+          const selectedStore = storeId
+            ? stores.find((store) => store.id === storeId) || null
+            : null;
+
+          if (storeId && !selectedStore) {
+            throw new Error('店铺不存在或未加载');
+          }
+
+          if (selectedStore?.status === 'inactive') {
+            throw new Error('店铺已停用');
+          }
+
+          if (user.role === 'distributor' && selectedStore && selectedStore.distributor_id !== user.id) {
+            throw new Error('店铺不属于当前分销商');
+          }
+
+          const distributorOrderCityId = selectedStore?.city_id ?? user.city_id;
+
           if (user.role === 'distributor') {
             const outOfCity = items.find((item) => {
               const p = products.find((x) => x.id === item.productId);
-              return p && p.city_id !== user.city_id;
+              return p && p.city_id !== distributorOrderCityId;
             });
             if (outOfCity) return { error: new Error('分销商只能下所属城市商品') };
           }
 
           let totalRetail = 0;
           let totalDiscount = 0;
-          let orderCityId: string | undefined;
+          let orderCityId: string | undefined = selectedStore?.city_id;
 
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
@@ -1010,7 +1383,15 @@ export const useAppStore = create<AppState>()(
             if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
 
             const retailPrice = Number(product.price || 0);
-            const discountPrice = Number(product.discount_price || product.price || 0);
+            const storeOverride = storeId
+              ? storeProductPrices.find((entry) => entry.store_id === storeId && entry.product_id === product.id)
+              : undefined;
+            const discountPrice = resolvePrice({
+              price: retailPrice,
+              discount_price: product.discount_price,
+              discount_rate: selectedStore?.discount_rate,
+              override_price: storeOverride?.override_price,
+            }).price;
             const unitCost = Number(product.cost || 0);
             const oneTimeCost = Number(product.one_time_cost || 0);
 
@@ -1036,10 +1417,19 @@ export const useAppStore = create<AppState>()(
           const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
             p_request_id: requestId,
+            p_store_id: storeId,
           });
 
           if (!rpcError) {
-            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+            const refreshTasks: Array<Promise<void>> = [
+              get().fetchOrders(),
+              get().fetchProducts(),
+              get().fetchNotifications(),
+            ];
+            if (storeId) {
+              refreshTasks.push(get().fetchStoreInventory(storeId));
+            }
+            await Promise.all(refreshTasks);
             return { error: null };
           }
 
@@ -1049,7 +1439,8 @@ export const useAppStore = create<AppState>()(
 
           const baseOrderPayload = {
             distributor_id: user.id,
-            city_id: user.city_id ?? orderCityId,
+            city_id: selectedStore?.city_id ?? user.city_id ?? orderCityId,
+            store_id: storeId,
             order_kind: 'distribution' as const,
             total_retail_amount: totalRetail,
             total_discount_amount: totalDiscount,
@@ -1146,6 +1537,50 @@ export const useAppStore = create<AppState>()(
             }),
           );
 
+          if (storeId) {
+            const storeInventoryPayload = orderItemsPayload
+              .filter((item) => !item.is_sample)
+              .reduce<Array<{ store_id: string; product_id: string; quantity: number; updated_at: string }>>((acc, item) => {
+                const existing = acc.find((entry) => entry.product_id === item.product_id);
+                if (existing) {
+                  existing.quantity += item.quantity;
+                  return acc;
+                }
+
+                acc.push({
+                  store_id: storeId,
+                  product_id: item.product_id,
+                  quantity: item.quantity,
+                  updated_at: new Date().toISOString(),
+                });
+                return acc;
+              }, []);
+
+            if (storeInventoryPayload.length > 0) {
+              const { data: existingStoreInventory, error: existingStoreInventoryError } = await supabase
+                .from('store_inventory')
+                .select('product_id, quantity')
+                .eq('store_id', storeId)
+                .in('product_id', storeInventoryPayload.map((entry) => entry.product_id));
+              if (existingStoreInventoryError) throw existingStoreInventoryError;
+
+              const existingQuantityMap = new Map(
+                (existingStoreInventory || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]),
+              );
+
+              const { error: storeInventoryError } = await supabase
+                .from('store_inventory')
+                .upsert(
+                  storeInventoryPayload.map((entry) => ({
+                    ...entry,
+                    quantity: (existingQuantityMap.get(entry.product_id) || 0) + entry.quantity,
+                  })),
+                  { onConflict: 'store_id,product_id' },
+                );
+              if (storeInventoryError) throw storeInventoryError;
+            }
+          }
+
           // Notify all admins about the new order
           const { data: admins } = await supabase
             .from('profiles')
@@ -1156,12 +1591,35 @@ export const useAppStore = create<AppState>()(
               user_id: a.id,
               type: 'new_order' as const,
               order_id: orderData.id,
-              message: `新订单 #${orderData.id.slice(0, 8)} 来自 ${user.store_name || user.email}`,
+              message: `新订单 #${orderData.id.slice(0, 8)} 来自 ${selectedStore?.name || user.store_name || user.email}`,
             }));
             await supabase.from('notifications').insert(notifs);
           }
 
-          await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
+          const refreshTasks: Array<Promise<void>> = [
+            get().fetchOrders(),
+            get().fetchProducts(),
+            get().fetchNotifications(),
+          ];
+          if (storeId) {
+            refreshTasks.push(get().fetchStoreInventory(storeId));
+          }
+          await Promise.all(refreshTasks);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      modifyDistributionOrder: async (orderId, items) => {
+        try {
+          const { error } = await supabase.rpc('modify_distribution_order_atomic', {
+            p_order_id: orderId,
+            p_items: items,
+          });
+          if (error) throw error;
+
+          await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };

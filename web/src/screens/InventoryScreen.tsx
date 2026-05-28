@@ -4,12 +4,38 @@ import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 export const InventoryScreen: React.FC = () => {
-  const { cities, products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
   const [cityFilter, setCityFilter] = React.useState<string>('all');
+  const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
+  const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null);
 
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
+
+  React.useEffect(() => {
+    if (isAdminOrManager) {
+      fetchStores();
+    }
+  }, [isAdminOrManager, fetchStores]);
+
+  React.useEffect(() => {
+    if (viewMode === 'store' && selectedStoreId) {
+      fetchStoreInventory(selectedStoreId);
+    }
+  }, [viewMode, selectedStoreId, fetchStoreInventory]);
+
+  const filteredStoreInventory = React.useMemo(() => {
+    if (viewMode !== 'store' || !selectedStoreId) return [];
+    return storeInventory.map(inv => {
+      const product = products.find(p => p.id === inv.product_id);
+      return {
+        ...inv,
+        product
+      };
+    });
+  }, [viewMode, selectedStoreId, storeInventory, products]);
   const filteredProducts = React.useMemo(() => {
     if (cityFilter === 'all') return products;
     return products.filter((item) => item.city_id === cityFilter);
@@ -26,6 +52,26 @@ export const InventoryScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-4">
+          {isAdminOrManager && (
+            <div className="flex bg-white/5 rounded-xl p-1 border border-white/10">
+              <button
+                type="button"
+                onClick={() => setViewMode('main')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${viewMode === 'main' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+              >
+                总仓库存
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('store')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${viewMode === 'store' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+              >
+                店铺库存
+              </button>
+            </div>
+          )}
+          {viewMode === 'main' && (
+            <>
           <button
             type="button"
             onClick={() => setShowLogs(true)}
@@ -53,29 +99,49 @@ export const InventoryScreen: React.FC = () => {
           >
             <ScanLine size={20} />
             <span>扫描入库</span>
-          </button>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setCityFilter('all')}
-          className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-        >
-          全部城市
-        </button>
-        {cities.map((city) => (
+      {viewMode === 'main' ? (
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            key={city.id}
-            onClick={() => setCityFilter(city.id)}
-            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+            onClick={() => setCityFilter('all')}
+            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
           >
-            {city.name}
+            全部城市
           </button>
-        ))}
-      </div>
+          {cities.map((city) => (
+            <button
+              type="button"
+              key={city.id}
+              onClick={() => setCityFilter(city.id)}
+              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+            >
+              {city.name}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          {stores.map((store) => (
+            <button
+              type="button"
+              key={store.id}
+              onClick={() => setSelectedStoreId(store.id)}
+              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === store.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+            >
+              {store.name}
+            </button>
+          ))}
+          {stores.length === 0 && (
+            <span className="text-sm text-white/40">暂无店铺</span>
+          )}
+        </div>
+      )}
 
       <div className="bg-white/5 border border-white/10 rounded-[32px] overflow-hidden backdrop-blur-md">
         <table className="w-full text-left border-collapse">
@@ -84,139 +150,179 @@ export const InventoryScreen: React.FC = () => {
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest">商品信息</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">城市</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">当前库存</th>
-              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">告警阈值</th>
-              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">快速操作</th>
+              {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">告警阈值</th>}
+              {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">快速操作</th>}
             </tr>
           </thead>
           <tbody>
-            {filteredProducts.map((product, index) => {
-              const currentQty = Number(product.quantity || 0);
-              const isLowStock = currentQty < Number(product.min_quantity || 10);
-              return (
-                <motion.tr
-                  key={product.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.02 }}
-                  className="group hover:bg-white/[0.03] transition-colors border-b border-white/5 last:border-0"
-                >
-                  <td className="px-8 py-5">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-                        {product.image_url ? <img src={product.image_url} className="w-full h-full object-cover" alt={product.name} /> : <span className="text-lg font-bold text-white/20">{product.name[0]}</span>}
+            {viewMode === 'main' ? (
+              filteredProducts.map((product, index) => {
+                const currentQty = Number(product.quantity || 0);
+                const isLowStock = currentQty < Number(product.min_quantity || 10);
+                return (
+                  <motion.tr
+                    key={product.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.02 }}
+                    className="group hover:bg-white/[0.03] transition-colors border-b border-white/5 last:border-0"
+                  >
+                    <td className="px-8 py-5">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                          {product.image_url ? <img src={product.image_url} className="w-full h-full object-cover" alt={product.name} /> : <span className="text-lg font-bold text-white/20">{product.name[0]}</span>}
+                        </div>
+                        <div>
+                          <p className="font-bold text-white group-hover:text-accent transition-colors">{product.name}</p>
+                          <p className="text-xs text-white/30 font-mono mt-1">{product.barcode || '无条码'}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-white group-hover:text-accent transition-colors">{product.name}</p>
-                        <p className="text-xs text-white/30 font-mono mt-1">{product.barcode || '无条码'}</p>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">{product.city_name || '-'}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <div className="flex flex-col items-center">
+                        <span className={`text-xl font-black ${isLowStock ? 'text-red-500' : 'text-green-500'}`}>{currentQty}</span>
+                        {isLowStock && <span className="text-[10px] bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-bold mt-1">库存不足</span>}
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-8 py-5 text-center">
-                    <span className="text-sm font-medium text-white/70">{product.city_name || '-'}</span>
-                  </td>
-                  <td className="px-8 py-5 text-center">
-                    <div className="flex flex-col items-center">
-                      <span className={`text-xl font-black ${isLowStock ? 'text-red-500' : 'text-green-500'}`}>{currentQty}</span>
-                      {isLowStock && <span className="text-[10px] bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-bold mt-1">库存不足</span>}
-                    </div>
-                  </td>
-                  <td className="px-8 py-5 text-center">
-                    <span className="text-sm font-medium text-white/60">{product.min_quantity || 10}</span>
-                  </td>
-                  <td className="px-8 py-5">
-                    <div className="flex items-center justify-end space-x-2 opacity-100">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const confirmed = window.confirm(`确认将 ${product.name} 库存减少 5 吗？`);
-                          if (!confirmed) return;
-                          const { error } = await updateInventoryByProduct(product.id, Math.max(0, currentQty - 5), {
-                            action: 'quick_reduce',
-                            note: '库存页快捷 -5',
-                          });
-                          if (error) window.alert(`减库存失败：${error.message}`);
-                        }}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const confirmed = window.confirm(`确认将 ${product.name} 库存增加 5 吗？`);
-                          if (!confirmed) return;
-                          const { error } = await updateInventoryByProduct(product.id, currentQty + 5, {
-                            action: 'quick_add',
-                            note: '库存页快捷 +5',
-                          });
-                          if (error) window.alert(`加库存失败：${error.message}`);
-                        }}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
-                      >
-                        <Plus size={16} />
-                      </button>
-                      {editingProductId === product.id ? (
-                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1 border border-white/10">
-                          <input
-                            value={editingQuantityText}
-                            onChange={(event) => setEditingQuantityText(event.target.value.replace(/[^0-9]/g, ''))}
-                            className="w-20 bg-transparent outline-none text-sm"
-                            placeholder="数量"
-                          />
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const qty = Number(editingQuantityText);
-                              if (!Number.isFinite(qty)) {
-                                window.alert('请输入有效数字');
-                                return;
-                              }
-                              const { error } = await updateInventoryByProduct(product.id, qty, {
-                                action: 'manual_adjust',
-                                note: '库存页行内编辑',
-                              });
-                              if (error) {
-                                window.alert(`设置库存失败：${error.message}`);
-                                return;
-                              }
-                              setEditingProductId(null);
-                              setEditingQuantityText('');
-                            }}
-                            className="p-1 rounded bg-green-500/20 text-green-300"
-                          >
-                            <Check size={14} />
-                          </button>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/60">{product.min_quantity || 10}</span>
+                    </td>
+                    <td className="px-8 py-5">
+                      <div className="flex items-center justify-end space-x-2 opacity-100">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const confirmed = window.confirm(`确认将 ${product.name} 库存减少 5 吗？`);
+                            if (!confirmed) return;
+                            const { error } = await updateInventoryByProduct(product.id, Math.max(0, currentQty - 5), {
+                              action: 'quick_reduce',
+                              note: '库存页快捷 -5',
+                            });
+                            if (error) window.alert(`减库存失败：${error.message}`);
+                          }}
+                          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        >
+                          <Minus size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const confirmed = window.confirm(`确认将 ${product.name} 库存增加 5 吗？`);
+                            if (!confirmed) return;
+                            const { error } = await updateInventoryByProduct(product.id, currentQty + 5, {
+                              action: 'quick_add',
+                              note: '库存页快捷 +5',
+                            });
+                            if (error) window.alert(`加库存失败：${error.message}`);
+                          }}
+                          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        >
+                          <Plus size={16} />
+                        </button>
+                        {editingProductId === product.id ? (
+                          <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1 border border-white/10">
+                            <input
+                              value={editingQuantityText}
+                              onChange={(event) => setEditingQuantityText(event.target.value.replace(/[^0-9]/g, ''))}
+                              className="w-20 bg-transparent outline-none text-sm"
+                              placeholder="数量"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const qty = Number(editingQuantityText);
+                                if (!Number.isFinite(qty)) {
+                                  window.alert('请输入有效数字');
+                                  return;
+                                }
+                                const { error } = await updateInventoryByProduct(product.id, qty, {
+                                  action: 'manual_adjust',
+                                  note: '库存页行内编辑',
+                                });
+                                if (error) {
+                                  window.alert(`设置库存失败：${error.message}`);
+                                  return;
+                                }
+                                setEditingProductId(null);
+                                setEditingQuantityText('');
+                              }}
+                              className="p-1 rounded bg-green-500/20 text-green-300"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingProductId(null);
+                                setEditingQuantityText('');
+                              }}
+                              className="p-1 rounded bg-red-500/20 text-red-300"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => {
-                              setEditingProductId(null);
-                              setEditingQuantityText('');
+                              setEditingProductId(product.id);
+                              setEditingQuantityText(String(currentQty));
                             }}
-                            className="p-1 rounded bg-red-500/20 text-red-300"
+                            className="p-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
                           >
-                            <X size={14} />
+                            <Pencil size={16} />
                           </button>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                );
+              })
+            ) : (
+              filteredStoreInventory.map((item, index) => {
+                const product = item.product;
+                return (
+                  <motion.tr
+                    key={item.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.02 }}
+                    className="group hover:bg-white/[0.03] transition-colors border-b border-white/5 last:border-0"
+                  >
+                    <td className="px-8 py-5">
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                          {product?.image_url ? <img src={product.image_url} className="w-full h-full object-cover" alt={product?.name || item.product_name} /> : <span className="text-lg font-bold text-white/20">{product?.name?.[0] || item.product_name?.[0] || '?'}</span>}
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingProductId(product.id);
-                            setEditingQuantityText(String(currentQty));
-                          }}
-                          className="p-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </motion.tr>
-              );
-            })}
-            {filteredProducts.length === 0 && (
+                        <div>
+                          <p className="font-bold text-white group-hover:text-accent transition-colors">{product?.name || item.product_name}</p>
+                          <p className="text-xs text-white/30 font-mono mt-1">{product?.barcode || '无条码'}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">{product?.city_name || '-'}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-xl font-black text-white">{item.quantity}</span>
+                    </td>
+                  </motion.tr>
+                );
+              })
+            )}
+            {viewMode === 'main' && filteredProducts.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-8 py-10 text-center text-white/40">当前筛选下暂无库存商品</td>
+              </tr>
+            )}
+            {viewMode === 'store' && filteredStoreInventory.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-8 py-10 text-center text-white/40">
+                  {!selectedStoreId ? '请选择店铺' : '该店铺暂无库存'}
+                </td>
               </tr>
             )}
           </tbody>

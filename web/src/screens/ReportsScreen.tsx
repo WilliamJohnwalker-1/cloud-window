@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, DollarSign, Download, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -7,7 +7,18 @@ import { useAppStore } from '../store/useAppStore';
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 
 export const ReportsScreen: React.FC = () => {
-  const { orders, products } = useAppStore();
+  const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, user } = useAppStore();
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
+
+  useEffect(() => {
+    void fetchStores();
+  }, [fetchStores]);
+
+  useEffect(() => {
+    if (!selectedStoreId) return;
+    void fetchStoreInventory(selectedStoreId);
+  }, [selectedStoreId, fetchStoreInventory]);
 
   const medalStyles = [
     'from-amber-400/30 to-amber-600/20 border-amber-300/40 text-amber-200',
@@ -15,17 +26,18 @@ export const ReportsScreen: React.FC = () => {
     'from-orange-500/30 to-orange-700/20 border-orange-300/30 text-orange-200',
   ];
 
-  const { stats, productVolumeRanking, cityData, productAmountRanking, productVelocityRanking, profitData } = useMemo(() => {
-    const totalRetail = orders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
-    const totalDiscount = orders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
-    const pendingCount = orders.filter((order) => order.status === 'pending').length;
+  const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, productVelocityRanking, profitData } = useMemo(() => {
+    const scopedOrders = selectedStoreId ? orders.filter((order) => order.store_id === selectedStoreId) : orders;
+    const totalRetail = scopedOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
+    const totalDiscount = scopedOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
+    const pendingCount = scopedOrders.filter((order) => order.status === 'pending').length;
 
     const cityMap = new Map<string, number>();
     const productAmountMap = new Map<string, number>();
     const productVolumeMap = new Map<string, number>();
     const productVolumeByIdMap = new Map<string, number>();
 
-    orders.forEach((order) => {
+    scopedOrders.forEach((order) => {
       const cityName = order.city_name || '未知';
       cityMap.set(cityName, (cityMap.get(cityName) || 0) + Number(order.total_discount_amount || 0));
 
@@ -46,6 +58,17 @@ export const ReportsScreen: React.FC = () => {
       .slice(0, 6)
       .map(([name, value]) => ({ name, value }));
 
+    const storeMap = new Map<string, number>();
+    scopedOrders.forEach((order) => {
+      const storeName = order.store_name || '未知店铺/历史订单';
+      storeMap.set(storeName, (storeMap.get(storeName) || 0) + Number(order.total_discount_amount || 0));
+    });
+
+    const sortedStores = Array.from(storeMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, value]) => ({ name, value }));
+
     const sortedProductAmount = Array.from(productAmountMap.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
@@ -56,9 +79,16 @@ export const ReportsScreen: React.FC = () => {
       .slice(0, 15)
       .map(([name, value]) => ({ name, value }));
 
-    const velocityRows = products.map((product) => {
+    const velocityRows = products
+      .filter((product) => {
+        if (!selectedStore) return true;
+        return product.city_id === selectedStore.city_id;
+      })
+      .map((product) => {
       const soldQty = productVolumeByIdMap.get(product.id) || 0;
-      const inventoryQty = Number(product.quantity || 0);
+      const inventoryQty = selectedStoreId
+        ? Number(storeInventory.find((entry) => entry.product_id === product.id)?.quantity || 0)
+        : Number(product.quantity || 0);
       const velocity = inventoryQty > 0 ? soldQty / inventoryQty : 0;
       return {
         name: product.name,
@@ -67,7 +97,7 @@ export const ReportsScreen: React.FC = () => {
         velocity,
         isUnhealthy: velocity < 0.5,
       };
-    });
+      });
 
     const sortedVelocityRows = velocityRows
       .sort((a, b) => b.velocity - a.velocity)
@@ -85,7 +115,7 @@ export const ReportsScreen: React.FC = () => {
       oneTimeCost: number;
     }> = {};
 
-    orders.forEach((order) => {
+    scopedOrders.forEach((order) => {
       order.items.forEach((item) => {
         const key = item.product_id;
         if (!productProfit[key]) {
@@ -138,13 +168,14 @@ export const ReportsScreen: React.FC = () => {
 
     return {
       stats: [
-        { label: '总零售额', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `订单 ${orders.length} 笔`, isUp: true },
+        { label: '总零售额', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `订单 ${scopedOrders.length} 笔`, isUp: true },
         { label: '折扣成交额', value: `¥${totalDiscount.toFixed(2)}`, icon: Package, trend: `待处理 ${pendingCount} 笔`, isUp: true },
         { label: '折扣差额', value: `¥${(totalRetail - totalDiscount).toFixed(2)}`, icon: TrendingUp, trend: '零售额 - 折扣额', isUp: totalRetail - totalDiscount >= 0 },
         { label: '待处理订单', value: String(pendingCount), icon: TrendingDown, trend: 'pending', isUp: pendingCount === 0 },
       ],
       productVolumeRanking: sortedProductVolume,
       cityData: sortedCities,
+      storeData: sortedStores,
       productAmountRanking: sortedProductAmount,
       productVelocityRanking: sortedVelocityRows,
       profitData: {
@@ -155,7 +186,21 @@ export const ReportsScreen: React.FC = () => {
         profitByProduct,
       },
     };
-  }, [orders, products]);
+  }, [orders, products, selectedStore, selectedStoreId, storeInventory]);
+
+  const inventorySummary = useMemo(() => {
+    if (!selectedStoreId) return null;
+    const lowStockCount = storeInventory.filter((item) => {
+      const product = products.find((row) => row.id === item.product_id);
+      const min = product?.min_quantity ?? 10;
+      return Number(item.quantity || 0) < min;
+    }).length;
+    return {
+      totalProducts: storeInventory.length,
+      totalQuantity: storeInventory.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      lowStockCount,
+    };
+  }, [products, selectedStoreId, storeInventory]);
 
   const exportVolumeCsv = (): void => {
     const header = '商品,销量';
@@ -224,6 +269,48 @@ export const ReportsScreen: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {(user?.role === 'admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <p className="text-sm text-white/60 mb-3">店铺筛选</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedStoreId(null)}
+              className={`px-3 py-1.5 rounded-xl border text-sm ${!selectedStoreId ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+            >
+              全部店铺
+            </button>
+            {stores.map((store) => (
+              <button
+                key={store.id}
+                type="button"
+                onClick={() => setSelectedStoreId(store.id)}
+                className={`px-3 py-1.5 rounded-xl border text-sm ${selectedStoreId === store.id ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+              >
+                {store.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {inventorySummary && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <p className="text-xs text-white/50">店铺商品数</p>
+            <p className="text-xl font-black">{inventorySummary.totalProducts}</p>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <p className="text-xs text-white/50">店铺总库存</p>
+            <p className="text-xl font-black">{inventorySummary.totalQuantity}</p>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <p className="text-xs text-white/50">店铺低库存</p>
+            <p className="text-xl font-black text-red-300">{inventorySummary.lowStockCount}</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;
@@ -322,6 +409,26 @@ export const ReportsScreen: React.FC = () => {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {!selectedStoreId && storeData.length > 0 && (
+          <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-xl font-bold">店铺销售占比</h3>
+            </div>
+            <div className="h-[300px] flex items-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={storeData} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={8} dataKey="value">
+                    {storeData.map((entry, index) => (
+                      <Cell key={entry.name} fill={colors[index % colors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">

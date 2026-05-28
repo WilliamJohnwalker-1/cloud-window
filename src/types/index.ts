@@ -8,6 +8,7 @@ export interface Profile {
   role: UserRole;
   city_id?: string | null;
   city_name?: string;
+  /** @deprecated Use Store.name instead. Kept for backward compatibility with profiles table. */
   store_name?: string | null;
   created_at: string;
   updated_at: string;
@@ -42,6 +43,39 @@ export interface Inventory {
   updated_at: string;
 }
 
+export interface Store {
+  id: string;
+  name: string;
+  city_id: string;
+  city_name?: string;
+  distributor_id?: string | null;
+  distributor_email?: string | null;
+  discount_rate: number;
+  address?: string;
+  phone?: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoreInventory {
+  id: string;
+  store_id: string;
+  product_id: string;
+  product_name?: string;
+  quantity: number;
+  updated_at: string;
+}
+
+export interface StoreProductPrice {
+  id: string;
+  store_id: string;
+  product_id: string;
+  override_price: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface OrderItem {
   id: string;
   order_id: string;
@@ -61,6 +95,8 @@ export interface Order {
   distributor_id: string;
   distributor_email?: string;
   distributor_store?: string;
+  store_id?: string | null;
+  store_name?: string | null;
   city_id?: string;
   city_name?: string;
   order_kind: OrderKind;

@@ -47,14 +47,14 @@ export default function ProductsScreen() {
   const {
     products,
     cities,
-    distributors,
+    stores,
     fetchProducts,
     fetchCities,
-    fetchDistributors,
+    fetchStores,
     addProduct,
     updateProduct,
     deleteProduct,
-    setDistributorProductDiscount,
+    setStoreProductPrice,
     backfillBarcodes,
     uploadProductImage,
     user,
@@ -62,14 +62,14 @@ export default function ProductsScreen() {
     useShallow((state) => ({
       products: state.products,
       cities: state.cities,
-      distributors: state.distributors,
+      stores: state.stores,
       fetchProducts: state.fetchProducts,
       fetchCities: state.fetchCities,
-      fetchDistributors: state.fetchDistributors,
+      fetchStores: state.fetchStores,
       addProduct: state.addProduct,
       updateProduct: state.updateProduct,
       deleteProduct: state.deleteProduct,
-      setDistributorProductDiscount: state.setDistributorProductDiscount,
+      setStoreProductPrice: state.setStoreProductPrice,
       backfillBarcodes: state.backfillBarcodes,
       uploadProductImage: state.uploadProductImage,
       user: state.user,
@@ -88,8 +88,8 @@ export default function ProductsScreen() {
   const [selectedCity, setSelectedCity] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
-  const [selectedDistributorId, setSelectedDistributorId] = useState('');
-  const [customDistributorDiscount, setCustomDistributorDiscount] = useState('');
+  const [selectedStoreId, setSelectedStoreId] = useState('');
+  const [customStorePrice, setCustomStorePrice] = useState('');
   const [searchText, setSearchText] = useState('');
   const [hasPinnedOwnCity, setHasPinnedOwnCity] = useState(false);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
@@ -114,9 +114,9 @@ export default function ProductsScreen() {
   useEffect(() => {
     fetchCities();
     if (user?.role === 'admin') {
-      fetchDistributors();
+      fetchStores();
     }
-  }, [fetchCities, fetchDistributors, user?.role]);
+  }, [fetchCities, fetchStores, user?.role]);
 
   useEffect(() => {
     if (isDistributor && user?.city_id && !hasPinnedOwnCity) {
@@ -140,8 +140,8 @@ export default function ProductsScreen() {
     setSelectedCity('');
     setImageUrl('');
     setEditingProduct(null);
-    setSelectedDistributorId('');
-    setCustomDistributorDiscount('');
+    setSelectedStoreId('');
+    setCustomStorePrice('');
   };
 
   const openAddModal = () => {
@@ -215,26 +215,26 @@ export default function ProductsScreen() {
     ]);
   };
 
-  const handleSaveDistributorDiscount = async () => {
+  const handleSaveStorePrice = async () => {
     if (!editingProduct) {
-      Toast.show({ type: 'error', text1: '提示', text2: '请先保存商品，再设置分销商折扣价' });
+      Toast.show({ type: 'error', text1: '提示', text2: '请先保存商品，再设置店铺定价' });
       return;
     }
-    if (!selectedDistributorId) {
-      Toast.show({ type: 'error', text1: '错误', text2: '请选择分销商' });
+    if (!selectedStoreId) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请选择店铺' });
       return;
     }
-    const discount = parseFloat(customDistributorDiscount);
-    if (isNaN(discount) || discount < 0) {
-      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效折扣价' });
+    const overridePrice = parseFloat(customStorePrice);
+    if (isNaN(overridePrice) || overridePrice < 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效定价' });
       return;
     }
-    const { error } = await setDistributorProductDiscount(selectedDistributorId, editingProduct.id, discount);
+    const { error } = await setStoreProductPrice(selectedStoreId, editingProduct.id, overridePrice);
     if (error) {
       Toast.show({ type: 'error', text1: '错误', text2: error.message });
     } else {
-      Toast.show({ type: 'success', text1: '成功', text2: '分销商专属折扣价已更新' });
-      setCustomDistributorDiscount('');
+      Toast.show({ type: 'success', text1: '成功', text2: '店铺专属定价已更新' });
+      setCustomStorePrice('');
     }
   };
 
@@ -630,16 +630,16 @@ export default function ProductsScreen() {
 
               {editingProduct && user?.role === 'admin' && (
                 <View style={[styles.distributorDiscountBox, { borderTopColor: theme.divider }] }>
-                  <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>分销商专属折扣价(元)</Text>
+                  <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>店铺专属定价(元)</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow}>
-                    {distributors.map((d) => (
+                    {stores.map((s) => (
                       <TouchableOpacity
-                        key={d.id}
-                        style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === d.id && styles.cityItemSelected]}
-                        onPress={() => setSelectedDistributorId(d.id)}
+                        key={s.id}
+                        style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedStoreId === s.id && styles.cityItemSelected]}
+                        onPress={() => setSelectedStoreId(s.id)}
                       >
-                        <Text style={[styles.cityItemText, { color: theme.textSecondary }, selectedDistributorId === d.id && styles.cityItemTextSelected]}>
-                          {d.store_name || d.email}
+                        <Text style={[styles.cityItemText, { color: theme.textSecondary }, selectedStoreId === s.id && styles.cityItemTextSelected]}>
+                          {s.name}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -647,13 +647,13 @@ export default function ProductsScreen() {
                   <View style={styles.distributorDiscountRow}>
                     <TextInput
                       style={[styles.input, styles.distributorDiscountInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                      placeholder="输入专属折扣价(元)"
-                      value={customDistributorDiscount}
-                      onChangeText={setCustomDistributorDiscount}
+                      placeholder="输入专属定价(元)"
+                      value={customStorePrice}
+                      onChangeText={setCustomStorePrice}
                       keyboardType="numeric"
                       placeholderTextColor={theme.textTertiary}
                     />
-                    <TouchableOpacity onPress={handleSaveDistributorDiscount} style={styles.distributorSaveBtn}>
+                    <TouchableOpacity onPress={handleSaveStorePrice} style={styles.distributorSaveBtn}>
                       <Text style={styles.distributorSaveBtnText}>保存</Text>
                     </TouchableOpacity>
                   </View>

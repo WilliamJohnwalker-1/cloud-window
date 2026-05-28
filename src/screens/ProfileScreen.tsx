@@ -16,7 +16,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown } from 'lucide-react-native';
+import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown, Store as StoreIcon } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -24,7 +24,7 @@ import { useAppStore } from '../store/useAppStore';
 import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
-import type { Notification } from '../types';
+import type { Notification, Store } from '../types';
 
 export default function ProfileScreen() {
   const {
@@ -39,12 +39,17 @@ export default function ProfileScreen() {
     distributors,
     notifications,
     orders,
+    stores,
     fetchCities,
     fetchDistributors,
     fetchNotifications,
+    fetchStores,
     addCity,
     deleteCity,
     moveCityOrder,
+    addStore,
+    updateStore,
+    deactivateStore,
     updateDistributorProfile,
     updateOwnStoreName,
     updateOwnAvatar,
@@ -64,12 +69,17 @@ export default function ProfileScreen() {
       distributors: state.distributors,
       notifications: state.notifications,
       orders: state.orders,
+      stores: state.stores,
       fetchCities: state.fetchCities,
       fetchDistributors: state.fetchDistributors,
       fetchNotifications: state.fetchNotifications,
+      fetchStores: state.fetchStores,
       addCity: state.addCity,
       deleteCity: state.deleteCity,
       moveCityOrder: state.moveCityOrder,
+      addStore: state.addStore,
+      updateStore: state.updateStore,
+      deactivateStore: state.deactivateStore,
       updateDistributorProfile: state.updateDistributorProfile,
       updateOwnStoreName: state.updateOwnStoreName,
       updateOwnAvatar: state.updateOwnAvatar,
@@ -81,6 +91,18 @@ export default function ProfileScreen() {
 
   const [cityModalVisible, setCityModalVisible] = useState(false);
   const [distributorModalVisible, setDistributorModalVisible] = useState(false);
+  const [storeModalVisible, setStoreModalVisible] = useState(false);
+  const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
+  const [isAddingStore, setIsAddingStore] = useState(false);
+  const [editStoreData, setEditStoreData] = useState({
+    name: '',
+    city_id: '',
+    distributor_id: '',
+    discount_rate: '1',
+    address: '',
+    phone: '',
+    status: 'active' as 'active' | 'inactive',
+  });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
   const [aboutModalVisible, setAboutModalVisible] = useState(false);
@@ -219,6 +241,92 @@ export default function ProfileScreen() {
     setEditingDistributorId(null);
   };
 
+  // --- Admin store management ---
+  const openAddStore = () => {
+    setIsAddingStore(true);
+    setEditingStoreId(null);
+    setEditStoreData({ name: '', city_id: '', distributor_id: '', discount_rate: '1', address: '', phone: '', status: 'active' });
+  };
+
+  const openEditStore = (store: Store) => {
+    setIsAddingStore(false);
+    setEditingStoreId(store.id);
+    setEditStoreData({
+      name: store.name,
+      city_id: store.city_id,
+      distributor_id: store.distributor_id || '',
+      discount_rate: String(store.discount_rate || 1),
+      address: store.address || '',
+      phone: store.phone || '',
+      status: store.status,
+    });
+  };
+
+  const handleSaveStore = async () => {
+    if (!editStoreData.name.trim()) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入店铺名称' });
+      return;
+    }
+    if (!editStoreData.city_id) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请选择归属城市' });
+      return;
+    }
+    const discountRate = Number(editStoreData.discount_rate);
+    if (isNaN(discountRate) || discountRate <= 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效的折扣率' });
+      return;
+    }
+
+    if (isAddingStore) {
+      const { error } = await addStore({
+        name: editStoreData.name,
+        city_id: editStoreData.city_id,
+        distributor_id: editStoreData.distributor_id || null,
+        discount_rate: discountRate,
+        address: editStoreData.address,
+        phone: editStoreData.phone,
+      });
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+      Toast.show({ type: 'success', text1: '成功', text2: '店铺已添加' });
+    } else if (editingStoreId) {
+      const { error } = await updateStore(editingStoreId, {
+        name: editStoreData.name,
+        city_id: editStoreData.city_id,
+        distributor_id: editStoreData.distributor_id || null,
+        discount_rate: discountRate,
+        address: editStoreData.address,
+        phone: editStoreData.phone,
+        status: editStoreData.status,
+      });
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+      Toast.show({ type: 'success', text1: '成功', text2: '店铺已更新' });
+    }
+
+    setIsAddingStore(false);
+    setEditingStoreId(null);
+  };
+
+  const handleDeactivateStore = (id: string, name: string) => {
+    Alert.alert('确认停用', `确定要停用店铺「${name}」吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '停用',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await deactivateStore(id);
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          else Toast.show({ type: 'success', text1: '成功', text2: '店铺已停用' });
+        },
+      },
+    ]);
+  };
+
   // --- Notifications: accept order ---
   const handleAcceptOrder = async (orderId: string, notificationId: string) => {
     const { error } = await acceptOrder(orderId);
@@ -346,6 +454,7 @@ export default function ProfileScreen() {
       ? [
           { IconComponent: MapPin, label: '城市管理', onPress: () => setCityModalVisible(true) },
           { IconComponent: Users, label: '分销商管理', onPress: () => setDistributorModalVisible(true) },
+          { IconComponent: StoreIcon, label: '店铺管理', onPress: () => setStoreModalVisible(true) },
         ]
       : []),
     {
@@ -829,6 +938,186 @@ export default function ProfileScreen() {
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无分销商</Text>}
               style={styles.cityList}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Store Management Modal */}
+      <Modal visible={storeModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>店铺管理</Text>
+              <TouchableOpacity onPress={() => setStoreModalVisible(false)}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!isAddingStore && !editingStoreId && (
+              <TouchableOpacity style={styles.addCityRow} onPress={openAddStore} activeOpacity={0.85}>
+                <LinearGradient
+                  colors={[theme.pink, theme.blue]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.addCityButton, { width: '100%' }]}
+                >
+                  <Text style={styles.addCityButtonText}>添加新店铺</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+
+            {(isAddingStore || editingStoreId) ? (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}>
+                <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>
+                  {isAddingStore ? '添加店铺' : '编辑店铺'}
+                </Text>
+                
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="店铺名称"
+                  value={editStoreData.name}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, name: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <Text style={[styles.editorHint, { color: theme.textTertiary }]}>归属城市</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                  {cities.map((city) => (
+                    <TouchableOpacity
+                      key={city.id}
+                      style={[
+                        styles.cityChip, 
+                        { backgroundColor: theme.surface },
+                        editStoreData.city_id === city.id && { backgroundColor: theme.pink }
+                      ]}
+                      onPress={() => setEditStoreData({ ...editStoreData, city_id: city.id })}
+                    >
+                      <Text style={[
+                        styles.cityChipText, 
+                        { color: theme.textSecondary },
+                        editStoreData.city_id === city.id && { color: '#fff', fontWeight: '600' }
+                      ]}>{city.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <Text style={[styles.editorHint, { color: theme.textTertiary }]}>分销商</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                  <TouchableOpacity
+                    style={[
+                      styles.cityChip,
+                      { backgroundColor: theme.surface },
+                      !editStoreData.distributor_id && { backgroundColor: theme.pink },
+                    ]}
+                    onPress={() => setEditStoreData({ ...editStoreData, distributor_id: '' })}
+                  >
+                    <Text
+                      style={[
+                        styles.cityChipText,
+                        { color: theme.textSecondary },
+                        !editStoreData.distributor_id && { color: '#fff', fontWeight: '600' },
+                      ]}
+                    >
+                      暂不绑定
+                    </Text>
+                  </TouchableOpacity>
+                  {distributors.map((dist) => (
+                    <TouchableOpacity
+                      key={dist.id}
+                      style={[
+                        styles.cityChip, 
+                        { backgroundColor: theme.surface },
+                        editStoreData.distributor_id === dist.id && { backgroundColor: theme.pink }
+                      ]}
+                      onPress={() => setEditStoreData({ ...editStoreData, distributor_id: dist.id })}
+                    >
+                      <Text style={[
+                        styles.cityChipText, 
+                        { color: theme.textSecondary },
+                        editStoreData.distributor_id === dist.id && { color: '#fff', fontWeight: '600' }
+                      ]}>{dist.email}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="折扣率 (如 0.8 表示 8折)"
+                  value={editStoreData.discount_rate}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, discount_rate: text })}
+                  placeholderTextColor={theme.textTertiary}
+                  keyboardType="numeric"
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="地址 (选填)"
+                  value={editStoreData.address}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, address: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="电话 (选填)"
+                  value={editStoreData.phone}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, phone: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                {editingStoreId && (
+                  <View style={[styles.infoRow, { borderBottomWidth: 0, paddingVertical: 0, marginBottom: 10 }]}>
+                    <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>状态</Text>
+                    <Switch
+                      value={editStoreData.status === 'active'}
+                      onValueChange={(val) => setEditStoreData({ ...editStoreData, status: val ? 'active' : 'inactive' })}
+                      trackColor={{ false: theme.border, true: theme.pinkLight }}
+                      thumbColor={editStoreData.status === 'active' ? theme.pink : theme.textTertiary}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={() => { setIsAddingStore(false); setEditingStoreId(null); }}>
+                    <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveStore}>
+                    <Text style={styles.smallBtnPrimaryText}>保存</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
+            {!isAddingStore && !editingStoreId && (
+              <FlatList
+                data={stores}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.cityName, { color: theme.textPrimary }]}>
+                        {item.name} {item.status === 'inactive' ? '(已停用)' : ''}
+                      </Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>
+                        {item.city_name || '未知城市'} · {item.distributor_email || '未绑定分销商'}
+                      </Text>
+                    </View>
+                    <View style={styles.cityActionsRow}>
+                      <TouchableOpacity onPress={() => openEditStore(item)} style={{ marginRight: 15 }}>
+                        <Text style={styles.closeButton}>编辑</Text>
+                      </TouchableOpacity>
+                      {item.status === 'active' && (
+                        <TouchableOpacity onPress={() => handleDeactivateStore(item.id, item.name)}>
+                          <Text style={styles.deleteCityText}>停用</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                )}
+                ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无店铺</Text>}
+                style={styles.cityList}
+              />
+            )}
           </View>
         </View>
       </Modal>

@@ -21,6 +21,7 @@ import Toast from 'react-native-toast-message';
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import type { Order, ProductWithDetails } from '../types';
+import { resolvePrice } from '../utils/priceResolver';
 
 interface CartItem {
   cartKey: string;
@@ -38,9 +39,13 @@ export default function OrdersScreen() {
     products,
     orders,
     distributors,
+    stores,
+    storeProductPrices,
     fetchProducts,
     fetchOrders,
     fetchDistributors,
+    fetchStores,
+    fetchStoreProductPrices,
     createBatchOrders,
     deleteOrder,
     acceptOrder,
@@ -68,7 +73,12 @@ export default function OrdersScreen() {
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
   const [statsExpanded, setStatsExpanded] = useState(true);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
+  const [orderModalDistributorId, setOrderModalDistributorId] = useState<string | null>(null);
+  const [orderModalStoreId, setOrderModalStoreId] = useState<string | null>(null);
 
+  const [modifyOrder, setModifyOrder] = useState<Order | null>(null);
+  const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
+  const [submittingModify, setSubmittingModify] = useState(false);
   const animatedHeight = useRef(new Animated.Value(168)).current;
   const animatedChevron = useRef(new Animated.Value(180)).current;
   const animatedOpacity = useRef(new Animated.Value(1)).current;
@@ -84,7 +94,14 @@ export default function OrdersScreen() {
     fetchOrders();
     fetchProducts();
     fetchDistributors();
-  }, [fetchDistributors, fetchOrders, fetchProducts]);
+    fetchStores();
+  }, [fetchDistributors, fetchOrders, fetchProducts, fetchStores]);
+
+  useEffect(() => {
+    if (orderModalStoreId) {
+      fetchStoreProductPrices(orderModalStoreId);
+    }
+  }, [orderModalStoreId, fetchStoreProductPrices]);
 
   useEffect(() => {
     animatedHeight.setValue(168);
@@ -94,7 +111,7 @@ export default function OrdersScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchOrders(), fetchProducts(), fetchDistributors()]);
+    await Promise.all([fetchOrders(), fetchProducts(), fetchDistributors(), fetchStores()]);
     setRefreshing(false);
   };
 
@@ -121,13 +138,32 @@ export default function OrdersScreen() {
     ]).start();
   };
 
+  const orderCityId = useMemo(() => {
+    if (orderModalStoreId) {
+      const store = stores.find(s => s.id === orderModalStoreId);
+      if (store) return store.city_id;
+    }
+    if (orderModalDistributorId) {
+      const dist = distributors.find(d => d.id === orderModalDistributorId);
+      if (dist) return dist.city_id;
+    }
+    if (user?.role === 'distributor') {
+      return user.city_id;
+    }
+    return null;
+  }, [orderModalStoreId, orderModalDistributorId, stores, distributors, user]);
+
   const availableProducts = useMemo(() => {
     const inStock = products.filter((p) => (p.quantity || 0) > 0);
-    if (user?.role === 'distributor') {
-      return inStock.filter((p) => p.city_id === user.city_id);
+    if (orderCityId) {
+      return inStock.filter((p) => p.city_id === orderCityId);
     }
     return inStock;
-  }, [products, user]);
+  }, [products, orderCityId]);
+
+  useEffect(() => {
+    clearCart();
+  }, [orderModalStoreId, orderModalDistributorId]);
 
   const baseOrders = useMemo(() => {
     let list = [...orders];
@@ -376,10 +412,20 @@ export default function OrdersScreen() {
     () => cartItems.reduce((sum, item) => (item.isSample ? sum : sum + item.quantity * Number(item.product.price || 0)), 0),
     [cartItems],
   );
-  const cartDiscountTotal = useMemo(
-    () => cartItems.reduce((sum, item) => (item.isSample ? sum : sum + item.quantity * Number(item.product.discount_price || item.product.price || 0)), 0),
-    [cartItems],
-  );
+  const cartDiscountTotal = useMemo(() => {
+    const selectedStore = orderModalStoreId ? stores.find(s => s.id === orderModalStoreId) : null;
+    return cartItems.reduce((sum, item) => {
+      if (item.isSample) return sum;
+      const storeOverride = orderModalStoreId ? storeProductPrices.find(p => p.product_id === item.product.id && p.store_id === orderModalStoreId) : null;
+      const resolvedPrice = resolvePrice({
+        price: item.product.price || 0,
+        discount_price: item.product.discount_price,
+        discount_rate: selectedStore?.discount_rate,
+        override_price: storeOverride?.override_price,
+      }).price;
+      return sum + item.quantity * resolvedPrice;
+    }, 0);
+  }, [cartItems, orderModalStoreId, stores, storeProductPrices]);
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
   const sampleLineCount = useMemo(() => cartItems.filter((item) => item.isSample).length, [cartItems]);
 
@@ -407,7 +453,7 @@ export default function OrdersScreen() {
       isSample: item.isSample,
     }));
 
-    const { error } = await createBatchOrders(items);
+    const { error } = await createBatchOrders(items, orderModalStoreId);
     if (error) {
       Toast.show({ type: 'error', text1: '错误', text2: error.message });
       return;
@@ -614,6 +660,19 @@ export default function OrdersScreen() {
             <Text style={styles.acceptedTagText}>已接单</Text>
           </View>
         )}
+        {isAdmin && item.status === 'accepted' && item.order_kind === 'distribution' && item.store_id && (
+          <TouchableOpacity
+            style={styles.modifyOrderButton}
+            onPress={() => {
+              setModifyOrder(item);
+              const initialCart = new Map<string, number>();
+              item.items.forEach(i => initialCart.set(i.id, i.quantity));
+              setModifyCart(initialCart);
+            }}
+          >
+            <Text style={styles.modifyOrderButtonText}>修改订单</Text>
+          </TouchableOpacity>
+        )}
         {(isAdmin || user?.id === item.distributor_id) && (
           <TouchableOpacity
             style={[styles.deleteOrderButton, deletingOrderId === item.id && styles.deleteOrderButtonDisabled]}
@@ -637,6 +696,16 @@ export default function OrdersScreen() {
     const saleInputValue = quantityInputMode.get(saleKey) || '';
     const sampleInputValue = quantityInputMode.get(sampleKey) || '';
 
+    const selectedStore = orderModalStoreId ? stores.find(s => s.id === orderModalStoreId) : null;
+    const storeOverride = orderModalStoreId ? storeProductPrices.find(p => p.product_id === item.id && p.store_id === orderModalStoreId) : null;
+    
+    const resolvedPrice = resolvePrice({
+      price: item.price || 0,
+      discount_price: item.discount_price,
+      discount_rate: selectedStore?.discount_rate,
+      override_price: storeOverride?.override_price,
+    }).price;
+
     return (
       <View style={styles.productRow}>
         {item.image_url ? (
@@ -651,8 +720,8 @@ export default function OrdersScreen() {
           <Text style={styles.productRowMeta}>
             {item.city_name ? `${item.city_name} · ` : ''}
             {user?.role === 'distributor'
-              ? `折 ${item.discount_price}元 · 零售 ${item.price}元`
-              : `零售 ${item.price}元 · 折 ${item.discount_price}元`}
+              ? `折 ${resolvedPrice}元 · 零售 ${item.price}元`
+              : `零售 ${item.price}元 · 折 ${resolvedPrice}元`}
           </Text>
         </View>
         <View style={styles.productRowActionsMulti}>
@@ -945,6 +1014,55 @@ export default function OrdersScreen() {
                 <Text style={styles.modalClose}>关闭</Text>
               </TouchableOpacity>
             </View>
+            <View style={styles.modalSelectors}>
+              {isAdmin && (
+                <View style={styles.selectorGroup}>
+                  <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>分销商</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
+                    <TouchableOpacity
+                      style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalDistributorId === null && styles.chipActive]}
+                      onPress={() => { setOrderModalDistributorId(null); setOrderModalStoreId(null); }}
+                    >
+                      <Text style={[styles.chipText, { color: theme.textSecondary }, orderModalDistributorId === null && styles.chipTextActive]}>未选择</Text>
+                    </TouchableOpacity>
+                    {distributors.map(d => (
+                      <TouchableOpacity
+                        key={d.id}
+                        style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalDistributorId === d.id && styles.chipActive]}
+                        onPress={() => { setOrderModalDistributorId(d.id); setOrderModalStoreId(null); }}
+                      >
+                        <Text style={[styles.chipText, { color: theme.textSecondary }, orderModalDistributorId === d.id && styles.chipTextActive]}>{d.store_name || d.email}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {(isAdmin ? orderModalDistributorId !== null : true) && (
+                <View style={styles.selectorGroup}>
+                  <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>店铺</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
+                    <TouchableOpacity
+                      style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalStoreId === null && styles.chipActive]}
+                      onPress={() => setOrderModalStoreId(null)}
+                    >
+                      <Text style={[styles.chipText, { color: theme.textSecondary }, orderModalStoreId === null && styles.chipTextActive]}>未选择</Text>
+                    </TouchableOpacity>
+                    {stores
+                      .filter(s => s.distributor_id === (isAdmin ? orderModalDistributorId : user?.id) && s.status === 'active')
+                      .map(s => (
+                        <TouchableOpacity
+                          key={s.id}
+                          style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalStoreId === s.id && styles.chipActive]}
+                          onPress={() => setOrderModalStoreId(s.id)}
+                        >
+                          <Text style={[styles.chipText, { color: theme.textSecondary }, orderModalStoreId === s.id && styles.chipTextActive]}>{s.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
 
             <FlatList
               data={availableProducts}
@@ -1118,6 +1236,85 @@ export default function OrdersScreen() {
           </View>
         </View>
       </Modal>
+      <Modal visible={modifyOrder !== null} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>修改订单 (仅减量)</Text>
+              <TouchableOpacity onPress={() => { setModifyOrder(null); setModifyCart(new Map()); }}>
+                <Text style={styles.modalClose}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {modifyOrder ? (
+              <ScrollView style={styles.detailScroll}>
+                {modifyOrder.items.map((orderItem) => {
+                  const currentQty = modifyCart.get(orderItem.id) ?? orderItem.quantity;
+                  return (
+                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}>
+                      <Text style={[styles.detailItemName, { color: theme.textPrimary }]}>
+                        {orderItem.product_name || '未知商品'}
+                        {orderItem.is_sample ? '（样品）' : ''}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity
+                          style={styles.qtyBtn}
+                          onPress={() => {
+                            if (currentQty > 0) {
+                              const nextCart = new Map(modifyCart);
+                              nextCart.set(orderItem.id, currentQty - 1);
+                              setModifyCart(nextCart);
+                            }
+                          }}
+                        >
+                          <Text style={styles.qtyBtnText}>-</Text>
+                        </TouchableOpacity>
+                        <Text style={[styles.qtyValue, { color: theme.textPrimary }]}>{currentQty}</Text>
+                        <TouchableOpacity
+                          style={[styles.qtyBtn, { opacity: 0.5 }]}
+                          disabled={true}
+                        >
+                          <Text style={styles.qtyBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButtonWrap, submittingModify && styles.disabledButton]}
+                onPress={async () => {
+                  if (!modifyOrder) return;
+                  setSubmittingModify(true);
+                  const itemsPayload = Array.from(modifyCart.entries()).map(([id, qty]) => ({
+                    order_item_id: id,
+                    new_quantity: qty,
+                  }));
+                  const { error } = await useAppStore.getState().modifyDistributionOrder(modifyOrder.id, itemsPayload);
+                  setSubmittingModify(false);
+                  if (error) {
+                    Toast.show({ type: 'error', text1: '修改失败', text2: error.message });
+                  } else {
+                    Toast.show({ type: 'success', text1: '成功', text2: '订单已修改' });
+                    setModifyOrder(null);
+                    setModifyCart(new Map());
+                  }
+                }}
+                disabled={submittingModify}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>{submittingModify ? '处理中...' : '确认修改'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -1277,6 +1474,16 @@ const styles = StyleSheet.create({
   detailText: { fontSize: 12, color: Colors.textSecondary },
   totalText: { fontSize: 16, fontWeight: '700', color: Colors.pink, marginTop: 3 },
   orderActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 8 },
+  modifyOrderButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.blue,
+    backgroundColor: Colors.blueBg,
+    marginRight: 8,
+  },
+  modifyOrderButtonText: { fontSize: 12, color: Colors.blue, fontWeight: '600' },
   deleteOrderButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1409,6 +1616,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 10,
   },
+  modalSelectors: { paddingHorizontal: 15, paddingBottom: 10 },
+  selectorGroup: { marginBottom: 10 },
+  selectorLabel: { fontSize: 12, marginBottom: 6, fontWeight: '600' },
+  selectorScroll: { flexDirection: 'row' },
   cartLine: { fontSize: 13, color: Colors.textPrimary, marginBottom: 2 },
   modalButtons: { flexDirection: 'row' },
   clearButton: {

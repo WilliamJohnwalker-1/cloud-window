@@ -240,6 +240,16 @@ BEGIN
   INSERT INTO public.profiles (id, email, role, city_id, store_name)
   VALUES (NEW.id, NEW.email, signup_role, selected_city, selected_store);
 
+  -- Auto-create a stores row for distributors with both city and store_name
+  IF signup_role = 'distributor' AND selected_city IS NOT NULL AND selected_store IS NOT NULL THEN
+    INSERT INTO public.stores (name, city_id, distributor_id)
+    SELECT selected_store, selected_city, NEW.id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.stores
+      WHERE distributor_id = NEW.id AND name = selected_store AND city_id = selected_city
+    );
+  END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -248,6 +258,30 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Trigger function: auto-create a stores row when a distributor profile is inserted.
+-- Covers both the signup path (handle_new_user) and the self-heal path (v3.10 policy).
+-- The signup path also inserts into stores explicitly; both use NOT EXISTS guards
+-- so repeated calls never duplicate stores.
+CREATE OR REPLACE FUNCTION public.create_store_for_new_distributor()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.role = 'distributor' AND NEW.city_id IS NOT NULL AND NEW.store_name IS NOT NULL THEN
+    INSERT INTO public.stores (name, city_id, distributor_id)
+    SELECT NEW.store_name, NEW.city_id, NEW.id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.stores
+      WHERE distributor_id = NEW.id AND name = NEW.store_name AND city_id = NEW.city_id
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_distributor_profile_created ON public.profiles;
+CREATE TRIGGER on_distributor_profile_created
+  AFTER INSERT ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.create_store_for_new_distributor();
 
 -- Storage bucket for product images
 INSERT INTO storage.buckets (id, name, public)
