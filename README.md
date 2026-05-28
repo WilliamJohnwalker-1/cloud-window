@@ -116,7 +116,11 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
 17. 执行 `supabase/migrate-v3.8-city-sort-index-guard.sql`
 18. 执行 `supabase/migrate-v3.9-rls-optimization.sql`
-19. 执行 `supabase/storage-policies.sql`
+19. 执行 `supabase/migrate-v3.10-profiles-self-heal.sql`
+20. 执行 `supabase/migrate-v4.0-store-management.sql`
+21. 执行 `supabase/migrate-v4.1-store-optional-distributor.sql`
+22. 执行 `supabase/migrate-v4.2-store-inventory-distributor-write.sql`
+23. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -138,7 +142,11 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 16. 执行 `supabase/migrate-v3.7-order-payment-note.sql`
 17. 执行 `supabase/migrate-v3.8-city-sort-index-guard.sql`
 18. 执行 `supabase/migrate-v3.9-rls-optimization.sql`
-19. 执行 `supabase/storage-policies.sql`
+19. 执行 `supabase/migrate-v3.10-profiles-self-heal.sql`
+20. 执行 `supabase/migrate-v4.0-store-management.sql`
+21. 执行 `supabase/migrate-v4.1-store-optional-distributor.sql`
+22. 执行 `supabase/migrate-v4.2-store-inventory-distributor-write.sql`
+23. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -326,6 +334,19 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.17 (2026-05-28) - 店铺维度能力补齐（待 admin 实单验收）
+
+- 商品编辑新增店铺专属定价管理（店铺选择 + 覆盖价保存）
+- 订单页补齐“修改订单（仅减量）”入口，前端按 `order_item_id/new_quantity` 提交到原子 RPC
+- 报表新增店铺筛选与店铺销售占比/店铺库存概览（Web 端）
+- 当前状态：本地类型检查通过；受限于 admin 凭据缺失，真实登录验收仍待补测
+
+### Mobile v2.1.14 (2026-05-28) - 报表店铺维度落地（待 admin 实单验收）
+
+- 报表页新增店铺筛选入口，销售/利润维度支持按店铺聚合或过滤
+- 新增店铺销售分布与店铺库存概览指标（商品数、总库存、低库存）
+- 当前状态：代码与类型检查通过；真实 admin 登录验收待补测
 
 ### Web v1.2.16 (2026-05-15) - 退款确认与部分退款支持
 

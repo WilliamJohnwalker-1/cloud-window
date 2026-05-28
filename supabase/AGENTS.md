@@ -26,6 +26,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v3.8-city-sort-index-guard.sql`: city sort_index de-dup + append-at-bottom insert guard + swap safety.
 - `migrate-v3.9-rls-optimization.sql`: RLS helper functions + policy optimization/hardening.
 - `migrate-v3.10-profiles-self-heal.sql`: allow users to self-heal missing distributor profile rows.
+- `migrate-v4.0-store-management.sql`: stores/store inventory/store pricing schema + data bootstrap + store-aware order RPCs.
+- `migrate-v4.1-store-optional-distributor.sql`: make stores.distributor_id nullable for deferred distributor binding.
+- `migrate-v4.2-store-inventory-distributor-write.sql`: allow distributors to insert/update own store_inventory rows.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -50,7 +53,10 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 17. `migrate-v3.8-city-sort-index-guard.sql`
 18. `migrate-v3.9-rls-optimization.sql`
 19. `migrate-v3.10-profiles-self-heal.sql`
-20. `storage-policies.sql`
+20. `migrate-v4.0-store-management.sql`
+21. `migrate-v4.1-store-optional-distributor.sql`
+22. `migrate-v4.2-store-inventory-distributor-write.sql`
+23. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -72,7 +78,10 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 17. `migrate-v3.8-city-sort-index-guard.sql`
 18. `migrate-v3.9-rls-optimization.sql`
 19. `migrate-v3.10-profiles-self-heal.sql`
-20. `storage-policies.sql`
+20. `migrate-v4.0-store-management.sql`
+21. `migrate-v4.1-store-optional-distributor.sql`
+22. `migrate-v4.2-store-inventory-distributor-write.sql`
+23. `storage-policies.sql`
 
 ## TABLES
 
@@ -83,6 +92,10 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `orders`: distributor_id, city_id, status, totals.
 - `order_items`: order_id, product_id, quantity, prices, unit_cost.
 - `distributor_product_prices`: Custom discount per distributor.
+- `stores`: store master data (city/distributor binding, discount rate, status).
+- `store_inventory`: per-store inventory pool by product.
+- `store_product_prices`: per-store product override price.
+- `app_schema_meta`: schema version gate metadata.
 - `notifications`: user_id, type, order_id, message.
 
 ## GOTCHAS
