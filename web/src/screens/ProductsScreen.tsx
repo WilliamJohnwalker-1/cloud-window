@@ -1,16 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Filter, Package, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { BarcodePreview } from '../components/BarcodePreview';
 import { useAppStore } from '../store/useAppStore';
 
 export const ProductsScreen: React.FC = () => {
-  const { user, cities, products, addProduct, updateProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
+  const { user, cities, products, stores, storeProductPrices, fetchStores, fetchStoreProductPrices, setStoreProductPrice, addProduct, updateProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+  const [customStorePrice, setCustomStorePrice] = useState<string>('');
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -19,6 +21,31 @@ export const ProductsScreen: React.FC = () => {
     discount_price: '',
     city_id: '',
   });
+
+  useEffect(() => {
+    if (isAdminOrManager) {
+      fetchStores();
+    }
+  }, [isAdminOrManager, fetchStores]);
+  useEffect(() => {
+    if (selectedStoreId) {
+      fetchStoreProductPrices(selectedStoreId);
+    }
+  }, [selectedStoreId, fetchStoreProductPrices]);
+
+  useEffect(() => {
+    if (selectedStoreId && editingProductId) {
+      const existingPrice = storeProductPrices.find(
+        (p) => p.store_id === selectedStoreId && p.product_id === editingProductId
+      );
+      if (existingPrice && existingPrice.override_price !== undefined && existingPrice.override_price !== null) {
+        setCustomStorePrice(String(existingPrice.override_price));
+      } else {
+        setCustomStorePrice('');
+      }
+    }
+  }, [selectedStoreId, editingProductId, storeProductPrices]);
+
 
   const filteredProducts = useMemo(() => {
     if (cityFilter === 'all') return products;
@@ -57,6 +84,8 @@ export const ProductsScreen: React.FC = () => {
   const openCreateModal = (): void => {
     setEditingProductId(null);
     setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
+    setSelectedStoreId('');
+    setCustomStorePrice('');
     setShowCreate(true);
   };
 
@@ -73,6 +102,8 @@ export const ProductsScreen: React.FC = () => {
       discount_price: String(product.discount_price),
       city_id: product.city_id,
     });
+    setSelectedStoreId('');
+    setCustomStorePrice('');
     setShowCreate(true);
   };
 
@@ -103,6 +134,29 @@ export const ProductsScreen: React.FC = () => {
     }
 
     await handleCreateProduct();
+  };
+
+  const handleSaveStorePrice = async (): Promise<void> => {
+    if (!editingProductId) {
+      window.alert('请先保存商品，再设置店铺定价');
+      return;
+    }
+    if (!selectedStoreId) {
+      window.alert('请选择店铺');
+      return;
+    }
+    const overridePrice = parseFloat(customStorePrice);
+    if (Number.isNaN(overridePrice) || overridePrice < 0) {
+      window.alert('请输入有效定价');
+      return;
+    }
+    const { error } = await setStoreProductPrice(selectedStoreId, editingProductId, overridePrice);
+    if (error) {
+      window.alert(`错误：${error.message}`);
+    } else {
+      window.alert('店铺专属定价已更新');
+      setCustomStorePrice('');
+    }
   };
 
   return (
@@ -260,6 +314,40 @@ export const ProductsScreen: React.FC = () => {
                 </div>
               </div>
             </div>
+            {editingProductId && user?.role === 'admin' && (
+              <div className="mt-6 pt-4 border-t border-white/10">
+                <h4 className="text-sm font-bold text-white/60 mb-3">店铺专属定价(元)</h4>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {stores.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setSelectedStoreId(s.id)}
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === s.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+                    >
+                      {s.name}（{s.city_name || '未知城市'}）
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={customStorePrice}
+                    onChange={(e) => setCustomStorePrice(e.target.value)}
+                    placeholder="输入专属定价(元)"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                    type="number"
+                    step="0.01"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveStorePrice}
+                    className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold transition-colors"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
               <button type="button" onClick={handleSaveProduct} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>

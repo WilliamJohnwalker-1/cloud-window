@@ -8,9 +8,10 @@ import { PaymentScreen } from './screens/PaymentScreen';
 import { ProductsScreen } from './screens/ProductsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { ReportsScreen } from './screens/ReportsScreen';
+import { StoresScreen } from './screens/StoresScreen';
 import { useAppStore } from './store/useAppStore';
 
-type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'reports' | 'profile';
+type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'reports' | 'profile' | 'stores';
 
 interface SearchResultItem {
   id: string;
@@ -215,6 +216,8 @@ function App() {
         return <ReportsScreen />;
       case 'profile':
         return <ProfileScreen />;
+      case 'stores':
+        return <StoresScreen />;
       default:
         return <ProductsScreen />;
     }
@@ -234,6 +237,8 @@ function App() {
         return '数据报表';
       case 'profile':
         return '个人中心';
+      case 'stores':
+        return '店铺管理';
       default:
         return '云窗文创';
     }

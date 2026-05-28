@@ -6,7 +6,8 @@ import {
   ShoppingCart, 
   BarChart3, 
   User, 
-  LogOut
+  LogOut,
+  Store
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { clsx } from 'clsx';
@@ -30,6 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'payment', label: '收款台', icon: ScanLine, roles: ['admin', 'inventory_manager'] },
     { id: 'reports', label: '报表', icon: BarChart3, roles: ['admin'] },
     { id: 'profile', label: '我的', icon: User },
+    { id: 'stores', label: '店铺', icon: Store, roles: ['admin'] },
   ];
 
   const filteredItems = menuItems.filter(item => 

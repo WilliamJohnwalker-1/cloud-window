@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 import { getPaymentApiEndpoint } from '../lib/payment';
+import { resolvePrice } from '../utils/priceResolver';
 
 type OrderFilter = 'all' | 'pending' | 'accepted';
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
@@ -16,10 +17,11 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [detailOrderData, setDetailOrderData] = useState<(typeof orders)[number] | null>(null);
   const [detailCache, setDetailCache] = useState<Record<string, (typeof orders)[number]>>({});
@@ -36,6 +38,9 @@ export const OrdersScreen: React.FC = () => {
   const [refundReasonInput, setRefundReasonInput] = useState('收银台退款');
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
+  const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
+  const [submittingModify, setSubmittingModify] = useState(false);
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
@@ -118,13 +123,20 @@ export const OrdersScreen: React.FC = () => {
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const filteredProducts = useMemo(() => {
+    let result = products;
+    if (selectedStoreId) {
+      const store = stores.find((s) => s.id === selectedStoreId);
+      if (store && store.city_id) {
+        result = result.filter((p) => p.city_id === store.city_id);
+      }
+    }
     const keyword = searchKeyword.trim().toLowerCase();
-    if (!keyword) return products;
-    return products.filter((product) => {
+    if (!keyword) return result;
+    return result.filter((product) => {
       const haystack = [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [products, searchKeyword]);
+  }, [products, searchKeyword, selectedStoreId, stores]);
 
   const cartItems = useMemo(() => {
     const parseCartKey = (cartKey: string): { productId: string; lineType: CartLineType } => {
@@ -154,8 +166,19 @@ export const OrdersScreen: React.FC = () => {
   }, [cartItems]);
 
   const totalDiscountAmount = useMemo(() => {
-    return cartItems.reduce((sum, item) => (item.isSample ? sum : sum + Number(item.product.discount_price || item.product.price || 0) * item.quantity), 0);
-  }, [cartItems]);
+    return cartItems.reduce((sum, item) => {
+      if (item.isSample) return sum;
+      const store = selectedStoreId ? stores.find((s) => s.id === selectedStoreId) : null;
+      const storeOverride = selectedStoreId ? storeProductPrices.find((entry) => entry.store_id === selectedStoreId && entry.product_id === item.product.id) : undefined;
+      const resolvedPrice = resolvePrice({
+        price: Number(item.product.price || 0),
+        discount_price: item.product.discount_price,
+        discount_rate: store?.discount_rate,
+        override_price: storeOverride?.override_price,
+      }).price;
+      return sum + resolvedPrice * item.quantity;
+    }, 0);
+  }, [cartItems, selectedStoreId, stores, storeProductPrices]);
 
   const detailOrder = detailOrderData;
 
@@ -186,6 +209,12 @@ export const OrdersScreen: React.FC = () => {
       }
     }));
   }, [fetchOrderDetail, filteredOrders]);
+  useEffect(() => {
+    if (selectedStoreId) {
+      void fetchStoreProductPrices(selectedStoreId);
+    }
+  }, [selectedStoreId, fetchStoreProductPrices]);
+
 
   const openOrderDetail = async (orderId: string): Promise<void> => {
     setDetailOrderId(orderId);
@@ -411,6 +440,7 @@ export const OrdersScreen: React.FC = () => {
         quantity: item.quantity,
         isSample: item.isSample,
       })),
+      selectedStoreId
     );
     if (result.error) {
       window.alert(`下单失败：${result.error.message}`);
@@ -420,7 +450,26 @@ export const OrdersScreen: React.FC = () => {
     setCart(new Map());
     setSearchKeyword('');
     setShowCreateModal(false);
+    setSelectedStoreId(null);
     window.alert('订单已创建');
+  };
+
+  const handleModifyOrder = async (): Promise<void> => {
+    if (!modifyOrder) return;
+    const itemsPayload = Array.from(modifyCart.entries()).map(([orderItemId, quantity]) => ({
+      order_item_id: orderItemId,
+      new_quantity: quantity,
+    }));
+    setSubmittingModify(true);
+    const { error } = await modifyDistributionOrder(modifyOrder.id, itemsPayload);
+    setSubmittingModify(false);
+    if (error) {
+      window.alert(`修改失败：${error.message}`);
+      return;
+    }
+    window.alert('订单修改成功');
+    setModifyOrder(null);
+    setModifyCart(new Map());
   };
 
   return (
@@ -636,6 +685,21 @@ export const OrdersScreen: React.FC = () => {
                     <span>{refundingOrderId === order.id ? '退款中' : '退款'}</span>
                   </button>
                 )}
+                {user?.role === 'admin' && order.status === 'accepted' && order.order_kind === 'distribution' && order.store_id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const resolvedOrder = getResolvedOrder(order.id) || order;
+                      setModifyOrder(resolvedOrder);
+                      const initialCart = new Map<string, number>();
+                      resolvedOrder.items.forEach((i) => initialCart.set(i.id, Number(i.quantity || 0)));
+                      setModifyCart(initialCart);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-blue-400/30 bg-blue-500/20 text-blue-100 hover:bg-blue-500/30 text-xs font-bold inline-flex items-center gap-1"
+                  >
+                    <span>修改订单</span>
+                  </button>
+                )}
                 {(user?.role === 'admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
                     <button
                       type="button"
@@ -676,12 +740,29 @@ export const OrdersScreen: React.FC = () => {
               </button>
             </div>
 
-            <input
-              value={searchKeyword}
-              onChange={(event) => setSearchKeyword(event.target.value)}
-              placeholder="搜索商品名称/条码"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
-            />
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select
+                value={selectedStoreId || ''}
+                onChange={(e) => {
+                  setSelectedStoreId(e.target.value || null);
+                  setCart(new Map());
+                }}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
+              >
+                <option value="" className="bg-[#121217]">-- 不指定店铺 (默认) --</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id} className="bg-[#121217]">
+                    {store.name} ({store.city_name}){store.distributor_email ? ` - ${store.distributor_email}` : ''}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={searchKeyword}
+                onChange={(event) => setSearchKeyword(event.target.value)}
+                placeholder="搜索商品名称/条码"
+                className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
@@ -690,6 +771,16 @@ export const OrdersScreen: React.FC = () => {
                   const sampleKey = getCartKey(product.id, 'sample');
                   const saleQty = cart.get(saleKey)?.quantity || 0;
                   const sampleQty = cart.get(sampleKey)?.quantity || 0;
+
+                  const store = selectedStoreId ? stores.find((s) => s.id === selectedStoreId) : null;
+                  const storeOverride = selectedStoreId ? storeProductPrices.find((entry) => entry.store_id === selectedStoreId && entry.product_id === product.id) : undefined;
+                  const resolvedPrice = resolvePrice({
+                    price: Number(product.price || 0),
+                    discount_price: product.discount_price,
+                    discount_rate: store?.discount_rate,
+                    override_price: storeOverride?.override_price,
+                  }).price;
+
                   return (
                     <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
                       <div className="flex items-center justify-between gap-3">
@@ -704,7 +795,7 @@ export const OrdersScreen: React.FC = () => {
                           <p className="font-semibold">{product.name}</p>
                           <p className="text-xs text-white/40">{product.city_name} · 条码 {product.barcode || '无'}</p>
                         </div>
-                        <p className="text-sm text-accent font-bold">¥{product.discount_price}</p>
+                        <p className="text-sm text-accent font-bold">¥{resolvedPrice.toFixed(2)}</p>
                       </div>
 
                       <div className="space-y-2">
@@ -964,6 +1055,84 @@ export const OrdersScreen: React.FC = () => {
                 className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
               >
                 {refundingOrderId === refundModalOrderId ? '退款处理中...' : '确认退款'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modifyOrder && (
+        <div className="fixed inset-0 bg-black/70 z-[90] flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">修改订单 #{modifyOrder.id.slice(0, 8)}</h3>
+              <button type="button" onClick={() => setModifyOrder(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/60">仅支持减少商品数量。如需增加，请新建订单。</p>
+            <div className="border border-white/10 rounded-2xl overflow-hidden max-h-[400px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-white/[0.03]">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-white/50">商品</th>
+                    <th className="text-right px-4 py-3 text-white/50">原数量</th>
+                    <th className="text-right px-4 py-3 text-white/50">修改后数量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modifyOrder.items.map((item) => {
+                    const currentQty = modifyCart.get(item.id) ?? Number(item.quantity || 0);
+                    const originalQty = Number(item.quantity || 0);
+                    const isSample = Boolean(item.is_sample);
+                    const step = isSample ? 1 : 5;
+                    return (
+                      <tr key={item.id} className="border-t border-white/5">
+                        <td className="px-4 py-3">
+                          {resolveItemName(item.product_id, item.product_name)}
+                          {isSample ? <span className="ml-2 text-[10px] text-cyan-300">样品</span> : null}
+                        </td>
+                        <td className="px-4 py-3 text-right">{originalQty}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setModifyCart(new Map(modifyCart).set(item.id, Math.max(0, currentQty - step)))}
+                              className="px-2 py-1 rounded bg-white/10 hover:bg-white/20"
+                            >
+                              -{step}
+                            </button>
+                            <span className="w-8 text-center">{currentQty}</span>
+                            <button
+                              type="button"
+                              onClick={() => setModifyCart(new Map(modifyCart).set(item.id, Math.min(originalQty, currentQty + step)))}
+                              disabled={currentQty >= originalQty}
+                              className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30"
+                            >
+                              +{step}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModifyOrder(null)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleModifyOrder(); }}
+                disabled={submittingModify}
+                className="px-4 py-2 rounded-xl border border-blue-400/30 bg-blue-500/20 text-blue-100 font-semibold disabled:opacity-60"
+              >
+                {submittingModify ? '提交中...' : '确认修改'}
               </button>
             </div>
           </div>
