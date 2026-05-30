@@ -29,6 +29,9 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v4.0-store-management.sql`: stores/store inventory/store pricing schema + data bootstrap + store-aware order RPCs.
 - `migrate-v4.1-store-optional-distributor.sql`: make stores.distributor_id nullable for deferred distributor binding.
 - `migrate-v4.2-store-inventory-distributor-write.sql`: allow distributors to insert/update own store_inventory rows.
+- `migrate-v4.3-store-super-admin-and-retail-store.sql`: add super_admin role + store contact + retail store binding support.
+- `migrate-v4.4-retail-default-yunchuang-store.sql`: default retail order store to 云窗 + backfill historical retail store_id.
+- `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`: retail delete rollback fix (total inventory only) + schema gate update.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -56,7 +59,10 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 20. `migrate-v4.0-store-management.sql`
 21. `migrate-v4.1-store-optional-distributor.sql`
 22. `migrate-v4.2-store-inventory-distributor-write.sql`
-23. `storage-policies.sql`
+23. `migrate-v4.3-store-super-admin-and-retail-store.sql`
+24. `migrate-v4.4-retail-default-yunchuang-store.sql`
+25. `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
+26. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -81,7 +87,10 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 20. `migrate-v4.0-store-management.sql`
 21. `migrate-v4.1-store-optional-distributor.sql`
 22. `migrate-v4.2-store-inventory-distributor-write.sql`
-23. `storage-policies.sql`
+23. `migrate-v4.3-store-super-admin-and-retail-store.sql`
+24. `migrate-v4.4-retail-default-yunchuang-store.sql`
+25. `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
+26. `storage-policies.sql`
 
 ## TABLES
 

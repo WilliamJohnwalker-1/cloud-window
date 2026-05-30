@@ -120,7 +120,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 20. 执行 `supabase/migrate-v4.0-store-management.sql`
 21. 执行 `supabase/migrate-v4.1-store-optional-distributor.sql`
 22. 执行 `supabase/migrate-v4.2-store-inventory-distributor-write.sql`
-23. 执行 `supabase/storage-policies.sql`
+23. 执行 `supabase/migrate-v4.3-store-super-admin-and-retail-store.sql`
+24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
+25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
+26. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -146,7 +149,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 20. 执行 `supabase/migrate-v4.0-store-management.sql`
 21. 执行 `supabase/migrate-v4.1-store-optional-distributor.sql`
 22. 执行 `supabase/migrate-v4.2-store-inventory-distributor-write.sql`
-23. 执行 `supabase/storage-policies.sql`
+23. 执行 `supabase/migrate-v4.3-store-super-admin-and-retail-store.sql`
+24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
+25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
+26. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -340,6 +346,8 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 收款台零售建单默认绑定店铺“云窗”，避免 `store_id` 为空导致店铺维度统计缺失
 - 新增迁移 `migrate-v4.4-retail-default-yunchuang-store.sql`：历史 `retail` 订单店铺回填到“云窗”
 - `create_retail_order_atomic` 在未传 `p_store_id` 时自动回落“云窗”并保持店铺有效性校验
+- 紧急补丁：零售订单删除时仅回退到总库存，不再扣减“云窗店铺库存池”（避免总店重复扣减）
+- 紧急补丁：超时未支付的零售订单在订单列表刷新时自动清理并回退库存（admin/super_admin/inventory_manager）
 
 ### Mobile v2.1.15 (2026-05-30) - 超级管理员库存可见性与店铺管理体验补齐
 
@@ -347,6 +355,9 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 修复超级管理员在库存管理页无法查看店铺库存：现可进入“店铺库存”视图并查看各店铺库存数据
 - 店铺管理弹窗改为 `KeyboardAvoidingView + ScrollView`，修复小屏/键盘遮挡导致字段显示不全
 - 店铺管理补齐联系人字段与店铺卡片联系人/电话展示，并支持停用后重新启用与删除操作
+- 报表页商品名称过长时，支持点击被缩略的商品名弹窗查看完整商品名称
+- 紧急补丁：移动端订单删除改为统一调用原子 RPC，零售订单删除时按总库存回退，不再错误扣减云窗店铺库存池
+- 紧急补丁：超时未支付的零售订单在订单列表刷新时自动清理并回退库存（admin/super_admin/inventory_manager）
 
 ### Web v1.2.18 (2026-05-30) - 收款台扫码稳定性与付款码校验修复
 

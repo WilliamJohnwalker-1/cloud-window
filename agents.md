@@ -207,10 +207,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. migrate-v4.3-store-super-admin-and-retail-store.sql -> 24. migrate-v4.4-retail-default-yunchuang-store.sql -> 25. migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql -> 26. storage-policies.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-21 same as above
+1. migrate-v2.sql -> 2-26 same as above
 
 ## GOTCHAS
 
@@ -234,8 +234,8 @@ Before committing:
 - Current web baseline: `v1.2.19`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 收款台零售订单默认绑定“云窗”店铺 + 历史零售订单店铺回填（v4.4）
-- Latest mobile stabilization: 修复 super_admin 在库存页无法查看店铺库存；店铺管理弹窗补齐键盘避让与滚动、联系人字段展示、店铺启用/删除操作
+- Latest web stabilization: 零售订单删除回滚仅作用于总库存（不再扣减云窗店铺库存池）+ 超时未支付零售订单自动清理回滚库存（v4.5）
+- Latest mobile stabilization: 修复 super_admin 在库存页无法查看店铺库存；订单删除统一走原子 RPC（零售删除不再错误扣减云窗店铺库存池）；订单列表刷新自动清理超时未支付零售订单
 - Latest store-management wave: Web 店铺定价管理已上线；Web 订单修改 UI 与双端报表店铺维度代码已落地，待 admin 凭据完成真实手工验收
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.

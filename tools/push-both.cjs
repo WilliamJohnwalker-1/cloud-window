@@ -7,17 +7,22 @@ const run = (command, args) => {
     stdio: 'inherit',
     env: process.env,
   });
-  if (result.status !== 0) {
-    process.exit(result.status || 1);
-  }
+  return result.status || 0;
 };
 
 const branch = process.argv[2] || 'master';
 
 console.log(`🚀 pushing ${branch} -> origin (gitee)`);
-run('git', ['push', 'origin', branch]);
+const originStatus = run('git', ['push', 'origin', branch]);
+if (originStatus !== 0) {
+  process.exit(originStatus);
+}
 
 console.log(`🚀 pushing ${branch} -> github`);
-run('git', ['push', 'github', branch]);
+const githubStatus = run('git', ['push', 'github', branch]);
+if (githubStatus !== 0) {
+  console.log('⚠️ github push failed (single attempt, no retry). Please report and hand off for manual push.');
+  process.exit(githubStatus);
+}
 
 console.log('✅ dual remote push completed');

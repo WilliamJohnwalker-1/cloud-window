@@ -176,6 +176,9 @@ const requiredSchemaVersion = '4.3.0';
 const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;
+const unpaidRetailAutoDeleteMs = 30 * 60 * 1000;
+const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'refunded']);
+const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
 
 let sessionGraceUntil = 0;
 
@@ -231,6 +234,19 @@ const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
   return error.code === '42883'
     || error.code === 'PGRST202'
     || message.includes('could not find the function');
+};
+
+const shouldAutoDeleteStaleRetailOrder = (row: Pick<OrderRow, 'order_kind' | 'payment_status' | 'created_at'>): boolean => {
+  if ((row.order_kind || 'distribution') !== 'retail') return false;
+
+  const paymentStatus = String(row.payment_status || '').toLowerCase();
+  if (paidRetailStatuses.has(paymentStatus)) return false;
+  if (!unpaidRetailStatuses.has(paymentStatus)) return false;
+
+  const createdAtMs = new Date(row.created_at).getTime();
+  if (!Number.isFinite(createdAtMs)) return false;
+
+  return Date.now() - createdAtMs >= unpaidRetailAutoDeleteMs;
 };
 
 interface AppState {
@@ -658,7 +674,33 @@ export const useAppStore = create<AppState>()(
           .limit(300);
         if (error || !data) return;
 
-        const mapped = (data as OrderRow[])
+        let rows = data as OrderRow[];
+        const canAutoCleanupUnpaidRetail = user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager';
+        if (canAutoCleanupUnpaidRetail) {
+          const staleRetailOrderIds = rows
+            .filter((row) => shouldAutoDeleteStaleRetailOrder(row))
+            .map((row) => row.id);
+
+          if (staleRetailOrderIds.length > 0) {
+            await Promise.allSettled(
+              staleRetailOrderIds.map((orderId) => (
+                supabase.rpc('delete_order_with_inventory_restore_atomic', { p_order_id: orderId })
+              )),
+            );
+
+            const { data: refreshedRows, error: refreshedError } = await supabase
+              .from('orders')
+              .select(orderSelect)
+              .order('created_at', { ascending: false })
+              .limit(300);
+
+            if (!refreshedError && refreshedRows) {
+              rows = refreshedRows as OrderRow[];
+            }
+          }
+        }
+
+        const mapped = rows
           .map(mapOrder)
           .filter((order) => (user.role === 'distributor' ? order.distributor_id === user.id : true));
         set({ orders: mapped });
