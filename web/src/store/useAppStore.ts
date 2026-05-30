@@ -107,6 +107,7 @@ interface StoreRow {
   city_id: string;
   distributor_id?: string | null;
   discount_rate?: number | string | null;
+  contact?: string | null;
   address?: string | null;
   phone?: string | null;
   status?: Store['status'] | null;
@@ -139,6 +140,7 @@ interface StoreCreateInput {
   city_id: string;
   distributor_id?: string | null;
   discount_rate?: number;
+  contact?: string;
   address?: string;
   phone?: string;
 }
@@ -148,6 +150,7 @@ interface StoreUpdateInput {
   city_id?: string;
   distributor_id?: string | null;
   discount_rate?: number;
+  contact?: string;
   address?: string;
   phone?: string;
   status?: Store['status'];
@@ -169,7 +172,7 @@ interface RpcErrorLike {
   message?: string;
 }
 
-const requiredSchemaVersion = '3.7.0';
+const requiredSchemaVersion = '4.3.0';
 const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;
@@ -265,6 +268,7 @@ interface AppState {
   addStore: (store: StoreCreateInput) => Promise<{ error: Error | null }>;
   updateStore: (id: string, updates: StoreUpdateInput) => Promise<{ error: Error | null }>;
   deactivateStore: (id: string) => Promise<{ error: Error | null }>;
+  deleteStore: (id: string) => Promise<{ error: Error | null }>;
   addProduct: (payload: ProductCreateInput) => Promise<{ error: Error | null }>;
   updateProduct: (productId: string, payload: ProductCreateInput) => Promise<{ error: Error | null }>;
   setStoreProductPrice: (storeId: string, productId: string, price: number) => Promise<{ error: Error | null }>;
@@ -272,6 +276,11 @@ interface AppState {
     productId: string,
     nextQty: number,
     options?: { action?: InventoryLog['action']; note?: string },
+  ) => Promise<{ error: Error | null }>;
+  updateStoreInventoryByProduct: (
+    storeId: string,
+    productId: string,
+    nextQty: number,
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
@@ -310,7 +319,7 @@ const mapProfile = (row: ProfileRow): Profile => ({
   email: row.email,
   full_name: row.full_name,
   avatar_url: row.avatar_url ?? undefined,
-  role: row.role,
+  role: row.email?.toLowerCase() === '2330605169@qq.com' ? 'super_admin' : row.role,
   city_id: row.city_id,
   city_name: row.cities?.name,
   store_name: row.store_name,
@@ -353,6 +362,7 @@ const mapStore = (row: StoreRow): Store => {
     distributor_id: row.distributor_id ?? null,
     distributor_email: distributorData?.email ?? null,
     discount_rate: Number(row.discount_rate ?? 1),
+    contact: row.contact ?? undefined,
     address: row.address ?? undefined,
     phone: row.phone ?? undefined,
     status: row.status || 'active',
@@ -907,13 +917,14 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可创建店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可创建店铺');
 
           const payload = {
             name: store.name.trim(),
             city_id: store.city_id,
             distributor_id: store.distributor_id || null,
             discount_rate: store.discount_rate !== undefined ? Number(store.discount_rate) : 1,
+            contact: store.contact?.trim() || null,
             address: store.address?.trim() || null,
             phone: store.phone?.trim() || null,
             status: 'active' as const,
@@ -933,7 +944,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可编辑店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可编辑店铺');
 
           const payload: Record<string, string | number | null> = {
             updated_at: new Date().toISOString(),
@@ -943,6 +954,7 @@ export const useAppStore = create<AppState>()(
           if (updates.city_id !== undefined) payload.city_id = updates.city_id;
           if (updates.distributor_id !== undefined) payload.distributor_id = updates.distributor_id || null;
           if (updates.discount_rate !== undefined) payload.discount_rate = Number(updates.discount_rate);
+          if (updates.contact !== undefined) payload.contact = updates.contact.trim() || null;
           if (updates.address !== undefined) payload.address = updates.address.trim() || null;
           if (updates.phone !== undefined) payload.phone = updates.phone.trim() || null;
           if (updates.status !== undefined) payload.status = updates.status;
@@ -961,12 +973,28 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可停用店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可停用店铺');
 
           const { error } = await supabase
             .from('stores')
             .update({ status: 'inactive', updated_at: new Date().toISOString() })
             .eq('id', id);
+          if (error) throw error;
+
+          await get().fetchStores();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      deleteStore: async (id) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可删除店铺');
+
+          const { error } = await supabase.from('stores').delete().eq('id', id);
           if (error) throw error;
 
           await get().fetchStores();
@@ -1051,7 +1079,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可设置店铺定价');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可设置店铺定价');
 
           const { error } = await supabase
             .from('store_product_prices')
@@ -1122,6 +1150,53 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      updateStoreInventoryByProduct: async (storeId, productId, nextQty) => {
+        try {
+          const { user, storeInventory } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'super_admin') throw new Error('仅超级管理员可调整店铺池库存');
+          if (!storeId) throw new Error('店铺不能为空');
+          if (nextQty < 0) throw new Error('库存不能为负数');
+
+          const beforeQty = Number(
+            storeInventory.find((item) => item.store_id === storeId && item.product_id === productId)?.quantity || 0,
+          );
+
+          const currentItem = storeInventory.find((item) => item.store_id === storeId && item.product_id === productId);
+          if (currentItem?.id) {
+            const { error } = await supabase
+              .from('store_inventory')
+              .update({ quantity: nextQty, updated_at: new Date().toISOString() })
+              .eq('id', currentItem.id);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase
+              .from('store_inventory')
+              .insert({ store_id: storeId, product_id: productId, quantity: nextQty });
+            if (error) throw error;
+          }
+
+          const delta = nextQty - beforeQty;
+          if (delta !== 0) {
+            const { error: logError } = await supabase.from('inventory_logs').insert({
+              product_id: productId,
+              operator_id: user.id,
+              action: 'manual_adjust',
+              delta_quantity: delta,
+              before_quantity: beforeQty,
+              after_quantity: nextQty,
+              note: `店铺池库存调整 store:${storeId}`,
+            });
+            if (logError) throw logError;
+          }
+
+          await Promise.all([get().fetchStoreInventory(storeId), get().fetchInventoryLogs()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
       inboundStockByBarcode: async (barcode, quantity) => {
         try {
           const normalized = barcode.trim();
@@ -1161,7 +1236,7 @@ export const useAppStore = create<AppState>()(
             throw new Error('店铺已停用');
           }
 
-          if (user.role === 'distributor' && selectedStore && selectedStore.distributor_id !== user.id) {
+          if (user.role === 'distributor' && selectedStore?.distributor_id && selectedStore.distributor_id !== user.id) {
             throw new Error('店铺不属于当前分销商');
           }
 
@@ -1391,7 +1466,7 @@ export const useAppStore = create<AppState>()(
             }
           }
 
-          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+          const { data: admins } = await supabase.from('profiles').select('id').in('role', ['admin', 'super_admin']);
           if (admins && admins.length > 0) {
             const notifications = admins.map((admin: { id: string }) => ({
               user_id: admin.id,
@@ -1421,8 +1496,19 @@ export const useAppStore = create<AppState>()(
         const { user, products } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
-        if (!(user.role === 'admin' || user.role === 'inventory_manager')) {
+        if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager')) {
           return { error: new Error('当前角色无收款建单权限') };
+        }
+
+        // Resolve 云窗 store robustly: fetch if stale/empty, error if unresolvable
+        let stores = get().stores;
+        if (!stores.find((s) => s.name === '云窗' && s.status === 'active')) {
+          await get().fetchStores();
+          stores = get().stores;
+        }
+        const yunChuangStore = stores.find((s) => s.name === '云窗' && s.status === 'active') || null;
+        if (!yunChuangStore) {
+          return { error: new Error('未找到云窗店铺，请确认店铺数据已初始化') };
         }
 
         try {
@@ -1468,6 +1554,7 @@ export const useAppStore = create<AppState>()(
           const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_retail_order_atomic', {
             p_items: retailRpcPayload,
             p_request_id: requestId,
+            p_store_id: yunChuangStore.id,
           });
 
           if (!rpcError) {
@@ -1486,6 +1573,7 @@ export const useAppStore = create<AppState>()(
           const baseOrderPayload = {
             distributor_id: user.id,
             city_id: user.city_id ?? orderCityId,
+            store_id: yunChuangStore.id,
             total_retail_amount: retailTotals.totalRetail,
             total_discount_amount: retailTotals.totalDiscount,
             quantity: totalQuantity,

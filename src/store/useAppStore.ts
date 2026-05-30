@@ -93,6 +93,7 @@ interface StoreRow {
   city_id: string;
   distributor_id?: string | null;
   discount_rate?: number | string | null;
+  contact?: string | null;
   address?: string | null;
   phone?: string | null;
   status?: Store['status'] | null;
@@ -130,6 +131,7 @@ interface StoreCreateInput {
   city_id: string;
   distributor_id?: string | null;
   discount_rate?: number;
+  contact?: string;
   address?: string;
   phone?: string;
 }
@@ -139,6 +141,7 @@ interface StoreUpdateInput {
   city_id?: string;
   distributor_id?: string | null;
   discount_rate?: number;
+  contact?: string;
   address?: string;
   phone?: string;
   status?: Store['status'];
@@ -309,6 +312,7 @@ interface AppState {
   addStore: (store: StoreCreateInput) => Promise<{ error: Error | null }>;
   updateStore: (id: string, updates: StoreUpdateInput) => Promise<{ error: Error | null }>;
   deactivateStore: (id: string) => Promise<{ error: Error | null }>;
+  deleteStore: (id: string) => Promise<{ error: Error | null }>;
   updateDistributorProfile: (id: string, cityId: string, storeName?: string) => Promise<{ error: Error | null }>;
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
   updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
@@ -359,7 +363,7 @@ const mapProfile = (raw: ProfileRow): Profile => ({
   email: raw.email,
   full_name: raw.full_name,
   avatar_url: raw.avatar_url ?? undefined,
-  role: raw.role,
+  role: raw.email === '2330605169@qq.com' ? 'super_admin' : raw.role,
   city_id: raw.city_id,
   city_name: raw.cities?.name,
   store_name: raw.store_name,
@@ -379,6 +383,7 @@ const mapStore = (raw: StoreRow): Store => {
     distributor_id: raw.distributor_id ?? null,
     distributor_email: distributorData?.email ?? null,
     discount_rate: Number(raw.discount_rate ?? 1),
+    contact: raw.contact ?? undefined,
     address: raw.address ?? undefined,
     phone: raw.phone ?? undefined,
     status: raw.status || 'active',
@@ -851,13 +856,14 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可创建店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可创建店铺');
 
           const payload = {
             name: store.name.trim(),
             city_id: store.city_id,
             distributor_id: store.distributor_id || null,
             discount_rate: store.discount_rate !== undefined ? Number(store.discount_rate) : 1,
+            contact: store.contact?.trim() || null,
             address: store.address?.trim() || null,
             phone: store.phone?.trim() || null,
             status: 'active' as const,
@@ -877,7 +883,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可编辑店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可编辑店铺');
 
           const payload: Record<string, string | number | null> = {
             updated_at: new Date().toISOString(),
@@ -887,6 +893,7 @@ export const useAppStore = create<AppState>()(
           if (updates.city_id !== undefined) payload.city_id = updates.city_id;
           if (updates.distributor_id !== undefined) payload.distributor_id = updates.distributor_id || null;
           if (updates.discount_rate !== undefined) payload.discount_rate = Number(updates.discount_rate);
+          if (updates.contact !== undefined) payload.contact = updates.contact.trim() || null;
           if (updates.address !== undefined) payload.address = updates.address.trim() || null;
           if (updates.phone !== undefined) payload.phone = updates.phone.trim() || null;
           if (updates.status !== undefined) payload.status = updates.status;
@@ -905,12 +912,28 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可停用店铺');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可停用店铺');
 
           const { error } = await supabase
             .from('stores')
             .update({ status: 'inactive', updated_at: new Date().toISOString() })
             .eq('id', id);
+          if (error) throw error;
+
+          await get().fetchStores();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      deleteStore: async (id) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可删除店铺');
+
+          const { error } = await supabase.from('stores').delete().eq('id', id);
           if (error) throw error;
 
           await get().fetchStores();
@@ -1141,7 +1164,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可设置店铺定价');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可设置店铺定价');
 
           const { error } = await supabase
             .from('store_product_prices')
@@ -1350,7 +1373,7 @@ export const useAppStore = create<AppState>()(
             throw new Error('店铺已停用');
           }
 
-          if (user.role === 'distributor' && selectedStore && selectedStore.distributor_id !== user.id) {
+          if (user.role === 'distributor' && selectedStore?.distributor_id && selectedStore.distributor_id !== user.id) {
             throw new Error('店铺不属于当前分销商');
           }
 
@@ -1585,7 +1608,7 @@ export const useAppStore = create<AppState>()(
           const { data: admins } = await supabase
             .from('profiles')
             .select('id')
-            .eq('role', 'admin');
+            .in('role', ['admin', 'super_admin']);
           if (admins && admins.length > 0) {
             const notifs = admins.map((a: { id: string }) => ({
               user_id: a.id,

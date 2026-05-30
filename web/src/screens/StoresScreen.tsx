@@ -1,16 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Store as StoreIcon, Plus, Edit2, PowerOff } from 'lucide-react';
+import { Store as StoreIcon, Plus, Edit2, PowerOff, RotateCcw, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 import { supabase } from '../lib/supabase';
 
 export const StoresScreen: React.FC = () => {
-  const { user, cities, stores, addStore, updateStore, deactivateStore } = useAppStore();
-  const isAdmin = user?.role === 'admin';
+  const { user, cities, stores, addStore, updateStore, deactivateStore, deleteStore } = useAppStore();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
+  const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    kind: 'deactivate' | 'delete';
+    storeId: string;
+    title: string;
+    description: string;
+    actionLabel: string;
+  } | null>(null);
   const [distributors, setDistributors] = useState<{ id: string; email: string }[]>([]);
   
   const [form, setForm] = useState({
@@ -18,6 +26,7 @@ export const StoresScreen: React.FC = () => {
     city_id: '',
     distributor_id: '',
     discount_rate: '1',
+    contact: '',
     address: '',
     phone: '',
   });
@@ -41,7 +50,7 @@ export const StoresScreen: React.FC = () => {
 
   const handleCreateStore = async (): Promise<void> => {
     if (!form.name.trim() || !form.city_id) {
-      window.alert('请完整填写店铺名称、城市');
+      setPageNotice({ type: 'error', text: '请完整填写店铺名称、城市' });
       return;
     }
     const payload = {
@@ -49,22 +58,24 @@ export const StoresScreen: React.FC = () => {
       city_id: form.city_id,
       distributor_id: form.distributor_id || null,
       discount_rate: Number(form.discount_rate || 1),
+      contact: form.contact.trim(),
       address: form.address.trim(),
       phone: form.phone.trim(),
     };
 
     const { error } = await addStore(payload);
     if (error) {
-      window.alert(`新增失败：${error.message}`);
+      setPageNotice({ type: 'error', text: `新增失败：${error.message}` });
       return;
     }
     setShowCreate(false);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', address: '', phone: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '' });
+    setPageNotice({ type: 'success', text: '新增店铺成功' });
   };
 
   const openCreateModal = (): void => {
     setEditingStoreId(null);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', address: '', phone: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '' });
     setShowCreate(true);
   };
 
@@ -78,6 +89,7 @@ export const StoresScreen: React.FC = () => {
       city_id: store.city_id,
       distributor_id: store.distributor_id || '',
       discount_rate: String(store.discount_rate || 1),
+      contact: store.contact || '',
       address: store.address || '',
       phone: store.phone || '',
     });
@@ -91,22 +103,24 @@ export const StoresScreen: React.FC = () => {
         city_id: form.city_id,
         distributor_id: form.distributor_id,
         discount_rate: Number(form.discount_rate || 1),
+        contact: form.contact.trim(),
         address: form.address.trim(),
         phone: form.phone.trim(),
       };
 
       if (!payload.name || !payload.city_id) {
-        window.alert('请完整填写店铺名称、城市');
+        setPageNotice({ type: 'error', text: '请完整填写店铺名称、城市' });
         return;
       }
 
       const { error } = await updateStore(editingStoreId, payload);
       if (error) {
-        window.alert(`更新失败：${error.message}`);
+        setPageNotice({ type: 'error', text: `更新失败：${error.message}` });
         return;
       }
       setShowCreate(false);
       setEditingStoreId(null);
+      setPageNotice({ type: 'success', text: '店铺信息已更新' });
       return;
     }
 
@@ -115,11 +129,56 @@ export const StoresScreen: React.FC = () => {
 
   const handleDeactivate = async (storeId: string, event: React.MouseEvent): Promise<void> => {
     event.stopPropagation();
-    if (!window.confirm('确定要停用该店铺吗？')) return;
-    const { error } = await deactivateStore(storeId);
+    setConfirmAction({
+      kind: 'deactivate',
+      storeId,
+      title: '停用店铺',
+      description: '确定要停用该店铺吗？',
+      actionLabel: '确认停用',
+    });
+  };
+
+  const handleReactivate = async (storeId: string, event: React.MouseEvent): Promise<void> => {
+    event.stopPropagation();
+    const { error } = await updateStore(storeId, { status: 'active' });
     if (error) {
-      window.alert(`停用失败：${error.message}`);
+      setPageNotice({ type: 'error', text: `启用失败：${error.message}` });
+      return;
     }
+    setPageNotice({ type: 'success', text: '店铺已重新启用' });
+  };
+
+  const handleDelete = async (storeId: string, event: React.MouseEvent): Promise<void> => {
+    event.stopPropagation();
+    setConfirmAction({
+      kind: 'delete',
+      storeId,
+      title: '删除店铺',
+      description: '确定要删除该店铺吗？删除后不可恢复。',
+      actionLabel: '确认删除',
+    });
+  };
+
+  const submitConfirmAction = async (): Promise<void> => {
+    if (!confirmAction) return;
+    if (confirmAction.kind === 'deactivate') {
+      const { error } = await deactivateStore(confirmAction.storeId);
+      if (error) {
+        setPageNotice({ type: 'error', text: `停用失败：${error.message}` });
+        return;
+      }
+      setPageNotice({ type: 'success', text: '店铺已停用' });
+      setConfirmAction(null);
+      return;
+    }
+
+    const { error } = await deleteStore(confirmAction.storeId);
+    if (error) {
+      setPageNotice({ type: 'error', text: `删除失败：${error.message}` });
+      return;
+    }
+    setPageNotice({ type: 'success', text: '店铺已删除' });
+    setConfirmAction(null);
   };
 
   if (!isAdmin) {
@@ -133,6 +192,21 @@ export const StoresScreen: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {pageNotice && (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${pageNotice.type === 'success' ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200' : 'bg-red-500/10 border-red-400/30 text-red-200'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <span>{pageNotice.text}</span>
+            <button
+              type="button"
+              onClick={() => setPageNotice(null)}
+              className="text-white/60 hover:text-white"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
@@ -199,8 +273,8 @@ export const StoresScreen: React.FC = () => {
                   <p className="text-sm font-medium text-white/80 truncate">{store.distributor_email || '未绑定分销商'}</p>
                 </div>
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
-                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">联系方式</p>
-                  <p className="text-sm font-medium text-white/80 truncate">{store.phone || '未填写'}</p>
+                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">联系人 / 电话</p>
+                  <p className="text-sm font-medium text-white/80 truncate">{store.contact || '未填写'}{store.phone ? ` / ${store.phone}` : ''}</p>
                 </div>
               </div>
 
@@ -220,6 +294,24 @@ export const StoresScreen: React.FC = () => {
                       <PowerOff size={18} />
                     </button>
                   )}
+                  {store.status === 'inactive' && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleReactivate(store.id, e)}
+                      className="p-2 rounded-xl hover:bg-green-500/20 text-white/40 hover:text-green-400 transition-colors"
+                      title="重新启用店铺"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(store.id, e)}
+                    className="p-2 rounded-xl hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors"
+                    title="删除店铺"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -285,12 +377,40 @@ export const StoresScreen: React.FC = () => {
               </div>
 
               <input value={form.discount_rate} onChange={(event) => setForm((prev) => ({ ...prev, discount_rate: event.target.value }))} placeholder="折扣率 (默认1)" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              <input value={form.contact} onChange={(event) => setForm((prev) => ({ ...prev, contact: event.target.value }))} placeholder="联系人" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="联系电话" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.address} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="详细地址" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
               <button type="button" onClick={handleSaveStore} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <h3 className="text-xl font-bold">{confirmAction.title}</h3>
+            <p className="text-sm text-white/60 leading-6">{confirmAction.description}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 rounded-xl bg-white/5"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void submitConfirmAction();
+                }}
+                className={`px-4 py-2 rounded-xl font-bold ${confirmAction.kind === 'delete' ? 'bg-red-500/80 hover:bg-red-500' : 'bg-tech-gradient'}`}
+              >
+                {confirmAction.actionLabel}
+              </button>
             </div>
           </div>
         </div>

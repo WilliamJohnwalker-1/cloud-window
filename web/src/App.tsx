@@ -164,7 +164,7 @@ function App() {
       .map((item) => ({
         id: `inventory-${item.id}`,
         title: item.name,
-        subtitle: `库存 · 当前 ${item.quantity || 0} · 预警 ${item.min_quantity || 10}`,
+        subtitle: `库存 · 当前 ${item.quantity ?? 0} · 预警 ${item.min_quantity ?? 10}`,
         tab: 'inventory',
       }));
 

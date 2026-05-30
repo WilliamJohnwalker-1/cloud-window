@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore';
 
 export const ProductsScreen: React.FC = () => {
   const { user, cities, products, stores, storeProductPrices, fetchStores, fetchStoreProductPrices, setStoreProductPrice, addProduct, updateProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [showCreate, setShowCreate] = useState(false);
@@ -246,7 +246,7 @@ export const ProductsScreen: React.FC = () => {
                 </div>
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">当前库存</p>
-                  <p className={product.quantity !== undefined && product.quantity < (product.min_quantity || 10) ? 'text-lg font-black text-red-500' : 'text-lg font-black text-green-500'}>
+                  <p className={product.quantity !== undefined && product.quantity < (product.min_quantity ?? 10) ? 'text-lg font-black text-red-500' : 'text-lg font-black text-green-500'}>
                     {product.quantity ?? 0}
                   </p>
                 </div>
