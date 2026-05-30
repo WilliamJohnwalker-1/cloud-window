@@ -384,6 +384,9 @@ function maybeUuidFromOutTradeNo(outTradeNo) {
   return normalized;
 }
 
+const wechatAuthCodePattern = /^1[0-5][0-9]{16}$/;
+const alipayAuthCodePattern = /^(?:2[5-9]|30)[0-9]{14,22}$/;
+
 function getMissingEnv(env, keys) {
   return keys.filter((key) => {
     const value = env[key];
@@ -661,8 +664,20 @@ export default {
         return json({ error: 'invalid params' }, { status: 400 });
       }
 
-      if (!/^\d{16,24}$/.test(authCode)) {
-        return json({ error: 'invalid auth code', status: 'failed' }, { status: 400 });
+      if (method === 'wechat' && !wechatAuthCodePattern.test(authCode)) {
+        return json({
+          success: false,
+          status: 'failed',
+          error: '微信付款码格式错误，应为18位数字且以10-15开头',
+        }, { status: 400 });
+      }
+
+      if (method === 'alipay' && !alipayAuthCodePattern.test(authCode)) {
+        return json({
+          success: false,
+          status: 'failed',
+          error: '支付宝付款码格式错误，应为16-24位数字且以25-30开头',
+        }, { status: 400 });
       }
 
       if (isMock) {

@@ -7,6 +7,7 @@ import {
   isPaymentMockMode,
   queryPaymentStatus,
   validateAuthCode,
+  validateAuthCodeForMethod,
   type WebPaymentStatus,
 } from '../lib/payment';
 import { supabase } from '../lib/supabase';
@@ -16,7 +17,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
 });
 
-const scanResetThresholdMs = 180;
+const scanResetThresholdMs = 420;
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
 const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
@@ -296,7 +297,7 @@ export const PaymentScreen: React.FC = () => {
       return;
     }
 
-    const authCode = (inputCode ?? paymentAuthCode).trim();
+    const authCode = normalizeDigits((inputCode ?? paymentAuthCode).trim()).slice(0, 24);
     if (!validateAuthCode(authCode)) {
       setStatus('failed');
       setStatusMessage('付款码格式错误，应为 16-24 位数字');
@@ -307,6 +308,16 @@ export const PaymentScreen: React.FC = () => {
     const resolvedPaymentMethod = detectedMethod || paymentMethod;
     if (detectedMethod && detectedMethod !== paymentMethod) {
       setPaymentMethod(detectedMethod);
+    }
+
+    if (!validateAuthCodeForMethod(authCode, resolvedPaymentMethod)) {
+      setStatus('failed');
+      setStatusMessage(
+        resolvedPaymentMethod === 'wechat'
+          ? '微信付款码格式错误，应为 18 位数字且以 10-15 开头'
+          : '支付宝付款码格式错误，应为 16-24 位数字且以 25-30 开头',
+      );
+      return;
     }
 
     setIsCollecting(true);

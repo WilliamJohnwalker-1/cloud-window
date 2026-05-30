@@ -154,7 +154,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.16）
+### 5. 启动 Web 端（v1.2.18）
 
 ```bash
 npm run web:v2
@@ -334,6 +334,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.18 (2026-05-30) - 收款台扫码稳定性与付款码校验修复
+
+- 修复微信付款码收款失败：前后端统一按微信规则校验 `auth_code`（18 位数字，且前缀 10-15）
+- 新增按通道校验：支付宝付款码需匹配 25-30 前缀，避免错通道码进入网关后报错
+- 收款台扫码缓冲窗口上调（`scanResetThresholdMs`），降低扫码枪高速输入时的丢码/截断概率
+- Worker `/api/payment/collect` 增加通道级校验兜底，非法码在网关前即返回明确错误
 
 ### Web v1.2.17 (2026-05-28) - 店铺维度能力补齐（待 admin 实单验收）
 
