@@ -65,6 +65,7 @@ interface OrderRow {
   cities?: { name: string } | Array<{ name: string }> | null;
   status?: Order['status'];
   order_kind?: Order['order_kind'] | null;
+  payment_status?: string | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   created_at: string;
@@ -169,6 +170,9 @@ const SESSION_GRACE_WINDOW_MS = 20_000;
 const SESSION_RETRY_DELAY_MS = 600;
 const SESSION_RETRY_TIMES = 2;
 const UUID_LIKE_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const unpaidRetailAutoDeleteMs = 30 * 60 * 1000;
+const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'refunded']);
+const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
 
 let sessionGuardGraceUntil = 0;
 
@@ -238,6 +242,23 @@ const waitMs = async (ms: number): Promise<void> => {
 const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${userId}-${Date.now()}-${randomPart}`;
+};
+
+const coalesceOrderKind = (kind: OrderRow['order_kind']): 'distribution' | 'retail' => (
+  kind === 'retail' ? 'retail' : 'distribution'
+);
+
+const shouldAutoDeleteStaleRetailOrder = (row: Pick<OrderRow, 'order_kind' | 'payment_status' | 'created_at'>): boolean => {
+  if (coalesceOrderKind(row.order_kind) !== 'retail') return false;
+
+  const paymentStatus = String(row.payment_status || '').toLowerCase();
+  if (paidRetailStatuses.has(paymentStatus)) return false;
+  if (!unpaidRetailStatuses.has(paymentStatus)) return false;
+
+  const createdAtMs = new Date(row.created_at).getTime();
+  if (!Number.isFinite(createdAtMs)) return false;
+
+  return Date.now() - createdAtMs >= unpaidRetailAutoDeleteMs;
 };
 
 const shouldFallbackToLegacyFlow = (
@@ -697,9 +718,7 @@ export const useAppStore = create<AppState>()(
         const { user } = get();
         if (!user) return;
 
-        const { data, error } = await supabase
-          .from('orders')
-          .select(`
+        const orderSelect = `
             *,
             cities(name),
             profiles:distributor_id(email,store_name),
@@ -708,13 +727,43 @@ export const useAppStore = create<AppState>()(
               *,
               products(name, city_id, cities(name))
             )
-          `)
+          `;
+
+        const { data, error } = await supabase
+          .from('orders')
+          .select(orderSelect)
           .order('created_at', { ascending: false })
           .limit(200);
 
         if (error || !data) return;
 
-        const mapped = data.map(mapOrder).filter((o) => (user.role === 'distributor' ? o.distributor_id === user.id : true));
+        let rows = data as OrderRow[];
+        const canAutoCleanupUnpaidRetail = user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager';
+        if (canAutoCleanupUnpaidRetail) {
+          const staleRetailOrderIds = rows
+            .filter((row) => shouldAutoDeleteStaleRetailOrder(row))
+            .map((row) => row.id);
+
+          if (staleRetailOrderIds.length > 0) {
+            await Promise.allSettled(
+              staleRetailOrderIds.map((orderId) => (
+                supabase.rpc('delete_order_with_inventory_restore_atomic', { p_order_id: orderId })
+              )),
+            );
+
+            const { data: refreshedRows, error: refreshedError } = await supabase
+              .from('orders')
+              .select(orderSelect)
+              .order('created_at', { ascending: false })
+              .limit(200);
+
+            if (!refreshedError && refreshedRows) {
+              rows = refreshedRows as OrderRow[];
+            }
+          }
+        }
+
+        const mapped = rows.map(mapOrder).filter((o) => (user.role === 'distributor' ? o.distributor_id === user.id : true));
         set({ orders: mapped });
       },
 
@@ -1651,46 +1700,10 @@ export const useAppStore = create<AppState>()(
 
       deleteOrder: async (orderId) => {
         try {
-          const { data: orderRows, error: orderFetchError } = await supabase
-            .from('orders')
-            .select('id, order_items(product_id, quantity)')
-            .eq('id', orderId)
-            .single();
-          if (orderFetchError) throw orderFetchError;
-
-          const items = (orderRows?.order_items || []) as Array<{ product_id: string; quantity: number }>;
-
-          const { error: deleteError } = await supabase.from('orders').delete().eq('id', orderId);
-          if (deleteError) throw deleteError;
-
-          const restoreMap = new Map<string, number>();
-          items.forEach((item) => {
-            restoreMap.set(item.product_id, (restoreMap.get(item.product_id) || 0) + Number(item.quantity));
+          const { error: deleteError } = await supabase.rpc('delete_order_with_inventory_restore_atomic', {
+            p_order_id: orderId,
           });
-
-          const restoreProductIds = Array.from(restoreMap.keys());
-          if (restoreProductIds.length > 0) {
-            const { data: inventoryRows, error: invFetchError } = await supabase
-              .from('inventory')
-              .select('product_id, quantity')
-              .in('product_id', restoreProductIds);
-            if (invFetchError) throw invFetchError;
-
-            const currentInventoryMap = new Map(
-              (inventoryRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]),
-            );
-
-            for (const [productId, restoreQty] of restoreMap) {
-              const { error: invUpdateError } = await supabase
-                .from('inventory')
-                .update({
-                  quantity: (currentInventoryMap.get(productId) || 0) + restoreQty,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('product_id', productId);
-              if (invUpdateError) throw invUpdateError;
-            }
-          }
+          if (deleteError) throw deleteError;
 
           await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };

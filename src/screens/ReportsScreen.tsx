@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
@@ -44,6 +45,10 @@ export default function ReportsScreen() {
   const isDistributor = user?.role === 'distributor';
 
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+
+  const showFullProductName = (name: string) => {
+    Alert.alert('商品全称', name);
+  };
 
   useEffect(() => {
     fetchProducts();
@@ -476,9 +481,15 @@ export default function ReportsScreen() {
               <View style={styles.velocityInfo}>
                 <View style={styles.velocityNameRow}>
                   {item.isUnhealthy && <AlertTriangle size={14} color={theme.danger} style={styles.alertIcon} />}
-                  <Text style={[styles.velocityName, { color: theme.textPrimary }, item.isUnhealthy && styles.velocityUnhealthy]}>
-                    {item.name}
-                  </Text>
+                  <TouchableOpacity onPress={() => showFullProductName(item.name)} activeOpacity={0.75}>
+                    <Text
+                      style={[styles.velocityName, { color: theme.textPrimary }, item.isUnhealthy && styles.velocityUnhealthy]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <Text style={[styles.velocityMeta, { color: theme.textSecondary }]}>
                   销量{item.quantity} / 库存{item.inventory} = 动销率{item.velocity.toFixed(2)}
@@ -625,7 +636,11 @@ export default function ReportsScreen() {
           profitData.profitByProduct.map((item) => (
             <View key={item.name} style={[styles.profitItem, { borderBottomColor: theme.divider }]}>
               <View style={styles.profitItemHeader}>
-                <Text style={[styles.profitItemName, { color: theme.textPrimary }]}>{item.name}</Text>
+                <TouchableOpacity onPress={() => showFullProductName(item.name)} activeOpacity={0.75} style={styles.profitNameTouchArea}>
+                  <Text style={[styles.profitItemName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
                 <Text style={[styles.profitItemValue, item.profit >= 0 ? styles.profitText : styles.lossText]}>
                   {item.profit.toFixed(2)}元
                 </Text>
@@ -767,6 +782,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 4,
+  },
+  profitNameTouchArea: {
+    flex: 1,
+    marginRight: 10,
   },
   profitItemName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   profitItemValue: { fontSize: 14, fontWeight: 'bold' },
