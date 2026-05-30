@@ -6,12 +6,14 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  KeyboardAvoidingView,
   TextInput,
   FlatList,
   ScrollView,
   Switch,
   Image,
   Linking,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
@@ -50,6 +52,7 @@ export default function ProfileScreen() {
     addStore,
     updateStore,
     deactivateStore,
+    deleteStore,
     updateDistributorProfile,
     updateOwnStoreName,
     updateOwnAvatar,
@@ -80,6 +83,7 @@ export default function ProfileScreen() {
       addStore: state.addStore,
       updateStore: state.updateStore,
       deactivateStore: state.deactivateStore,
+      deleteStore: state.deleteStore,
       updateDistributorProfile: state.updateDistributorProfile,
       updateOwnStoreName: state.updateOwnStoreName,
       updateOwnAvatar: state.updateOwnAvatar,
@@ -99,6 +103,7 @@ export default function ProfileScreen() {
     city_id: '',
     distributor_id: '',
     discount_rate: '1',
+    contact: '',
     address: '',
     phone: '',
     status: 'active' as 'active' | 'inactive',
@@ -123,7 +128,7 @@ export default function ProfileScreen() {
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isDistributor = user?.role === 'distributor';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -245,7 +250,7 @@ export default function ProfileScreen() {
   const openAddStore = () => {
     setIsAddingStore(true);
     setEditingStoreId(null);
-    setEditStoreData({ name: '', city_id: '', distributor_id: '', discount_rate: '1', address: '', phone: '', status: 'active' });
+    setEditStoreData({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', status: 'active' });
   };
 
   const openEditStore = (store: Store) => {
@@ -256,6 +261,7 @@ export default function ProfileScreen() {
       city_id: store.city_id,
       distributor_id: store.distributor_id || '',
       discount_rate: String(store.discount_rate || 1),
+      contact: store.contact || '',
       address: store.address || '',
       phone: store.phone || '',
       status: store.status,
@@ -283,6 +289,7 @@ export default function ProfileScreen() {
         city_id: editStoreData.city_id,
         distributor_id: editStoreData.distributor_id || null,
         discount_rate: discountRate,
+        contact: editStoreData.contact,
         address: editStoreData.address,
         phone: editStoreData.phone,
       });
@@ -297,6 +304,7 @@ export default function ProfileScreen() {
         city_id: editStoreData.city_id,
         distributor_id: editStoreData.distributor_id || null,
         discount_rate: discountRate,
+        contact: editStoreData.contact,
         address: editStoreData.address,
         phone: editStoreData.phone,
         status: editStoreData.status,
@@ -322,6 +330,35 @@ export default function ProfileScreen() {
           const { error } = await deactivateStore(id);
           if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
           else Toast.show({ type: 'success', text1: '成功', text2: '店铺已停用' });
+        },
+      },
+    ]);
+  };
+
+  const handleActivateStore = (id: string, name: string) => {
+    Alert.alert('确认启用', `确定要启用店铺「${name}」吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '启用',
+        onPress: async () => {
+          const { error } = await updateStore(id, { status: 'active' });
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          else Toast.show({ type: 'success', text1: '成功', text2: '店铺已启用' });
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteStore = (id: string, name: string) => {
+    Alert.alert('确认删除', `确定要删除店铺「${name}」吗？删除后不可恢复。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await deleteStore(id);
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          else Toast.show({ type: 'success', text1: '成功', text2: '店铺已删除' });
         },
       },
     ]);
@@ -408,6 +445,7 @@ export default function ProfileScreen() {
   const getRoleName = (role: string) => {
     switch (role) {
       case 'admin': return '管理员';
+      case 'super_admin': return '超级管理员';
       case 'distributor': return '分销商';
       case 'inventory_manager': return '库存管理员';
       default: return role;
@@ -945,7 +983,12 @@ export default function ProfileScreen() {
       {/* Store Management Modal */}
       <Modal visible={storeModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 16 : 0}
+            style={styles.keyboardAvoidingWrapper}
+          >
+          <View style={[styles.modalContent, styles.storeModalContent, { backgroundColor: theme.surface }]}> 
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>店铺管理</Text>
               <TouchableOpacity onPress={() => setStoreModalVisible(false)}>
@@ -967,7 +1010,13 @@ export default function ProfileScreen() {
             )}
 
             {(isAddingStore || editingStoreId) ? (
-              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}>
+              <ScrollView
+                style={styles.storeEditorScroll}
+                contentContainerStyle={styles.storeEditorScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}> 
                 <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>
                   {isAddingStore ? '添加店铺' : '编辑店铺'}
                 </Text>
@@ -1051,6 +1100,14 @@ export default function ProfileScreen() {
 
                 <TextInput
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="联系人 (选填)"
+                  value={editStoreData.contact}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, contact: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="地址 (选填)"
                   value={editStoreData.address}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, address: text })}
@@ -1086,6 +1143,7 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+              </ScrollView>
             ) : null}
 
             {!isAddingStore && !editingStoreId && (
@@ -1101,6 +1159,7 @@ export default function ProfileScreen() {
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>
                         {item.city_name || '未知城市'} · {item.distributor_email || '未绑定分销商'}
                       </Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>联系人：{item.contact || '-'} · 电话：{item.phone || '-'}</Text>
                     </View>
                     <View style={styles.cityActionsRow}>
                       <TouchableOpacity onPress={() => openEditStore(item)} style={{ marginRight: 15 }}>
@@ -1111,6 +1170,14 @@ export default function ProfileScreen() {
                           <Text style={styles.deleteCityText}>停用</Text>
                         </TouchableOpacity>
                       )}
+                      {item.status === 'inactive' && (
+                        <TouchableOpacity onPress={() => handleActivateStore(item.id, item.name)} style={{ marginRight: 12 }}>
+                          <Text style={[styles.closeButton, { color: theme.blue }]}>启用</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => handleDeleteStore(item.id, item.name)}>
+                        <Text style={styles.deleteCityText}>删除</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 )}
@@ -1119,6 +1186,7 @@ export default function ProfileScreen() {
               />
             )}
           </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </ScrollView>
@@ -1236,12 +1304,16 @@ const styles = StyleSheet.create({
   logoutText: { fontSize: 16, color: Colors.danger, fontWeight: '600' },
   version: { textAlign: 'center', color: Colors.textTertiary, marginTop: 20, fontSize: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(18,18,26,0.52)', justifyContent: 'flex-end' },
+  keyboardAvoidingWrapper: { width: '100%' },
   modalContent: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 20,
     maxHeight: '75%',
+  },
+  storeModalContent: {
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1340,6 +1412,10 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     paddingHorizontal: 16,
     fontSize: 16,
+    lineHeight: 20,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
     marginRight: 10,
     backgroundColor: Colors.surfaceSecondary,
     color: Colors.textPrimary,
@@ -1347,6 +1423,12 @@ const styles = StyleSheet.create({
   addCityButton: { width: 70, height: 48, justifyContent: 'center', alignItems: 'center', borderRadius: Radius.md },
   addCityButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cityList: { maxHeight: 300 },
+  storeEditorScroll: {
+    maxHeight: 430,
+  },
+  storeEditorScrollContent: {
+    paddingBottom: 10,
+  },
   cityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

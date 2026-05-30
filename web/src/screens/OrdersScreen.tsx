@@ -18,7 +18,7 @@ const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
-  const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'inventory_manager';
+  const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
@@ -237,7 +237,7 @@ export const OrdersScreen: React.FC = () => {
   };
 
   const canRefundOrder = (order: (typeof orders)[number]): boolean => {
-    const canOperate = user?.role === 'admin' || user?.role === 'inventory_manager';
+    const canOperate = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
     if (!canOperate) return false;
     if (order.order_kind !== 'retail') return false;
     const paymentStatus = String(order.payment_status || '').toLowerCase();
@@ -318,6 +318,7 @@ export const OrdersScreen: React.FC = () => {
         订单类型: getOrderKindLabel(order.order_kind),
         状态: order.status,
         城市: order.city_name || '',
+        配送店铺: order.store_name || '',
         分销商: order.distributor_store || order.distributor_email || '',
         商品种类: resolvedOrder.items.length,
         商品总件数: pieces,
@@ -464,10 +465,10 @@ export const OrdersScreen: React.FC = () => {
     const { error } = await modifyDistributionOrder(modifyOrder.id, itemsPayload);
     setSubmittingModify(false);
     if (error) {
-      window.alert(`修改失败：${error.message}`);
+      setPageNotice({ type: 'error', text: `修改失败：${error.message}` });
       return;
     }
-    window.alert('订单修改成功');
+    setPageNotice({ type: 'success', text: '订单修改成功' });
     setModifyOrder(null);
     setModifyCart(new Map());
   };
@@ -621,8 +622,9 @@ export const OrdersScreen: React.FC = () => {
                   </div>
                   <div className="flex items-center space-x-4 mt-1 text-white/40 text-xs">
                     <div className="flex items-center space-x-1"><Clock size={12} /><span>{new Date(order.created_at).toLocaleString()}</span></div>
-                    <div className="flex items-center space-x-1"><MapPin size={12} /><span>{order.city_name}</span></div>
-                    <div className="flex items-center space-x-1"><Store size={12} /><span>{order.distributor_store || order.distributor_email}</span></div>
+                    <div className="flex items-center space-x-1"><MapPin size={12} /><span>{order.city_name || '-'}</span></div>
+                    <div className="flex items-center space-x-1"><Store size={12} /><span>配送店铺：{order.store_name || '未指定店铺'}</span></div>
+                    <div className="flex items-center space-x-1"><span>分销商：{order.distributor_store || order.distributor_email || '-'}</span></div>
                   </div>
                 </div>
               </div>
@@ -630,7 +632,7 @@ export const OrdersScreen: React.FC = () => {
               <div className="text-right space-y-2">
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest">订单总额</p>
                 <p className="text-2xl font-black text-white">¥{order.total_discount_amount}</p>
-                {order.status === 'pending' && user?.role === 'admin' && (
+                {order.status === 'pending' && (user?.role === 'admin' || user?.role === 'super_admin') && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -685,7 +687,7 @@ export const OrdersScreen: React.FC = () => {
                     <span>{refundingOrderId === order.id ? '退款中' : '退款'}</span>
                   </button>
                 )}
-                {user?.role === 'admin' && order.status === 'accepted' && order.order_kind === 'distribution' && order.store_id && (
+                {(user?.role === 'admin' || user?.role === 'super_admin') && order.status === 'accepted' && order.order_kind === 'distribution' && order.store_id && (
                   <button
                     type="button"
                     onClick={() => {
@@ -700,7 +702,7 @@ export const OrdersScreen: React.FC = () => {
                     <span>修改订单</span>
                   </button>
                 )}
-                {(user?.role === 'admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
+                {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -911,6 +913,7 @@ export const OrdersScreen: React.FC = () => {
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">支付状态：</span>{detailOrder.payment_status || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">支付渠道：</span>{detailOrder.payment_method || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
+                <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">配送店铺：</span>{detailOrder.store_name || '未指定'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">交易号：</span>{detailOrder.payment_transaction_id || '-'}</div>
@@ -1084,7 +1087,7 @@ export const OrdersScreen: React.FC = () => {
                     const currentQty = modifyCart.get(item.id) ?? Number(item.quantity || 0);
                     const originalQty = Number(item.quantity || 0);
                     const isSample = Boolean(item.is_sample);
-                    const step = isSample ? 1 : 5;
+                    const step = 1;
                     return (
                       <tr key={item.id} className="border-t border-white/5">
                         <td className="px-4 py-3">

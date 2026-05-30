@@ -83,8 +83,8 @@ export default function OrdersScreen() {
   const animatedChevron = useRef(new Animated.Value(180)).current;
   const animatedOpacity = useRef(new Animated.Value(1)).current;
 
-  const isAdmin = user?.role === 'admin';
-  const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
 
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
@@ -612,10 +612,14 @@ export default function OrdersScreen() {
 
       <View style={styles.orderMetaContainer}>
         <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
-        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}> 
           下单账号: {item.distributor_email || item.distributor_id}
           {item.distributor_store ? ` · ${item.distributor_store}` : ''}
         </Text>
+      </View>
+      <View style={styles.orderMetaContainer}>
+        <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>配送店铺: {item.store_name || '未指定'}</Text>
       </View>
 
       <View style={styles.orderItemsSummary}>
@@ -1038,8 +1042,7 @@ export default function OrdersScreen() {
                 </View>
               )}
 
-              {(isAdmin ? orderModalDistributorId !== null : true) && (
-                <View style={styles.selectorGroup}>
+              <View style={styles.selectorGroup}>
                   <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>店铺</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
                     <TouchableOpacity
@@ -1049,7 +1052,11 @@ export default function OrdersScreen() {
                       <Text style={[styles.chipText, { color: theme.textSecondary }, orderModalStoreId === null && styles.chipTextActive]}>未选择</Text>
                     </TouchableOpacity>
                     {stores
-                      .filter(s => s.distributor_id === (isAdmin ? orderModalDistributorId : user?.id) && s.status === 'active')
+                      .filter((s) => {
+                        if (s.status !== 'active') return false;
+                        if (isAdmin) return true;
+                        return s.distributor_id === user?.id || !s.distributor_id;
+                      })
                       .map(s => (
                         <TouchableOpacity
                           key={s.id}
@@ -1061,7 +1068,6 @@ export default function OrdersScreen() {
                       ))}
                   </ScrollView>
                 </View>
-              )}
             </View>
 
             <FlatList

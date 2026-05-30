@@ -269,7 +269,7 @@ export const ReportsScreen: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {(user?.role === 'admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
+      {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <p className="text-sm text-white/60 mb-3">店铺筛选</p>
           <div className="flex flex-wrap gap-2">

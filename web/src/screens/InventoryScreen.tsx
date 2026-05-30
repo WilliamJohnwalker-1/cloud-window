@@ -4,15 +4,23 @@ import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 export const InventoryScreen: React.FC = () => {
-  const { user, cities, products, updateInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
   const [cityFilter, setCityFilter] = React.useState<string>('all');
   const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
   const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null);
+  const [pageNotice, setPageNotice] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [manualStoreEdit, setManualStoreEdit] = React.useState<{
+    storeId: string;
+    productId: string;
+    productName: string;
+    quantityText: string;
+  } | null>(null);
 
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const isSuperAdmin = user?.role === 'super_admin';
 
   React.useEffect(() => {
     if (isAdminOrManager) {
@@ -41,10 +49,25 @@ export const InventoryScreen: React.FC = () => {
     return products.filter((item) => item.city_id === cityFilter);
   }, [cityFilter, products]);
 
-  const lowStockCount = filteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity || 10)).length;
+  const lowStockCount = filteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10)).length;
 
   return (
     <div className="space-y-6">
+      {pageNotice && (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${pageNotice.type === 'success' ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200' : 'bg-red-500/10 border-red-400/30 text-red-200'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <span>{pageNotice.text}</span>
+            <button
+              type="button"
+              onClick={() => setPageNotice(null)}
+              className="text-white/60 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="bg-orange-500/10 border border-orange-500/20 px-4 py-2 rounded-xl flex items-center space-x-2">
           <AlertTriangle size={18} className="text-orange-500" />
@@ -152,13 +175,14 @@ export const InventoryScreen: React.FC = () => {
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">当前库存</th>
               {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">告警阈值</th>}
               {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">快速操作</th>}
+              {viewMode === 'store' && isSuperAdmin && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">店铺池调整</th>}
             </tr>
           </thead>
           <tbody>
             {viewMode === 'main' ? (
               filteredProducts.map((product, index) => {
                 const currentQty = Number(product.quantity || 0);
-                const isLowStock = currentQty < Number(product.min_quantity || 10);
+                const isLowStock = currentQty < Number(product.min_quantity ?? 10);
                 return (
                   <motion.tr
                     key={product.id}
@@ -188,7 +212,7 @@ export const InventoryScreen: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-8 py-5 text-center">
-                      <span className="text-sm font-medium text-white/60">{product.min_quantity || 10}</span>
+                      <span className="text-sm font-medium text-white/60">{product.min_quantity ?? 10}</span>
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex items-center justify-end space-x-2 opacity-100">
@@ -284,6 +308,7 @@ export const InventoryScreen: React.FC = () => {
             ) : (
               filteredStoreInventory.map((item, index) => {
                 const product = item.product;
+                const currentStoreQty = Number(item.quantity || 0);
                 return (
                   <motion.tr
                     key={item.id}
@@ -309,6 +334,54 @@ export const InventoryScreen: React.FC = () => {
                     <td className="px-8 py-5 text-center">
                       <span className="text-xl font-black text-white">{item.quantity}</span>
                     </td>
+                    {isSuperAdmin && (
+                      <td className="px-8 py-5">
+                        <div className="flex items-center justify-end space-x-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const { error } = await updateStoreInventoryByProduct(item.store_id, item.product_id, Math.max(0, currentStoreQty - 1));
+                              if (error) {
+                                setPageNotice({ type: 'error', text: `店铺池减量失败：${error.message}` });
+                                return;
+                              }
+                              setPageNotice({ type: 'success', text: `已将 ${product?.name || item.product_name} 店铺池库存减 1` });
+                            }}
+                            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                          >
+                            <Minus size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const { error } = await updateStoreInventoryByProduct(item.store_id, item.product_id, currentStoreQty + 1);
+                              if (error) {
+                                setPageNotice({ type: 'error', text: `店铺池加量失败：${error.message}` });
+                                return;
+                              }
+                              setPageNotice({ type: 'success', text: `已将 ${product?.name || item.product_name} 店铺池库存加 1` });
+                            }}
+                            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualStoreEdit({
+                                storeId: item.store_id,
+                                productId: item.product_id,
+                                productName: product?.name || item.product_name || '商品',
+                                quantityText: String(currentStoreQty),
+                              });
+                            }}
+                            className="p-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </motion.tr>
                 );
               })
@@ -320,7 +393,7 @@ export const InventoryScreen: React.FC = () => {
             )}
             {viewMode === 'store' && filteredStoreInventory.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-8 py-10 text-center text-white/40">
+                <td colSpan={isSuperAdmin ? 4 : 3} className="px-8 py-10 text-center text-white/40">
                   {!selectedStoreId ? '请选择店铺' : '该店铺暂无库存'}
                 </td>
               </tr>
@@ -368,6 +441,53 @@ export const InventoryScreen: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {manualStoreEdit && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <h3 className="text-lg font-bold">调整店铺池库存</h3>
+            <p className="text-sm text-white/60">{manualStoreEdit.productName}</p>
+            <input
+              value={manualStoreEdit.quantityText}
+              onChange={(event) => {
+                const nextText = event.target.value.replace(/[^0-9]/g, '');
+                setManualStoreEdit((prev) => (prev ? { ...prev, quantityText: nextText } : prev));
+              }}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+              placeholder="请输入不小于0的库存数量"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setManualStoreEdit(null)}
+                className="px-4 py-2 rounded-xl bg-white/5"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const qty = Number(manualStoreEdit.quantityText);
+                  if (!Number.isFinite(qty) || qty < 0) {
+                    setPageNotice({ type: 'error', text: '请输入不小于0的有效数字' });
+                    return;
+                  }
+                  const { error } = await updateStoreInventoryByProduct(manualStoreEdit.storeId, manualStoreEdit.productId, qty);
+                  if (error) {
+                    setPageNotice({ type: 'error', text: `店铺池设置失败：${error.message}` });
+                    return;
+                  }
+                  setPageNotice({ type: 'success', text: `已将 ${manualStoreEdit.productName} 店铺池库存设置为 ${qty}` });
+                  setManualStoreEdit(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-tech-gradient font-bold"
+              >
+                保存
+              </button>
             </div>
           </div>
         </div>

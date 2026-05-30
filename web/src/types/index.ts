@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'distributor' | 'inventory_manager';
+export type UserRole = 'admin' | 'super_admin' | 'distributor' | 'inventory_manager';
 
 export interface Profile {
   id: string;
@@ -51,6 +51,7 @@ export interface Store {
   distributor_id?: string | null;
   distributor_email?: string | null;
   discount_rate: number;
+  contact?: string;
   address?: string;
   phone?: string;
   status: 'active' | 'inactive';
