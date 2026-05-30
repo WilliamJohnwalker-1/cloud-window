@@ -230,12 +230,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.14`
-- Current web baseline: `v1.2.17`
+- Current mobile baseline: `v2.1.15`
+- Current web baseline: `v1.2.19`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 退款确认弹窗上线 + 部分退款支持 + 退款事件幂等键增强
-- Latest mobile stabilization: 注册档案自愈修复（profiles 缺失自动补建）+ 登录报错诊断增强
+- Latest web stabilization: 收款台零售订单默认绑定“云窗”店铺 + 历史零售订单店铺回填（v4.4）
+- Latest mobile stabilization: 修复 super_admin 在库存页无法查看店铺库存；店铺管理弹窗补齐键盘避让与滚动、联系人字段展示、店铺启用/删除操作
 - Latest store-management wave: Web 店铺定价管理已上线；Web 订单修改 UI 与双端报表店铺维度代码已落地，待 admin 凭据完成真实手工验收
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.

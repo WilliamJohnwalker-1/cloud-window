@@ -63,6 +63,15 @@ const withApiBase = (path: string): string => {
 
 export const validateAuthCode = (code: string): boolean => /^\d{16,24}$/.test(code.trim());
 
+export const validateWechatAuthCode = (code: string): boolean => /^1[0-5]\d{16}$/.test(code.trim());
+
+export const validateAlipayAuthCode = (code: string): boolean => /^(?:2[5-9]|30)\d{14,22}$/.test(code.trim());
+
+export const validateAuthCodeForMethod = (code: string, paymentMethod: 'wechat' | 'alipay'): boolean => {
+  if (paymentMethod === 'wechat') return validateWechatAuthCode(code);
+  return validateAlipayAuthCode(code);
+};
+
 export const getPaymentApiEndpoint = (): string => paymentApiUrl;
 
 export async function fetchPaymentHealthCheck(): Promise<PaymentHealthCheckResult> {

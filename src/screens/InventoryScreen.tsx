@@ -71,7 +71,7 @@ export default function InventoryScreen() {
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   useEffect(() => {
     fetchProducts();
