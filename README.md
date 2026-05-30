@@ -154,7 +154,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.18）
+### 5. 启动 Web 端（v1.2.19）
 
 ```bash
 npm run web:v2
@@ -334,6 +334,17 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.19 (2026-05-30) - 收款台零售订单店铺绑定修复
+
+- 收款台零售建单默认绑定店铺“云窗”，避免 `store_id` 为空导致店铺维度统计缺失
+- 新增迁移 `migrate-v4.4-retail-default-yunchuang-store.sql`：历史 `retail` 订单店铺回填到“云窗”
+- `create_retail_order_atomic` 在未传 `p_store_id` 时自动回落“云窗”并保持店铺有效性校验
+
+### Mobile v2.1.15 (2026-05-30) - 双端发版基线同步
+
+- 移动端版本基线迭代至 `v2.1.15`
+- 本次无额外移动端功能变更，主要用于与 Web `v1.2.19` 同步发布节奏
 
 ### Web v1.2.18 (2026-05-30) - 收款台扫码稳定性与付款码校验修复
 
