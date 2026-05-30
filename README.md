@@ -341,10 +341,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 新增迁移 `migrate-v4.4-retail-default-yunchuang-store.sql`：历史 `retail` 订单店铺回填到“云窗”
 - `create_retail_order_atomic` 在未传 `p_store_id` 时自动回落“云窗”并保持店铺有效性校验
 
-### Mobile v2.1.15 (2026-05-30) - 双端发版基线同步
+### Mobile v2.1.15 (2026-05-30) - 超级管理员库存可见性与店铺管理体验补齐
 
 - 移动端版本基线迭代至 `v2.1.15`
-- 本次无额外移动端功能变更，主要用于与 Web `v1.2.19` 同步发布节奏
+- 修复超级管理员在库存管理页无法查看店铺库存：现可进入“店铺库存”视图并查看各店铺库存数据
+- 店铺管理弹窗改为 `KeyboardAvoidingView + ScrollView`，修复小屏/键盘遮挡导致字段显示不全
+- 店铺管理补齐联系人字段与店铺卡片联系人/电话展示，并支持停用后重新启用与删除操作
 
 ### Web v1.2.18 (2026-05-30) - 收款台扫码稳定性与付款码校验修复
 
