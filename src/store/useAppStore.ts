@@ -357,6 +357,12 @@ interface AppState {
     quantity: number,
     options?: { skipRefresh?: boolean },
   ) => Promise<{ error: Error | null }>;
+  updateStoreInventory: (
+    storeId: string,
+    productId: string,
+    quantity: number,
+    options?: { skipRefresh?: boolean },
+  ) => Promise<{ error: Error | null }>;
   updateInventorySettings: (
     productId: string,
     quantity: number,
@@ -1245,6 +1251,36 @@ export const useAppStore = create<AppState>()(
           if (!options?.skipRefresh) {
             await get().fetchProducts();
           }
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateStoreInventory: async (storeId, productId, quantity, options) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'super_admin') throw new Error('仅超级管理员可调整店铺库存');
+
+          const { error } = await supabase
+            .from('store_inventory')
+            .upsert(
+              {
+                store_id: storeId,
+                product_id: productId,
+                quantity,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: 'store_id,product_id' },
+            );
+
+          if (error) throw error;
+
+          if (!options?.skipRefresh) {
+            await get().fetchStoreInventory(storeId);
+          }
+
           return { error: null };
         } catch (error) {
           return { error: error as Error };
