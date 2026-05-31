@@ -315,15 +315,8 @@ export default function OrdersScreen() {
     }
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
-  const rangedTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => ({ key: `r-${idx + 1}`, row: rangedProductStats[idx] ?? null })),
-    [rangedProductStats],
-  );
-
-  const cumulativeTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => ({ key: `c-${idx + 1}`, row: cumulativeProductStats[idx] ?? null })),
-    [cumulativeProductStats],
-  );
+  const rangedStatsRows = useMemo(() => rangedProductStats, [rangedProductStats]);
+  const cumulativeStatsRows = useMemo(() => cumulativeProductStats, [cumulativeProductStats]);
 
   const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
   const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
@@ -878,73 +871,68 @@ export default function OrdersScreen() {
       </View>
 
       {isAdmin && (
-        <>
-          <View style={styles.filterRowSpacer} />
-          <View style={styles.filterRowOverlay}>
-            <View style={[styles.filterPanel, { backgroundColor: theme.surface }]}>
-              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                <TouchableOpacity
-                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
-                  onPress={() => setSelectedOrderCityId(null)}
+        <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+            <TouchableOpacity
+              style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
+              onPress={() => setSelectedOrderCityId(null)}
+            >
+              <Text
+                style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                全部城市
+              </Text>
+            </TouchableOpacity>
+            {orderFilterCities.map((city) => (
+              <TouchableOpacity
+                key={city.id}
+                style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
+                onPress={() => setSelectedOrderCityId(city.id)}
+              >
+                <Text
+                  style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
-                  <Text
-                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部城市
-                  </Text>
-                </TouchableOpacity>
-                {orderFilterCities.map((city) => (
-                  <TouchableOpacity
-                    key={city.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
-                    onPress={() => setSelectedOrderCityId(city.id)}
-                  >
-                    <Text
-                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {city.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                <TouchableOpacity
-                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === null && styles.chipActive]}
-                  onPress={() => setSelectedOrderStoreId(null)}
+                  {city.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+            <TouchableOpacity
+              style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === null && styles.chipActive]}
+              onPress={() => setSelectedOrderStoreId(null)}
+            >
+              <Text
+                style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === null && styles.chipTextActive]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                全部店铺
+              </Text>
+            </TouchableOpacity>
+            {activeStoresForOrderFilter.map((store) => (
+              <TouchableOpacity
+                key={store.id}
+                style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === store.id && styles.chipActive]}
+                onPress={() => setSelectedOrderStoreId(store.id)}
+              >
+                <Text
+                  style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === store.id && styles.chipTextActive]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
-                  <Text
-                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === null && styles.chipTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部店铺
-                  </Text>
-                </TouchableOpacity>
-                {activeStoresForOrderFilter.map((store) => (
-                  <TouchableOpacity
-                    key={store.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === store.id && styles.chipActive]}
-                    onPress={() => setSelectedOrderStoreId(store.id)}
-                  >
-                    <Text
-                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === store.id && styles.chipTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {store.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </>
+                  {store.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
       )}
 
       <View style={[styles.monthSwitchRow, { backgroundColor: theme.surface }]}>
@@ -1036,19 +1024,45 @@ export default function OrdersScreen() {
             <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
                 <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>{rangeLabel}</Text>
-                {rangedTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
-                    {row ? `${row.name}: ${row.quantity}` : '—'}
-                  </Text>
-                ))}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.statsScrollContent}
+                >
+                  {rangedStatsRows.length > 0 ? (
+                    rangedStatsRows.map((row) => (
+                      <View key={`r-${row.name}`} style={[styles.statsItemCard, { backgroundColor: theme.surfaceSecondary }]}> 
+                        <Text style={[styles.statsItemName, { color: theme.textPrimary }]} numberOfLines={1}>
+                          {row.name}
+                        </Text>
+                        <Text style={styles.statsItemQty}>{row.quantity}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[styles.statsRowText, { color: theme.textTertiary }, styles.statsRowPlaceholder]}>—</Text>
+                  )}
+                </ScrollView>
               </View>
               <View style={styles.statsColumn}>
                 <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>累计</Text>
-                {cumulativeTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
-                    {row ? `${row.name}: ${row.quantity}` : '—'}
-                  </Text>
-                ))}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.statsScrollContent}
+                >
+                  {cumulativeStatsRows.length > 0 ? (
+                    cumulativeStatsRows.map((row) => (
+                      <View key={`c-${row.name}`} style={[styles.statsItemCard, { backgroundColor: theme.surfaceSecondary }]}> 
+                        <Text style={[styles.statsItemName, { color: theme.textPrimary }]} numberOfLines={1}>
+                          {row.name}
+                        </Text>
+                        <Text style={styles.statsItemQty}>{row.quantity}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[styles.statsRowText, { color: theme.textTertiary }, styles.statsRowPlaceholder]}>—</Text>
+                  )}
+                </ScrollView>
               </View>
             </View>
           </Animated.View>
@@ -1418,16 +1432,7 @@ const styles = StyleSheet.create({
   outboundButtonWrap: { marginRight: 8 },
   addButton: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: Radius.xl },
   addButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  filterRowSpacer: { height: 108 },
-  filterRowOverlay: {
-    position: 'absolute',
-    top: 62,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    elevation: 2,
-  },
-  filterPanel: { paddingTop: 6, paddingBottom: 8 },
+  filterPanelContainer: { paddingTop: 6, paddingBottom: 8 },
   filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 12, marginBottom: 4 },
   filterRow: { minHeight: 42 },
   filterRowContent: { paddingVertical: 8, paddingHorizontal: 10, alignItems: 'center' },
@@ -1443,7 +1448,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: Colors.pink },
   chipText: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
   chipTextActive: { color: '#fff', fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
-  monthSwitchRow: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 8 },
+  monthSwitchRow: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 8, flexWrap: 'wrap' },
   switchChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -1504,6 +1509,18 @@ const styles = StyleSheet.create({
   statsRowPlaceholder: { color: Colors.textTertiary },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   statsColumn: { flex: 1, minWidth: 0 },
+  statsScrollContent: { paddingTop: 6, paddingBottom: 2, paddingRight: 8 },
+  statsItemCard: {
+    width: 102,
+    minHeight: 52,
+    borderRadius: Radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginRight: 8,
+    justifyContent: 'center',
+  },
+  statsItemName: { fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  statsItemQty: { fontSize: 16, fontWeight: '700', color: Colors.pink },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',

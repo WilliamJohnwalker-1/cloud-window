@@ -834,7 +834,7 @@ export default function ProfileScreen() {
       {/* City Management Modal */}
       <Modal visible={cityModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>城市管理</Text>
               <TouchableOpacity onPress={() => setCityModalVisible(false)}>
@@ -899,6 +899,7 @@ export default function ProfileScreen() {
               )}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无城市</Text>}
               style={styles.cityList}
+              contentContainerStyle={cities.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
             />
           </View>
         </View>
@@ -907,7 +908,7 @@ export default function ProfileScreen() {
       {/* Distributor Management Modal */}
       <Modal visible={distributorModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>分销商管理</Text>
               <TouchableOpacity onPress={() => setDistributorModalVisible(false)}>
@@ -975,6 +976,7 @@ export default function ProfileScreen() {
               )}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无分销商</Text>}
               style={styles.cityList}
+              contentContainerStyle={distributors.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
             />
           </View>
         </View>
@@ -1313,6 +1315,10 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: '75%',
   },
+  managementModalContent: {
+    maxHeight: '90%',
+    minHeight: '78%',
+  },
   storeModalContent: {
     maxHeight: '90%',
     minHeight: '82%',
@@ -1425,6 +1431,7 @@ const styles = StyleSheet.create({
   addCityButton: { width: 70, height: 48, justifyContent: 'center', alignItems: 'center', borderRadius: Radius.md },
   addCityButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cityList: { flex: 1 },
+  cityListContent: { paddingBottom: 12 },
   cityListEmptyContent: { flexGrow: 1, justifyContent: 'center' },
   storeEditorScroll: {
     maxHeight: 430,
