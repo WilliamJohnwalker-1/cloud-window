@@ -160,7 +160,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.19）
+### 5. 启动 Web 端（v1.2.20）
 
 ```bash
 npm run web:v2
@@ -344,6 +344,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.20 (2026-05-31) - 城市→店铺二级筛选对齐移动端
+
+- Web 库存页“店铺库存”视图支持城市→店铺二级筛选，切换城市后店铺列表自动收敛
+- Web 订单页新增城市→店铺二级筛选，订单列表与统计卡按同口径联动过滤
+- Web 报表页筛选升级为城市→店铺二级筛选，销售/利润/排行统计按筛选结果实时聚合
 
 ### Web v1.2.19 (2026-05-30) - 收款台零售订单店铺绑定修复
 
