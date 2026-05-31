@@ -10,6 +10,7 @@ export const InventoryScreen: React.FC = () => {
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
   const [cityFilter, setCityFilter] = React.useState<string>('all');
   const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
+  const [selectedStoreCityId, setSelectedStoreCityId] = React.useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null);
   const [pageNotice, setPageNotice] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [manualStoreEdit, setManualStoreEdit] = React.useState<{
@@ -33,6 +34,27 @@ export const InventoryScreen: React.FC = () => {
       fetchStoreInventory(selectedStoreId);
     }
   }, [viewMode, selectedStoreId, fetchStoreInventory]);
+
+  const storeFilterCities = React.useMemo(
+    () => cities.filter((city) => stores.some((store) => store.city_id === city.id)),
+    [cities, stores],
+  );
+
+  const activeStoresForFilter = React.useMemo(
+    () => (selectedStoreCityId ? stores.filter((store) => store.city_id === selectedStoreCityId) : stores),
+    [selectedStoreCityId, stores],
+  );
+
+  React.useEffect(() => {
+    if (viewMode !== 'store') return;
+    if (activeStoresForFilter.length === 0) {
+      setSelectedStoreId(null);
+      return;
+    }
+    if (!selectedStoreId || !activeStoresForFilter.some((store) => store.id === selectedStoreId)) {
+      setSelectedStoreId(activeStoresForFilter[0].id);
+    }
+  }, [activeStoresForFilter, selectedStoreId, viewMode]);
 
   const filteredStoreInventory = React.useMemo(() => {
     if (viewMode !== 'store' || !selectedStoreId) return [];
@@ -149,20 +171,39 @@ export const InventoryScreen: React.FC = () => {
           ))}
         </div>
       ) : (
-        <div className="flex items-center gap-2 flex-wrap">
-          {stores.map((store) => (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              key={store.id}
-              onClick={() => setSelectedStoreId(store.id)}
-              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === store.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+              onClick={() => setSelectedStoreCityId(null)}
+              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreCityId === null ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
             >
-              {store.name}
+              全部城市
             </button>
-          ))}
-          {stores.length === 0 && (
-            <span className="text-sm text-white/40">暂无店铺</span>
-          )}
+            {storeFilterCities.map((city) => (
+              <button
+                type="button"
+                key={city.id}
+                onClick={() => setSelectedStoreCityId(city.id)}
+                className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreCityId === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+              >
+                {city.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeStoresForFilter.map((store) => (
+              <button
+                type="button"
+                key={store.id}
+                onClick={() => setSelectedStoreId(store.id)}
+                className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === store.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+              >
+                {store.name}
+              </button>
+            ))}
+            {activeStoresForFilter.length === 0 && <span className="text-sm text-white/40">该城市暂无店铺</span>}
+          </div>
         </div>
       )}
 
