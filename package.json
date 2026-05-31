@@ -16,7 +16,9 @@
     "ota:publish": "node ./tools/publish-ota.cjs",
     "release:android:sync": "node ./tools/sync-android-build-to-r2.cjs",
     "push:both": "node ./tools/push-both.cjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck:mobile && npm run typecheck:web",
+    "typecheck:mobile": "tsc --noEmit -p tsconfig.json",
+    "typecheck:web": "tsc --noEmit -p web/tsconfig.json",
     "lint": "node ./node_modules/eslint/bin/eslint.js . --ext .ts,.tsx",
     "test": "node ./node_modules/vitest/vitest.mjs run --passWithNoTests",
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
@@ -58,6 +60,7 @@
     "eslint": "^9.39.1",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.46.4",
+    "typescript-language-server": "^5.3.0",
     "vitest": "^3.2.4",
     "wrangler": "^4.95.0"
   },
