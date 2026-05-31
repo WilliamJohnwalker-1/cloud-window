@@ -31,6 +31,7 @@ export default function InventoryScreen() {
     fetchStores,
     fetchStoreInventory,
     updateInventory,
+    updateStoreInventory,
     updateInventorySettings,
     findProductByBarcode,
     inboundStock,
@@ -46,6 +47,7 @@ export default function InventoryScreen() {
       fetchStores: state.fetchStores,
       fetchStoreInventory: state.fetchStoreInventory,
       updateInventory: state.updateInventory,
+      updateStoreInventory: state.updateStoreInventory,
       updateInventorySettings: state.updateInventorySettings,
       findProductByBarcode: state.findProductByBarcode,
       inboundStock: state.inboundStock,
@@ -67,10 +69,16 @@ export default function InventoryScreen() {
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'main' | 'store'>('main');
+  const [selectedStoreCityId, setSelectedStoreCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [storeEditModalVisible, setStoreEditModalVisible] = useState(false);
+  const [editingStoreInventoryItem, setEditingStoreInventoryItem] = useState<StoreInventory | null>(null);
+  const [editStoreQuantity, setEditStoreQuantity] = useState('0');
+  const [savingStoreEdit, setSavingStoreEdit] = useState(false);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
+  const isSuperAdmin = user?.role === 'super_admin';
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   useEffect(() => {
@@ -87,11 +95,21 @@ export default function InventoryScreen() {
     }
   }, [viewMode, selectedStoreId, fetchStoreInventory]);
 
+  const storeFilterCities = cities.filter((city) => stores.some((store) => store.city_id === city.id));
+  const activeStoresForStoreFilter = selectedStoreCityId
+    ? stores.filter((store) => store.city_id === selectedStoreCityId)
+    : stores;
+
   useEffect(() => {
-    if (viewMode === 'store' && !selectedStoreId && stores.length > 0) {
-      setSelectedStoreId(stores[0].id);
+    if (viewMode !== 'store') return;
+    if (activeStoresForStoreFilter.length === 0) {
+      setSelectedStoreId(null);
+      return;
     }
-  }, [viewMode, selectedStoreId, stores]);
+    if (!selectedStoreId || !activeStoresForStoreFilter.some((store) => store.id === selectedStoreId)) {
+      setSelectedStoreId(activeStoresForStoreFilter[0].id);
+    }
+  }, [viewMode, selectedStoreId, activeStoresForStoreFilter]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -314,6 +332,28 @@ export default function InventoryScreen() {
   };
 
   const renderStoreInventoryItem = ({ item }: { item: StoreInventory }) => {
+    const openStoreInventoryEditor = () => {
+      if (!isSuperAdmin) return;
+      setEditingStoreInventoryItem(item);
+      setEditStoreQuantity(String(item.quantity ?? 0));
+      setStoreEditModalVisible(true);
+    };
+
+    const handleUpdateStoreStock = async (adjustment: number) => {
+      if (!isSuperAdmin || !selectedStoreId) return;
+
+      const nextQuantity = Number(item.quantity || 0) + adjustment;
+      if (nextQuantity < 0) {
+        Toast.show({ type: 'error', text1: '错误', text2: '店铺库存不能为负数' });
+        return;
+      }
+
+      const { error } = await updateStoreInventory(selectedStoreId, item.product_id, nextQuantity);
+      if (error) {
+        Toast.show({ type: 'error', text1: '更新失败', text2: error.message });
+      }
+    };
+
     return (
       <View style={[styles.card, { backgroundColor: theme.surface }]}>
         <View style={styles.cardHeader}>
@@ -327,12 +367,69 @@ export default function InventoryScreen() {
             </Text>
           </View>
         </View>
+
+        {isSuperAdmin && (
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={[styles.adjustButton, styles.decreaseButton]}
+              onPress={() => handleUpdateStoreStock(-10)}
+            >
+              <ChevronsDown size={16} color={Colors.danger} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.adjustButton, styles.decreaseButton]}
+              onPress={() => handleUpdateStoreStock(-1)}
+            >
+              <Minus size={16} color={Colors.danger} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.setButton}
+              onPress={openStoreInventoryEditor}
+            >
+              <Pencil size={14} color={Colors.blue} />
+              <Text style={styles.setButtonText}>编辑</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.adjustButton, styles.increaseButton]}
+              onPress={() => handleUpdateStoreStock(1)}
+            >
+              <Plus size={16} color={Colors.success} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.adjustButton, styles.increaseButton]}
+              onPress={() => handleUpdateStoreStock(10)}
+            >
+              <ChevronsUp size={16} color={Colors.success} />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
 
   const totalStock = cityFilteredProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
   const lowStockCount = lowStockProducts.length;
+
+  const handleSaveStoreInventoryQuantity = async () => {
+    if (!isSuperAdmin || !editingStoreInventoryItem || !selectedStoreId) return;
+    const nextQuantity = Number.parseInt(editStoreQuantity, 10);
+    if (Number.isNaN(nextQuantity) || nextQuantity < 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效的非负整数' });
+      return;
+    }
+
+    setSavingStoreEdit(true);
+    const { error } = await updateStoreInventory(selectedStoreId, editingStoreInventoryItem.product_id, nextQuantity);
+    setSavingStoreEdit(false);
+
+    if (error) {
+      Toast.show({ type: 'error', text1: '更新失败', text2: error.message });
+      return;
+    }
+
+    setStoreEditModalVisible(false);
+    setEditingStoreInventoryItem(null);
+  };
 
   if (user?.role === 'distributor') {
     return (
@@ -369,7 +466,12 @@ export default function InventoryScreen() {
         ) : null}
       </View>
 
-      <View style={[styles.cityFilterSpacer, isAdminOrManager && { height: 58 + 48 }]} />
+      <View
+        style={[
+          styles.cityFilterSpacer,
+          isAdminOrManager && { height: viewMode === 'store' ? 58 + 58 + 48 : 58 + 48 },
+        ]}
+      />
 
       <View style={styles.cityFilterOverlay}>
         {isAdminOrManager && (
@@ -439,14 +541,66 @@ export default function InventoryScreen() {
               ))}
             </>
           ) : (
-            stores.map((store) => (
+            <>
+              <TouchableOpacity
+                style={[styles.cityFilterItem, selectedStoreCityId === null && styles.cityFilterItemActive]}
+                onPress={() => setSelectedStoreCityId(null)}
+              >
+                <LinearGradient
+                  colors={selectedStoreCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cityGradientChip}
+                >
+                  <Text
+                    style={[styles.cityFilterText, selectedStoreCityId === null && styles.cityFilterTextActive]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    全部城市
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              {storeFilterCities.map((city) => (
+                <TouchableOpacity
+                  key={city.id}
+                  style={[styles.cityFilterItem, selectedStoreCityId === city.id && styles.cityFilterItemActive]}
+                  onPress={() => setSelectedStoreCityId(city.id)}
+                >
+                  <LinearGradient
+                    colors={selectedStoreCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.cityGradientChip}
+                  >
+                    <Text
+                      style={[styles.cityFilterText, selectedStoreCityId === city.id && styles.cityFilterTextActive]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {city.name}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+        </ScrollView>
+        {viewMode === 'store' ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={[styles.cityFilterRow, { backgroundColor: theme.surface, borderTopColor: theme.border }]}
+            contentContainerStyle={styles.cityFilterContent}
+          >
+            {activeStoresForStoreFilter.map((store) => (
               <TouchableOpacity
                 key={store.id}
                 style={[styles.cityFilterItem, selectedStoreId === store.id && styles.cityFilterItemActive]}
                 onPress={() => setSelectedStoreId(store.id)}
               >
                 <LinearGradient
-                   colors={selectedStoreId === store.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                  colors={selectedStoreId === store.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.cityGradientChip}
@@ -460,9 +614,9 @@ export default function InventoryScreen() {
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
-            ))
-          )}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        ) : null}
       </View>
 
       {viewMode === 'main' ? (
@@ -596,6 +750,47 @@ export default function InventoryScreen() {
                 disabled={savingEdit}
               >
                 <Text style={styles.saveButtonText}>{savingEdit ? '保存中...' : '保存'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={storeEditModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>编辑店铺库存</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>{editingStoreInventoryItem?.product_name ?? ''}</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>店铺库存</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                value={editStoreQuantity}
+                onChangeText={setEditStoreQuantity}
+                keyboardType="number-pad"
+                placeholder="输入店铺库存"
+                placeholderTextColor={theme.textTertiary}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  setStoreEditModalVisible(false);
+                  setEditingStoreInventoryItem(null);
+                }}
+                disabled={savingStoreEdit}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, savingStoreEdit && styles.disabledButton]}
+                onPress={handleSaveStoreInventoryQuantity}
+                disabled={savingStoreEdit}
+              >
+                <Text style={styles.saveButtonText}>{savingStoreEdit ? '保存中...' : '保存'}</Text>
               </TouchableOpacity>
             </View>
           </View>

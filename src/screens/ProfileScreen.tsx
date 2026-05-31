@@ -988,7 +988,7 @@ export default function ProfileScreen() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 16 : 0}
             style={styles.keyboardAvoidingWrapper}
           >
-          <View style={[styles.modalContent, styles.storeModalContent, { backgroundColor: theme.surface }]}> 
+          <View style={[styles.modalContent, styles.storeModalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>店铺管理</Text>
               <TouchableOpacity onPress={() => setStoreModalVisible(false)}>
@@ -1016,7 +1016,7 @@ export default function ProfileScreen() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
-              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}> 
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}>
                 <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>
                   {isAddingStore ? '添加店铺' : '编辑店铺'}
                 </Text>
@@ -1183,6 +1183,7 @@ export default function ProfileScreen() {
                 )}
                 ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无店铺</Text>}
                 style={styles.cityList}
+                contentContainerStyle={stores.length === 0 ? styles.cityListEmptyContent : undefined}
               />
             )}
           </View>
@@ -1304,7 +1305,7 @@ const styles = StyleSheet.create({
   logoutText: { fontSize: 16, color: Colors.danger, fontWeight: '600' },
   version: { textAlign: 'center', color: Colors.textTertiary, marginTop: 20, fontSize: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(18,18,26,0.52)', justifyContent: 'flex-end' },
-  keyboardAvoidingWrapper: { width: '100%' },
+  keyboardAvoidingWrapper: { width: '100%', flex: 1, justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 28,
@@ -1314,6 +1315,7 @@ const styles = StyleSheet.create({
   },
   storeModalContent: {
     maxHeight: '90%',
+    minHeight: '82%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1422,7 +1424,8 @@ const styles = StyleSheet.create({
   },
   addCityButton: { width: 70, height: 48, justifyContent: 'center', alignItems: 'center', borderRadius: Radius.md },
   addCityButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  cityList: { maxHeight: 300 },
+  cityList: { flex: 1 },
+  cityListEmptyContent: { flexGrow: 1, justifyContent: 'center' },
   storeEditorScroll: {
     maxHeight: 430,
   },

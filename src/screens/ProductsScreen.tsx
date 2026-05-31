@@ -95,7 +95,7 @@ export default function ProductsScreen() {
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const isDistributor = user?.role === 'distributor';
 
   const orderedCities = useMemo(() => {
@@ -113,7 +113,7 @@ export default function ProductsScreen() {
 
   useEffect(() => {
     fetchCities();
-    if (user?.role === 'admin') {
+    if (user?.role === 'admin' || user?.role === 'super_admin') {
       fetchStores();
     }
   }, [fetchCities, fetchStores, user?.role]);
@@ -628,7 +628,7 @@ export default function ProductsScreen() {
                 </TouchableOpacity>
               )}
 
-              {editingProduct && user?.role === 'admin' && (
+              {editingProduct && (user?.role === 'admin' || user?.role === 'super_admin') && (
                 <View style={[styles.distributorDiscountBox, { borderTopColor: theme.divider }] }>
                   <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>店铺专属定价(元)</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow}>

@@ -44,11 +44,39 @@ export default function ReportsScreen() {
 
   const isDistributor = user?.role === 'distributor';
 
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [floatingProductName, setFloatingProductName] = useState('');
+
+  const activeStores = useMemo(() => stores.filter((store) => store.status === 'active'), [stores]);
+  const reportCities = useMemo(() => {
+    const cityMap = new Map<string, string>();
+    activeStores.forEach((store) => {
+      if (!cityMap.has(store.city_id)) {
+        cityMap.set(store.city_id, store.city_name || '未知城市');
+      }
+    });
+    return Array.from(cityMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [activeStores]);
+  const filteredStores = useMemo(() => {
+    if (!selectedCityId) return activeStores;
+    return activeStores.filter((store) => store.city_id === selectedCityId);
+  }, [activeStores, selectedCityId]);
 
   const showFullProductName = (name: string) => {
-    Alert.alert('商品全称', name);
+    const normalized = String(name || '').trim();
+    if (!normalized) {
+      Alert.alert('商品全称', '暂无商品名称');
+      return;
+    }
+    setFloatingProductName(normalized);
   };
+
+  useEffect(() => {
+    if (!floatingProductName) return;
+    const timer = setTimeout(() => setFloatingProductName(''), 2200);
+    return () => clearTimeout(timer);
+  }, [floatingProductName]);
 
   useEffect(() => {
     fetchProducts();
@@ -62,10 +90,24 @@ export default function ReportsScreen() {
     }
   }, [selectedStoreId, fetchStoreInventory]);
 
+  useEffect(() => {
+    if (!selectedStoreId) return;
+    const stillVisible = filteredStores.some((store) => store.id === selectedStoreId);
+    if (!stillVisible) {
+      setSelectedStoreId(null);
+    }
+  }, [filteredStores, selectedStoreId]);
+
   const filteredOrders = useMemo(() => {
-    if (!selectedStoreId) return orders;
-    return orders.filter(o => o.store_id === selectedStoreId);
-  }, [orders, selectedStoreId]);
+    let list = [...orders];
+    if (selectedCityId) {
+      list = list.filter((order) => order.city_id === selectedCityId);
+    }
+    if (selectedStoreId) {
+      list = list.filter((order) => order.store_id === selectedStoreId);
+    }
+    return list;
+  }, [orders, selectedCityId, selectedStoreId]);
 
   const salesData = useMemo(() => {
     const totalRetailSales = filteredOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
@@ -398,32 +440,49 @@ export default function ReportsScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销量排行榜</Text>
         {salesData.topProductsQty.length > 0 ? (
-          <BarChart
-            data={salesData.topProductsQty.map((item, index) => ({
-              value: item.quantity,
-              label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
-              frontColor: CHART_COLORS[index % CHART_COLORS.length],
-              topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                  {item.quantity}
-                </Text>
-              ),
-            }))}
-            barWidth={30}
-            spacing={20}
-            roundedTop
-            roundedBottom
-            hideRules
-            xAxisThickness={1}
-            xAxisColor={theme.divider}
-            yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-            noOfSections={4}
-            maxValue={Math.ceil((salesData.topProductsQty[0]?.quantity || 1) * 1.2)}
-            isAnimated
-            animationDuration={500}
-            height={150}
-          />
+          <>
+            <BarChart
+              data={salesData.topProductsQty.map((item, index) => ({
+                value: item.quantity,
+                label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
+                frontColor: CHART_COLORS[index % CHART_COLORS.length],
+                topLabelComponent: () => (
+                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
+                    {item.quantity}
+                  </Text>
+                ),
+              }))}
+              barWidth={30}
+              spacing={20}
+              roundedTop
+              roundedBottom
+              hideRules
+              xAxisThickness={1}
+              xAxisColor={theme.divider}
+              yAxisThickness={0}
+              yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
+              noOfSections={4}
+              maxValue={Math.ceil((salesData.topProductsQty[0]?.quantity || 1) * 1.2)}
+              isAnimated
+              animationDuration={500}
+              height={150}
+            />
+            <View style={styles.rankListContainer}>
+              {salesData.topProductsQty.map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.name}-qty`}
+                  style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
+                  onPress={() => showFullProductName(item.name)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                    {index + 1}. {item.name}
+                  </Text>
+                  <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.quantity}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -435,32 +494,49 @@ export default function ReportsScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销售额排行榜</Text>
         {salesData.topProductsAmt.length > 0 ? (
-          <BarChart
-            data={salesData.topProductsAmt.map((item, index) => ({
-              value: item.amount,
-              label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
-              frontColor: CHART_COLORS[index % CHART_COLORS.length],
-              topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                  {item.amount.toFixed(0)}
-                </Text>
-              ),
-            }))}
-            barWidth={30}
-            spacing={20}
-            roundedTop
-            roundedBottom
-            hideRules
-            xAxisThickness={1}
-            xAxisColor={theme.divider}
-            yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-            noOfSections={4}
-            maxValue={Math.ceil((salesData.topProductsAmt[0]?.amount || 1) * 1.2)}
-            isAnimated
-            animationDuration={500}
-            height={150}
-          />
+          <>
+            <BarChart
+              data={salesData.topProductsAmt.map((item, index) => ({
+                value: item.amount,
+                label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
+                frontColor: CHART_COLORS[index % CHART_COLORS.length],
+                topLabelComponent: () => (
+                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
+                    {item.amount.toFixed(0)}
+                  </Text>
+                ),
+              }))}
+              barWidth={30}
+              spacing={20}
+              roundedTop
+              roundedBottom
+              hideRules
+              xAxisThickness={1}
+              xAxisColor={theme.divider}
+              yAxisThickness={0}
+              yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
+              noOfSections={4}
+              maxValue={Math.ceil((salesData.topProductsAmt[0]?.amount || 1) * 1.2)}
+              isAnimated
+              animationDuration={500}
+              height={150}
+            />
+            <View style={styles.rankListContainer}>
+              {salesData.topProductsAmt.map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.name}-amt`}
+                  style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
+                  onPress={() => showFullProductName(item.name)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                    {index + 1}. {item.name}
+                  </Text>
+                  <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.amount.toFixed(0)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -670,12 +746,40 @@ export default function ReportsScreen() {
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>数据报表</Text>
       </View>
 
-      {!isDistributor && stores.length > 0 && (
+      {!isDistributor && activeStores.length > 0 && (
         <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderBottomColor: theme.divider }]}>
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
             <TouchableOpacity
               style={[
-                styles.filterChip, 
+                styles.filterChip,
+                { backgroundColor: theme.background, borderColor: theme.divider },
+                !selectedCityId && { backgroundColor: Colors.blue, borderColor: Colors.blue }
+              ]}
+              onPress={() => setSelectedCityId(null)}
+            >
+              <Text style={[styles.filterChipText, { color: theme.textSecondary }, !selectedCityId && styles.filterChipTextActive]}>全部城市</Text>
+            </TouchableOpacity>
+            {reportCities.map(city => (
+              <TouchableOpacity
+                key={city.id}
+                style={[
+                  styles.filterChip,
+                  { backgroundColor: theme.background, borderColor: theme.divider },
+                  selectedCityId === city.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }
+                ]}
+                onPress={() => setSelectedCityId(city.id)}
+              >
+                <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedCityId === city.id && styles.filterChipTextActive]}>{city.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
                 { backgroundColor: theme.background, borderColor: theme.divider },
                 !selectedStoreId && { backgroundColor: Colors.blue, borderColor: Colors.blue }
               ]}
@@ -683,11 +787,11 @@ export default function ReportsScreen() {
             >
               <Text style={[styles.filterChipText, { color: theme.textSecondary }, !selectedStoreId && styles.filterChipTextActive]}>全部店铺</Text>
             </TouchableOpacity>
-            {stores.map(store => (
+            {filteredStores.map(store => (
               <TouchableOpacity
                 key={store.id}
                 style={[
-                  styles.filterChip, 
+                  styles.filterChip,
                   { backgroundColor: theme.background, borderColor: theme.divider },
                   selectedStoreId === store.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }
                 ]}
@@ -711,6 +815,14 @@ export default function ReportsScreen() {
         {!isDistributor && reportType === 'inventory' && renderInventoryReport()}
         {!isDistributor && reportType === 'profit' && renderProfitReport()}
       </View>
+
+      {floatingProductName ? (
+        <View style={[styles.floatingNameBubble, { backgroundColor: theme.surface, borderColor: theme.border }] }>
+          <Text style={[styles.floatingNameText, { color: theme.textPrimary }]} numberOfLines={2} ellipsizeMode="tail">
+            {floatingProductName}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -802,9 +914,45 @@ const styles = StyleSheet.create({
   velocityUnhealthyBg: { backgroundColor: 'rgba(248, 113, 113, 0.05)' },
   alertIcon: { marginRight: 6 },
   velocityMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  rankListContainer: {
+    marginTop: 10,
+  },
+  rankListRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+  },
+  rankListName: {
+    flex: 1,
+    fontSize: 12,
+    marginRight: 10,
+  },
+  rankListValue: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   filterContainer: { paddingVertical: 10, borderBottomWidth: 1 },
+  filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 15, marginBottom: 6 },
   filterScroll: { paddingHorizontal: 15, gap: 10 },
   filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: Radius.pill, borderWidth: 1 },
   filterChipText: { fontSize: 13 },
   filterChipTextActive: { color: '#fff', fontWeight: '600' },
+  floatingNameBubble: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    ...Shadow.card,
+  },
+  floatingNameText: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
 });

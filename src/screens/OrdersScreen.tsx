@@ -58,8 +58,9 @@ export default function OrdersScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [cart, setCart] = useState<Map<string, CartItem>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedOrderCityId, setSelectedOrderCityId] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
-  const [selectedDistributorId, setSelectedDistributorId] = useState<string | null>(null);
+  const [selectedOrderStoreId, setSelectedOrderStoreId] = useState<string | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
   const [rangeStartDate, setRangeStartDate] = useState('');
   const [rangeEndDate, setRangeEndDate] = useState('');
@@ -165,13 +166,44 @@ export default function OrdersScreen() {
     clearCart();
   }, [orderModalStoreId, orderModalDistributorId]);
 
+  const orderFilterCities = useMemo(() => {
+    const cityMap = new Map<string, string>();
+    stores
+      .filter((store) => store.status === 'active')
+      .forEach((store) => {
+        if (!cityMap.has(store.city_id)) {
+          cityMap.set(store.city_id, store.city_name || '未知城市');
+        }
+      });
+    return Array.from(cityMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [stores]);
+
+  const activeStoresForOrderFilter = useMemo(() => {
+    const activeStores = stores.filter((store) => store.status === 'active');
+    if (!selectedOrderCityId) return activeStores;
+    return activeStores.filter((store) => store.city_id === selectedOrderCityId);
+  }, [selectedOrderCityId, stores]);
+
+  useEffect(() => {
+    if (!selectedOrderStoreId) return;
+    const stillVisible = activeStoresForOrderFilter.some((store) => store.id === selectedOrderStoreId);
+    if (!stillVisible) {
+      setSelectedOrderStoreId(null);
+    }
+  }, [activeStoresForOrderFilter, selectedOrderStoreId]);
+
   const baseOrders = useMemo(() => {
     let list = [...orders];
-    if (isAdmin && selectedDistributorId) {
-      list = list.filter((o) => o.distributor_id === selectedDistributorId);
+    if (isAdmin) {
+      if (selectedOrderCityId) {
+        list = list.filter((o) => o.city_id === selectedOrderCityId);
+      }
+      if (selectedOrderStoreId) {
+        list = list.filter((o) => o.store_id === selectedOrderStoreId);
+      }
     }
     return list;
-  }, [orders, isAdmin, selectedDistributorId]);
+  }, [orders, isAdmin, selectedOrderCityId, selectedOrderStoreId]);
 
   const matchesStatsRange = useCallback((order: Order): boolean => {
     const date = new Date(order.created_at);
@@ -225,8 +257,8 @@ export default function OrdersScreen() {
       const lowerSearch = searchText.toLowerCase().trim();
       list = list.filter((o) => {
         const shortId = o.id.slice(0, 8).toLowerCase();
-        const email = (o.distributor_email || '').toLowerCase();
-        return shortId.includes(lowerSearch) || email.includes(lowerSearch);
+        const storeName = (o.store_name || '').toLowerCase();
+        return shortId.includes(lowerSearch) || storeName.includes(lowerSearch);
       });
     }
     return list;
@@ -612,14 +644,16 @@ export default function OrdersScreen() {
 
       <View style={styles.orderMetaContainer}>
         <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
-        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}> 
-          下单账号: {item.distributor_email || item.distributor_id}
-          {item.distributor_store ? ` · ${item.distributor_store}` : ''}
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
+          配送店铺: {item.store_name || '未指定'}
         </Text>
       </View>
       <View style={styles.orderMetaContainer}>
         <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
-        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>配送店铺: {item.store_name || '未指定'}</Text>
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
+          下单账号: {item.distributor_email || item.distributor_id}
+          {item.distributor_store ? ` · ${item.distributor_store}` : ''}
+        </Text>
       </View>
 
       <View style={styles.orderItemsSummary}>
@@ -720,7 +754,12 @@ export default function OrdersScreen() {
           </View>
         )}
         <View style={styles.productRowInfo}>
-          <Text style={styles.productRowName} numberOfLines={1}>{item.name}</Text>
+          <TouchableOpacity
+            activeOpacity={0.75}
+            onPress={() => Alert.alert('商品全称', item.name)}
+          >
+            <Text style={styles.productRowName} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
+          </TouchableOpacity>
           <Text style={styles.productRowMeta}>
             {item.city_name ? `${item.city_name} · ` : ''}
             {user?.role === 'distributor'
@@ -842,35 +881,68 @@ export default function OrdersScreen() {
         <>
           <View style={styles.filterRowSpacer} />
           <View style={styles.filterRowOverlay}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.filterRow, { backgroundColor: theme.surface }]} contentContainerStyle={styles.filterRowContent}>
-              <TouchableOpacity
-                style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === null && styles.chipActive]}
-                onPress={() => setSelectedDistributorId(null)}
-              >
-                <Text
-                  style={[styles.chipText, { color: theme.textSecondary }, selectedDistributorId === null && styles.chipTextActive]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
+            <View style={[styles.filterPanel, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                <TouchableOpacity
+                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
+                  onPress={() => setSelectedOrderCityId(null)}
                 >
-                  全部分销商
-                </Text>
-              </TouchableOpacity>
-              {distributors.map((d) => (
+                  <Text
+                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    全部城市
+                  </Text>
+                </TouchableOpacity>
+                {orderFilterCities.map((city) => (
                   <TouchableOpacity
-                    key={d.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedDistributorId === d.id && styles.chipActive]}
-                    onPress={() => setSelectedDistributorId(d.id)}
+                    key={city.id}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
+                    onPress={() => setSelectedOrderCityId(city.id)}
                   >
                     <Text
-                      style={[styles.chipText, { color: theme.textSecondary }, selectedDistributorId === d.id && styles.chipTextActive]}
+                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {d.store_name || d.email}
+                      {city.name}
                     </Text>
                   </TouchableOpacity>
                 ))}
-            </ScrollView>
+              </ScrollView>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                <TouchableOpacity
+                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === null && styles.chipActive]}
+                  onPress={() => setSelectedOrderStoreId(null)}
+                >
+                  <Text
+                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === null && styles.chipTextActive]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    全部店铺
+                  </Text>
+                </TouchableOpacity>
+                {activeStoresForOrderFilter.map((store) => (
+                  <TouchableOpacity
+                    key={store.id}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === store.id && styles.chipActive]}
+                    onPress={() => setSelectedOrderStoreId(store.id)}
+                  >
+                    <Text
+                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === store.id && styles.chipTextActive]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {store.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         </>
       )}
@@ -951,7 +1023,7 @@ export default function OrdersScreen() {
       </View>
 
       {isAdmin && (
-        <Animated.View style={[styles.statsCard, { height: animatedHeight, backgroundColor: theme.surface }]}> 
+        <Animated.View style={[styles.statsCard, { height: animatedHeight, backgroundColor: theme.surface }]}>
           <TouchableOpacity onPress={toggleStatsExpanded} activeOpacity={0.85}>
             <View style={styles.statsHeader}>
               <Text style={[styles.statsTitle, { color: theme.textPrimary }]}>商品数量统计（同商品自动累加）</Text>
@@ -987,7 +1059,7 @@ export default function OrdersScreen() {
         <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
         <TextInput
           style={[styles.searchInput, { color: theme.textPrimary }]}
-          placeholder="搜索订单号或分销商邮箱..."
+          placeholder="搜索订单号或店铺名称..."
           placeholderTextColor={theme.textTertiary}
           value={searchText}
           onChangeText={setSearchText}
@@ -1208,7 +1280,13 @@ export default function OrdersScreen() {
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{new Date(detailOrder.created_at).toLocaleString('zh-CN')}</Text>
                 </View>
                 <View style={styles.detailSection}>
-                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>分销商</Text>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>配送店铺</Text>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
+                    {detailOrder.store_name || '未指定'}
+                  </Text>
+                </View>
+                <View style={styles.detailSection}>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>下单账号</Text>
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
                     {detailOrder.distributor_email || detailOrder.distributor_id}
                     {detailOrder.distributor_store ? ` · ${detailOrder.distributor_store}` : ''}
@@ -1218,7 +1296,7 @@ export default function OrdersScreen() {
                 <View style={styles.detailSection}>
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>商品明细</Text>
                   {detailOrder.items.map((orderItem) => (
-                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}> 
+                    <View key={orderItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}>
                       <Text style={[styles.detailItemName, { color: theme.textPrimary }]}>
                         {orderItem.product_name || '未知商品'}
                         {orderItem.is_sample ? '（样品）' : ''}
@@ -1340,7 +1418,7 @@ const styles = StyleSheet.create({
   outboundButtonWrap: { marginRight: 8 },
   addButton: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: Radius.xl },
   addButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  filterRowSpacer: { height: 50 },
+  filterRowSpacer: { height: 108 },
   filterRowOverlay: {
     position: 'absolute',
     top: 62,
@@ -1349,7 +1427,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 2,
   },
-  filterRow: { backgroundColor: Colors.surface, minHeight: 50 },
+  filterPanel: { paddingTop: 6, paddingBottom: 8 },
+  filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 12, marginBottom: 4 },
+  filterRow: { minHeight: 42 },
   filterRowContent: { paddingVertical: 8, paddingHorizontal: 10, alignItems: 'center' },
   chip: {
     width: 100,
