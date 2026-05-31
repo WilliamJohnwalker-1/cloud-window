@@ -70,9 +70,10 @@ export default function OrdersScreen() {
   const [outboundProduct, setOutboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingOutbound, setSubmittingOutbound] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
-  const [statsExpanded, setStatsExpanded] = useState(true);
+  const [statsExpanded, setStatsExpanded] = useState(false);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [orderModalDistributorId, setOrderModalDistributorId] = useState<string | null>(null);
   const [orderModalStoreId, setOrderModalStoreId] = useState<string | null>(null);
@@ -80,9 +81,9 @@ export default function OrdersScreen() {
   const [modifyOrder, setModifyOrder] = useState<Order | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
-  const animatedHeight = useRef(new Animated.Value(168)).current;
-  const animatedChevron = useRef(new Animated.Value(180)).current;
-  const animatedOpacity = useRef(new Animated.Value(1)).current;
+  const animatedHeight = useRef(new Animated.Value(40)).current;
+  const animatedChevron = useRef(new Animated.Value(0)).current;
+  const animatedOpacity = useRef(new Animated.Value(0)).current;
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
@@ -105,10 +106,10 @@ export default function OrdersScreen() {
   }, [orderModalStoreId, fetchStoreProductPrices]);
 
   useEffect(() => {
-    animatedHeight.setValue(168);
-    animatedChevron.setValue(180);
-    animatedOpacity.setValue(1);
-  }, [animatedChevron, animatedHeight, animatedOpacity]);
+    animatedHeight.setValue(statsExpanded ? 236 : 40);
+    animatedChevron.setValue(statsExpanded ? 180 : 0);
+    animatedOpacity.setValue(statsExpanded ? 1 : 0);
+  }, [animatedChevron, animatedHeight, animatedOpacity, statsExpanded]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -122,7 +123,7 @@ export default function OrdersScreen() {
 
     Animated.parallel([
       Animated.timing(animatedHeight, {
-        toValue: nextValue ? 168 : 40,
+        toValue: nextValue ? 236 : 40,
         duration: 300,
         useNativeDriver: false,
       }),
@@ -264,9 +265,12 @@ export default function OrdersScreen() {
     return list;
   }, [rangedOrders, searchText]);
 
-  const rangedProductStats = useMemo(() => {
+  const monthlyProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
-    filteredOrders.forEach((order) => {
+    const now = new Date();
+    baseOrders.forEach((order) => {
+      const date = new Date(order.created_at);
+      if (date.getFullYear() !== now.getFullYear() || date.getMonth() !== now.getMonth()) return;
       order.items.forEach((item) => {
         const key = item.product_id;
         const prev = map.get(key);
@@ -277,7 +281,7 @@ export default function OrdersScreen() {
       });
     });
     return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
-  }, [filteredOrders]);
+  }, [baseOrders]);
 
   const cumulativeProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
@@ -315,15 +319,15 @@ export default function OrdersScreen() {
     }
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
-  const rangedTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => ({ key: `r-${idx + 1}`, row: rangedProductStats[idx] ?? null })),
-    [rangedProductStats],
-  );
-
-  const cumulativeTopRows = useMemo(
-    () => Array.from({ length: 5 }, (_, idx) => ({ key: `c-${idx + 1}`, row: cumulativeProductStats[idx] ?? null })),
-    [cumulativeProductStats],
-  );
+  const monthlyStatsRows = useMemo(() => monthlyProductStats, [monthlyProductStats]);
+  const cumulativeStatsRows = useMemo(() => cumulativeProductStats, [cumulativeProductStats]);
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (isAdmin && selectedOrderCityId) count += 1;
+    if (isAdmin && selectedOrderStoreId) count += 1;
+    if (statsRange !== 'all') count += 1;
+    return count;
+  }, [isAdmin, selectedOrderCityId, selectedOrderStoreId, statsRange]);
 
   const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
   const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
@@ -877,137 +881,7 @@ export default function OrdersScreen() {
         </View>
       </View>
 
-      {isAdmin && (
-        <>
-          <View style={styles.filterRowSpacer} />
-          <View style={styles.filterRowOverlay}>
-            <View style={[styles.filterPanel, { backgroundColor: theme.surface }]}>
-              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                <TouchableOpacity
-                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
-                  onPress={() => setSelectedOrderCityId(null)}
-                >
-                  <Text
-                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部城市
-                  </Text>
-                </TouchableOpacity>
-                {orderFilterCities.map((city) => (
-                  <TouchableOpacity
-                    key={city.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
-                    onPress={() => setSelectedOrderCityId(city.id)}
-                  >
-                    <Text
-                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {city.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                <TouchableOpacity
-                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === null && styles.chipActive]}
-                  onPress={() => setSelectedOrderStoreId(null)}
-                >
-                  <Text
-                    style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === null && styles.chipTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部店铺
-                  </Text>
-                </TouchableOpacity>
-                {activeStoresForOrderFilter.map((store) => (
-                  <TouchableOpacity
-                    key={store.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === store.id && styles.chipActive]}
-                    onPress={() => setSelectedOrderStoreId(store.id)}
-                  >
-                    <Text
-                      style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === store.id && styles.chipTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {store.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </>
-      )}
-
-      <View style={[styles.monthSwitchRow, { backgroundColor: theme.surface }]}>
-        {[
-          { key: 'day', label: '当日' },
-          { key: 'week', label: '本周' },
-          { key: 'month', label: '本月' },
-          { key: 'year', label: '年度' },
-          { key: 'all', label: '累计' },
-          { key: 'range', label: '自定义时间段' },
-        ].map((item) => (
-          <TouchableOpacity
-            key={item.key}
-            style={[styles.switchChip, { backgroundColor: theme.surfaceSecondary }, statsRange === item.key && styles.switchChipActive]}
-            onPress={() => setStatsRange(item.key as StatsRange)}
-          >
-            <Text style={[styles.switchChipText, { color: theme.textSecondary }, statsRange === item.key && styles.switchChipTextActive]}>{item.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {statsRange === 'range' && (
-        <View style={[styles.customDateRow, { backgroundColor: theme.surface }] }>
-          <Text style={[styles.customDateLabel, { color: theme.textSecondary }]}>起止</Text>
-          <TextInput
-            value={rangeStartDate}
-            onChangeText={setRangeStartDate}
-            placeholder="开始 YYYY-MM-DD"
-            placeholderTextColor={theme.textTertiary}
-            style={[
-              styles.customDateInput,
-              {
-                backgroundColor: theme.surfaceSecondary,
-                color: theme.textPrimary,
-                lineHeight: 18,
-                paddingVertical: 0,
-                includeFontPadding: false,
-              },
-            ]}
-            textAlignVertical="center"
-          />
-          <Text style={[styles.customDateSeparator, { color: theme.textSecondary }]}>至</Text>
-          <TextInput
-            value={rangeEndDate}
-            onChangeText={setRangeEndDate}
-            placeholder="结束 YYYY-MM-DD"
-            placeholderTextColor={theme.textTertiary}
-            style={[
-              styles.customDateInput,
-              {
-                backgroundColor: theme.surfaceSecondary,
-                color: theme.textPrimary,
-                lineHeight: 18,
-                paddingVertical: 0,
-                includeFontPadding: false,
-              },
-            ]}
-            textAlignVertical="center"
-          />
-        </View>
-      )}
-
-      <View style={[styles.summary, { backgroundColor: theme.surface }]}>
+      <View style={[styles.summary, { backgroundColor: theme.surface }]}> 
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{filteredOrders.length}</Text>
           <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>订单数</Text>
@@ -1035,37 +909,123 @@ export default function OrdersScreen() {
           <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
             <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
-                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>{rangeLabel}</Text>
-                {rangedTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
-                    {row ? `${row.name}: ${row.quantity}` : '—'}
-                  </Text>
-                ))}
+                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>本月</Text>
+                <ScrollView
+                  style={styles.statsColumnScroll}
+                  contentContainerStyle={styles.statsList}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                >
+                  {monthlyStatsRows.length > 0 ? (
+                    monthlyStatsRows.map((row) => (
+                      <View key={`m-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surfaceSecondary }]}> 
+                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2}>
+                          {row.name}
+                        </Text>
+                        <Text style={styles.statsListQty}>{row.quantity}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[styles.statsRowText, { color: theme.textTertiary }, styles.statsRowPlaceholder]}>—</Text>
+                  )}
+                </ScrollView>
               </View>
               <View style={styles.statsColumn}>
                 <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>累计</Text>
-                {cumulativeTopRows.map(({ key, row }) => (
-                  <Text key={key} style={[styles.statsRowText, { color: row ? theme.textPrimary : theme.textTertiary }, !row && styles.statsRowPlaceholder]}>
-                    {row ? `${row.name}: ${row.quantity}` : '—'}
-                  </Text>
-                ))}
+                <ScrollView
+                  style={styles.statsColumnScroll}
+                  contentContainerStyle={styles.statsList}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                >
+                  {cumulativeStatsRows.length > 0 ? (
+                    cumulativeStatsRows.map((row) => (
+                      <View key={`c-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surfaceSecondary }]}> 
+                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2}>
+                          {row.name}
+                        </Text>
+                        <Text style={styles.statsListQty}>{row.quantity}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={[styles.statsRowText, { color: theme.textTertiary }, styles.statsRowPlaceholder]}>—</Text>
+                  )}
+                </ScrollView>
               </View>
             </View>
           </Animated.View>
         </Animated.View>
       )}
 
-      <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }]}>
-        <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
-        <TextInput
-          style={[styles.searchInput, { color: theme.textPrimary }]}
-          placeholder="搜索订单号或店铺名称..."
-          placeholderTextColor={theme.textTertiary}
-          value={searchText}
-          onChangeText={setSearchText}
-          textAlignVertical="center"
-        />
+      <View style={styles.searchFilterRow}>
+        <View style={[styles.searchContainer, styles.searchContainerCompact, { backgroundColor: theme.surfaceSecondary }] }>
+          <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
+          <TextInput
+            style={[styles.searchInput, { color: theme.textPrimary }]}
+            placeholder="搜索订单号或店铺名称..."
+            placeholderTextColor={theme.textTertiary}
+            value={searchText}
+            onChangeText={setSearchText}
+            textAlignVertical="center"
+          />
+        </View>
+        <TouchableOpacity
+          style={[styles.filterEntryButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
+          activeOpacity={0.85}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Text style={[styles.filterEntryText, { color: theme.textPrimary }]}>{activeFilterCount > 0 ? `筛选(${activeFilterCount})` : '筛选'}</Text>
+        </TouchableOpacity>
       </View>
+
+      {((isAdmin && (selectedOrderCityId || selectedOrderStoreId)) || statsRange !== 'all') && (
+        <View style={styles.activeFiltersWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
+            {isAdmin && selectedOrderCityId && (
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                onPress={() => setSelectedOrderCityId(null)}
+              >
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>城市: {orderFilterCities.find((c) => c.id === selectedOrderCityId)?.name || '已选'} ×</Text>
+              </TouchableOpacity>
+            )}
+            {isAdmin && selectedOrderStoreId && (
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                onPress={() => setSelectedOrderStoreId(null)}
+              >
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>店铺: {activeStoresForOrderFilter.find((s) => s.id === selectedOrderStoreId)?.name || '已选'} ×</Text>
+              </TouchableOpacity>
+            )}
+            {statsRange !== 'all' && (
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                onPress={() => {
+                  setStatsRange('all');
+                  setRangeStartDate('');
+                  setRangeEndDate('');
+                }}
+              >
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>时间: {rangeLabel} ×</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.activeFilterChip, styles.activeFilterChipClear, { borderColor: theme.border }]}
+              onPress={() => {
+                if (isAdmin) {
+                  setSelectedOrderCityId(null);
+                  setSelectedOrderStoreId(null);
+                }
+                setStatsRange('all');
+                setRangeStartDate('');
+                setRangeEndDate('');
+              }}
+            >
+              <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>清空筛选</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
 
       <FlatList
         data={filteredOrders}
@@ -1080,6 +1040,150 @@ export default function OrdersScreen() {
           </View>
         }
       />
+
+      <Modal visible={filterModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>筛选条件</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Text style={styles.modalClose}>完成</Text>
+              </TouchableOpacity>
+            </View>
+
+            {isAdmin && (
+              <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
+                <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                  <TouchableOpacity
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
+                    onPress={() => setSelectedOrderCityId(null)}
+                  >
+                    <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      全部城市
+                    </Text>
+                  </TouchableOpacity>
+                  {orderFilterCities.map((city) => (
+                    <TouchableOpacity
+                      key={city.id}
+                      style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
+                      onPress={() => setSelectedOrderCityId(city.id)}
+                    >
+                      <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                        {city.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                  <TouchableOpacity
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === null && styles.chipActive]}
+                    onPress={() => setSelectedOrderStoreId(null)}
+                  >
+                    <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === null && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      全部店铺
+                    </Text>
+                  </TouchableOpacity>
+                  {activeStoresForOrderFilter.map((store) => (
+                    <TouchableOpacity
+                      key={store.id}
+                      style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderStoreId === store.id && styles.chipActive]}
+                      onPress={() => setSelectedOrderStoreId(store.id)}
+                    >
+                      <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderStoreId === store.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                        {store.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            <View style={[styles.monthSwitchRow, { backgroundColor: theme.surface }]}> 
+              {[
+                { key: 'day', label: '当日' },
+                { key: 'week', label: '本周' },
+                { key: 'month', label: '本月' },
+                { key: 'year', label: '年度' },
+                { key: 'all', label: '累计' },
+                { key: 'range', label: '自定义时间段' },
+              ].map((item) => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.switchChip, { backgroundColor: theme.surfaceSecondary }, statsRange === item.key && styles.switchChipActive]}
+                  onPress={() => setStatsRange(item.key as StatsRange)}
+                >
+                  <Text style={[styles.switchChipText, { color: theme.textSecondary }, statsRange === item.key && styles.switchChipTextActive]}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {statsRange === 'range' && (
+              <View style={[styles.customDateRow, { backgroundColor: theme.surface }] }>
+                <Text style={[styles.customDateLabel, { color: theme.textSecondary }]}>起止</Text>
+                <TextInput
+                  value={rangeStartDate}
+                  onChangeText={setRangeStartDate}
+                  placeholder="开始 YYYY-MM-DD"
+                  placeholderTextColor={theme.textTertiary}
+                  style={[
+                    styles.customDateInput,
+                    {
+                      backgroundColor: theme.surfaceSecondary,
+                      color: theme.textPrimary,
+                      lineHeight: 18,
+                      paddingVertical: 0,
+                      includeFontPadding: false,
+                    },
+                  ]}
+                  textAlignVertical="center"
+                />
+                <Text style={[styles.customDateSeparator, { color: theme.textSecondary }]}>至</Text>
+                <TextInput
+                  value={rangeEndDate}
+                  onChangeText={setRangeEndDate}
+                  placeholder="结束 YYYY-MM-DD"
+                  placeholderTextColor={theme.textTertiary}
+                  style={[
+                    styles.customDateInput,
+                    {
+                      backgroundColor: theme.surfaceSecondary,
+                      color: theme.textPrimary,
+                      lineHeight: 18,
+                      paddingVertical: 0,
+                      includeFontPadding: false,
+                    },
+                  ]}
+                  textAlignVertical="center"
+                />
+              </View>
+            )}
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={[styles.clearButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  if (isAdmin) {
+                    setSelectedOrderCityId(null);
+                    setSelectedOrderStoreId(null);
+                  }
+                  setStatsRange('all');
+                  setRangeStartDate('');
+                  setRangeEndDate('');
+                }}
+              >
+                <Text style={[styles.clearButtonText, { color: theme.textSecondary }]}>重置筛选</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmButtonWrap} onPress={() => setFilterModalVisible(false)} activeOpacity={0.85}>
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>完成</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -1418,16 +1522,7 @@ const styles = StyleSheet.create({
   outboundButtonWrap: { marginRight: 8 },
   addButton: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: Radius.xl },
   addButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  filterRowSpacer: { height: 108 },
-  filterRowOverlay: {
-    position: 'absolute',
-    top: 62,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    elevation: 2,
-  },
-  filterPanel: { paddingTop: 6, paddingBottom: 8 },
+  filterPanelContainer: { paddingTop: 6, paddingBottom: 8 },
   filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 12, marginBottom: 4 },
   filterRow: { minHeight: 42 },
   filterRowContent: { paddingVertical: 8, paddingHorizontal: 10, alignItems: 'center' },
@@ -1443,7 +1538,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: Colors.pink },
   chipText: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
   chipTextActive: { color: '#fff', fontWeight: '600', width: '100%', textAlign: 'center', paddingHorizontal: 4 },
-  monthSwitchRow: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 8 },
+  monthSwitchRow: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 8, flexWrap: 'wrap' },
   switchChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -1489,7 +1584,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     marginHorizontal: 10,
     marginBottom: 8,
-    padding: 12,
+    padding: 10,
     minHeight: 40,
     ...Shadow.card,
   },
@@ -1502,18 +1597,77 @@ const styles = StyleSheet.create({
   statsSubTitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
   statsRowText: { fontSize: 12, color: Colors.textPrimary, marginTop: 2, lineHeight: 17, flexShrink: 1 },
   statsRowPlaceholder: { color: Colors.textTertiary },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' },
   statsColumn: { flex: 1, minWidth: 0 },
+  statsColumnScroll: {
+    maxHeight: 160,
+  },
+  statsScrollContent: { paddingTop: 6, paddingBottom: 2, paddingRight: 8 },
+  statsList: { paddingTop: 6, paddingBottom: 4 },
+  statsListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginBottom: 6,
+    width: '100%',
+  },
+  statsListName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
+    marginRight: 8,
+  },
+  statsListQty: {
+    minWidth: 28,
+    textAlign: 'right',
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.pink,
+  },
+  statsItemCard: {
+    width: 102,
+    minHeight: 52,
+    borderRadius: Radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginRight: 8,
+    justifyContent: 'center',
+  },
+  statsItemName: { fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  statsItemQty: { fontSize: 16, fontWeight: '700', color: Colors.pink },
+  searchFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 10,
+    marginBottom: 8,
+    gap: 8,
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.surfaceSecondary,
-    marginHorizontal: 10,
     marginBottom: 10,
     borderRadius: Radius.pill,
     paddingHorizontal: 12,
     height: 40,
   },
+  searchContainerCompact: {
+    flex: 1,
+    marginHorizontal: 0,
+    marginBottom: 0,
+  },
+  filterEntryButton: {
+    height: 40,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterEntryText: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   searchIcon: { marginRight: 8 },
   searchInput: {
     flex: 1,
@@ -1523,6 +1677,30 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     includeFontPadding: false,
     textAlignVertical: 'center',
+  },
+  activeFiltersWrap: {
+    marginHorizontal: 10,
+    marginBottom: 10,
+  },
+  activeFiltersContent: {
+    paddingRight: 8,
+    alignItems: 'center',
+  },
+  activeFilterChip: {
+    height: 30,
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  activeFilterChipClear: {
+    borderWidth: 1,
+    backgroundColor: Colors.surface,
+  },
+  activeFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
   list: { padding: 10 },
   orderCard: {
@@ -1708,6 +1886,7 @@ const styles = StyleSheet.create({
   selectorScroll: { flexDirection: 'row' },
   cartLine: { fontSize: 13, color: Colors.textPrimary, marginBottom: 2 },
   modalButtons: { flexDirection: 'row' },
+  filterModalActions: { flexDirection: 'row', marginTop: 10 },
   clearButton: {
     height: 48,
     justifyContent: 'center',

@@ -831,7 +831,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { padding: 15, backgroundColor: Colors.surface },
   headerTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary },
-  tabBar: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingBottom: 10 },
+  tabBar: { flexDirection: 'row', backgroundColor: Colors.surface, paddingHorizontal: 10, paddingTop: 15, paddingBottom: 10 },
   tab: {
     flex: 1,
     borderRadius: Radius.sm,
@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  filterContainer: { paddingVertical: 10, borderBottomWidth: 1 },
+  filterContainer: { paddingTop: 10, paddingBottom: 16, borderBottomWidth: 1 },
   filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 15, marginBottom: 6 },
   filterScroll: { paddingHorizontal: 15, gap: 10 },
   filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: Radius.pill, borderWidth: 1 },
