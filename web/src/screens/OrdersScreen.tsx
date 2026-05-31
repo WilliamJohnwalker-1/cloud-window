@@ -21,6 +21,8 @@ export const OrdersScreen: React.FC = () => {
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedFilterCityId, setSelectedFilterCityId] = useState<string | null>(null);
+  const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [detailOrderData, setDetailOrderData] = useState<(typeof orders)[number] | null>(null);
@@ -50,6 +52,28 @@ export const OrdersScreen: React.FC = () => {
     if (filter === 'all') return orders;
     return orders.filter((order) => order.status === filter);
   }, [filter, orders]);
+
+  const orderFilterCities = useMemo(
+    () =>
+      orders.reduce<Array<{ id: string; name: string }>>((acc, order) => {
+        if (!order.city_id || acc.some((city) => city.id === order.city_id)) return acc;
+        acc.push({ id: order.city_id, name: order.city_name || '未知城市' });
+        return acc;
+      }, []),
+    [orders],
+  );
+
+  const filteredStoresForOrderFilter = useMemo(
+    () => (selectedFilterCityId ? stores.filter((store) => store.city_id === selectedFilterCityId) : stores),
+    [selectedFilterCityId, stores],
+  );
+
+  useEffect(() => {
+    if (!selectedFilterStoreId) return;
+    if (!filteredStoresForOrderFilter.some((store) => store.id === selectedFilterStoreId)) {
+      setSelectedFilterStoreId(null);
+    }
+  }, [filteredStoresForOrderFilter, selectedFilterStoreId]);
 
   const matchesStatsRange = useCallback((createdAt: string): boolean => {
     const date = new Date(createdAt);
@@ -90,8 +114,15 @@ export const OrdersScreen: React.FC = () => {
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const filteredOrders = useMemo(() => {
-    return baseOrders.filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange]);
+    let result = baseOrders;
+    if (selectedFilterCityId) {
+      result = result.filter((order) => order.city_id === selectedFilterCityId);
+    }
+    if (selectedFilterStoreId) {
+      result = result.filter((order) => order.store_id === selectedFilterStoreId);
+    }
+    return result.filter((order) => matchesStatsRange(order.created_at));
+  }, [baseOrders, matchesStatsRange, selectedFilterCityId, selectedFilterStoreId]);
 
   const totalRetail = useMemo(() => {
     return filteredOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
@@ -535,6 +566,52 @@ export const OrdersScreen: React.FC = () => {
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+        <div className="space-y-2">
+          <p className="text-sm text-white/60">城市筛选</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedFilterCityId(null)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterCityId === null ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            >
+              全部城市
+            </button>
+            {orderFilterCities.map((city) => (
+              <button
+                key={city.id}
+                type="button"
+                onClick={() => setSelectedFilterCityId(city.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterCityId === city.id ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+              >
+                {city.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm text-white/60">店铺筛选</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedFilterStoreId(null)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterStoreId === null ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            >
+              全部店铺
+            </button>
+            {filteredStoresForOrderFilter.map((store) => (
+              <button
+                key={store.id}
+                type="button"
+                onClick={() => setSelectedFilterStoreId(store.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterStoreId === store.id ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+              >
+                {store.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {[
             { key: 'day', label: '当日' },

@@ -8,8 +8,24 @@ const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 
 export const ReportsScreen: React.FC = () => {
   const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, user } = useAppStore();
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
+
+  const reportCities = useMemo(
+    () =>
+      stores.reduce<Array<{ id: string; name: string }>>((acc, store) => {
+        if (!store.city_id || acc.some((city) => city.id === store.city_id)) return acc;
+        acc.push({ id: store.city_id, name: store.city_name || '未知城市' });
+        return acc;
+      }, []),
+    [stores],
+  );
+
+  const filteredStores = useMemo(
+    () => (selectedCityId ? stores.filter((store) => store.city_id === selectedCityId) : stores),
+    [selectedCityId, stores],
+  );
 
   useEffect(() => {
     void fetchStores();
@@ -20,6 +36,13 @@ export const ReportsScreen: React.FC = () => {
     void fetchStoreInventory(selectedStoreId);
   }, [selectedStoreId, fetchStoreInventory]);
 
+  useEffect(() => {
+    if (!selectedStoreId) return;
+    if (!filteredStores.some((store) => store.id === selectedStoreId)) {
+      setSelectedStoreId(null);
+    }
+  }, [filteredStores, selectedStoreId]);
+
   const medalStyles = [
     'from-amber-400/30 to-amber-600/20 border-amber-300/40 text-amber-200',
     'from-slate-300/30 to-slate-500/20 border-slate-300/30 text-slate-100',
@@ -27,7 +50,8 @@ export const ReportsScreen: React.FC = () => {
   ];
 
   const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, productVelocityRanking, profitData } = useMemo(() => {
-    const scopedOrders = selectedStoreId ? orders.filter((order) => order.store_id === selectedStoreId) : orders;
+    const cityScopedOrders = selectedCityId ? orders.filter((order) => order.city_id === selectedCityId) : orders;
+    const scopedOrders = selectedStoreId ? cityScopedOrders.filter((order) => order.store_id === selectedStoreId) : cityScopedOrders;
     const totalRetail = scopedOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = scopedOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
     const pendingCount = scopedOrders.filter((order) => order.status === 'pending').length;
@@ -186,7 +210,7 @@ export const ReportsScreen: React.FC = () => {
         profitByProduct,
       },
     };
-  }, [orders, products, selectedStore, selectedStoreId, storeInventory]);
+  }, [orders, products, selectedCityId, selectedStore, selectedStoreId, storeInventory]);
 
   const inventorySummary = useMemo(() => {
     if (!selectedStoreId) return null;
@@ -271,7 +295,27 @@ export const ReportsScreen: React.FC = () => {
     <div className="space-y-8">
       {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-          <p className="text-sm text-white/60 mb-3">店铺筛选</p>
+          <p className="text-sm text-white/60 mb-2">城市筛选</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setSelectedCityId(null)}
+              className={`px-3 py-1.5 rounded-xl border text-sm ${!selectedCityId ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+            >
+              全部城市
+            </button>
+            {reportCities.map((city) => (
+              <button
+                key={city.id}
+                type="button"
+                onClick={() => setSelectedCityId(city.id)}
+                className={`px-3 py-1.5 rounded-xl border text-sm ${selectedCityId === city.id ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+              >
+                {city.name}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-white/60 mb-2">店铺筛选</p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -280,7 +324,7 @@ export const ReportsScreen: React.FC = () => {
             >
               全部店铺
             </button>
-            {stores.map((store) => (
+            {filteredStores.map((store) => (
               <button
                 key={store.id}
                 type="button"
