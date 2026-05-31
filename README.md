@@ -208,6 +208,10 @@ npm run release:android:sync -- --build-id <EAS_BUILD_ID>
 该命令会自动：下载 APK、上传到 `cloud-window-apk-prod`、并回写 Worker 的
 `MOBILE_LATEST_VERSION`、`MOBILE_ANDROID_APK_KEY`、`MOBILE_ANDROID_APK_URL`。
 
+脚本回写策略已升级为 `wrangler secret bulk`（批量写入三项变量），并在回写后执行两步校验：
+- 校验 Worker secret key 是否都存在；
+- 校验 `/mobile/latest.json` 是否已返回最新版本、APK key、APK URL。
+
 > 默认写入 **默认 Worker**（不附加 `--env`），避免误写到 `worker-name-production`。
 > 可通过 `--worker-name <你的Worker名>` 指定回写目标（默认 `cloud-window`）。
 
@@ -324,7 +328,7 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 验证建议
 
-- `npx tsc --noEmit`
+- `npm run typecheck`（移动端 + Web 分离校验，避免把 `dist` 构建产物纳入 root tsc）
 - `npx expo start`
 - 手工回归主链路：
   1. 分销商下单
