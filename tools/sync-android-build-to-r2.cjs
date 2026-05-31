@@ -31,6 +31,7 @@ loadDotEnv();
 
 const parseArgs = () => {
   const args = argv.slice(2);
+  const has = (name) => args.includes(name);
   const pick = (name, fallback = '') => {
     const byEq = args.find((item) => item.startsWith(`${name}=`));
     if (byEq) return byEq.slice(name.length + 1).trim();
@@ -40,6 +41,7 @@ const parseArgs = () => {
   };
 
   return {
+    help: has('--help') || has('-h'),
     buildId: pick('--build-id', env.EAS_BUILD_ID || ''),
     appVersion: pick('--version', env.MOBILE_VERSION || ''),
     bucket: pick('--bucket', env.R2_BUCKET_NAME || 'cloud-window-apk-prod'),
@@ -48,6 +50,20 @@ const parseArgs = () => {
     workerName: pick('--worker-name', env.WORKER_NAME || 'cloud-window'),
     apiBaseUrl: pick('--api-base-url', env.MOBILE_APK_BASE_URL || 'https://yunchuang888888.com'),
   };
+};
+
+const printHelp = () => {
+  console.log('Usage: node tools/sync-android-build-to-r2.cjs [options]');
+  console.log('');
+  console.log('Options:');
+  console.log('  --build-id <id>          EAS Android build id (if omitted, auto-detect by app version)');
+  console.log('  --version <semver>       Mobile app version (default: expo.version from app.json)');
+  console.log('  --bucket <name>          R2 bucket name (default: cloud-window-apk-prod)');
+  console.log('  --worker-name <name>     Cloudflare Worker name (default: cloud-window)');
+  console.log('  --worker-env <env>       Wrangler env, e.g. production');
+  console.log('  --secret-mode <mode>     classic | versioned (default: classic)');
+  console.log('  --api-base-url <url>     Base URL for /mobile/latest.json verification');
+  console.log('  -h, --help               Show this help');
 };
 
 const buildWranglerEnvArgs = (workerEnv) => {
@@ -97,6 +113,23 @@ const run = (command, commandArgs, options = {}) => {
   }
 
   return result.stdout || '';
+};
+
+const runWithRetry = (command, commandArgs, options = {}, maxRetries = 2, delayMs = 3000) => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+    try {
+      return run(command, commandArgs, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt <= maxRetries) {
+        console.warn(`⚠️ command failed (attempt ${attempt}/${maxRetries + 1}), retrying in ${delayMs}ms: ${command} ${commandArgs.join(' ')}`);
+        sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError;
 };
 
 const extractJson = (raw) => {
@@ -153,6 +186,67 @@ const getLatestWorkerVersionId = (workerName, envArgs) => {
   return String(latest.id);
 };
 
+const writeWorkerSecretsBulk = ({ workerName, envArgs, secretMode, secretsFile }) => {
+  if (String(secretMode).toLowerCase() === 'versioned') {
+    runWithRetry('npx', ['wrangler', 'versions', 'secret', 'bulk', secretsFile, '--name', workerName, ...envArgs]);
+    return;
+  }
+
+  runWithRetry('npx', ['wrangler', 'secret', 'bulk', secretsFile, '--name', workerName, ...envArgs]);
+};
+
+const verifyWorkerSecretsExist = ({ workerName, envArgs, requiredNames }) => {
+  const output = run('npx', ['wrangler', 'secret', 'list', '--name', workerName, '--json', ...envArgs], { capture: true });
+  const list = extractJson(output);
+
+  if (!Array.isArray(list)) {
+    throw new Error('Unexpected wrangler secret list format while verifying secrets');
+  }
+
+  const existing = new Set(
+    list
+      .map((item) => String(item?.name || '').trim())
+      .filter(Boolean),
+  );
+
+  const missing = requiredNames.filter((name) => !existing.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Worker secret verification failed, missing keys: ${missing.join(', ')}`);
+  }
+};
+
+const verifyMobileManifest = ({ apiBaseUrl, expectedVersion, expectedApkKey, expectedApkUrl }) => {
+  const normalizedApiBaseUrl = String(apiBaseUrl || '').trim().replace(/\/$/, '');
+  const manifestUrl = `${normalizedApiBaseUrl}/mobile/latest.json`;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const raw = run('curl', ['-L', manifestUrl], { capture: true });
+      const payload = extractJson(raw);
+      const latestVersion = String(payload?.latestVersion || '').trim();
+      const androidApkKey = String(payload?.androidApkKey || '').trim();
+      const androidApkUrl = String(payload?.androidApkUrl || '').trim();
+
+      if (latestVersion !== expectedVersion) {
+        throw new Error(`latestVersion mismatch, expected=${expectedVersion}, actual=${latestVersion}`);
+      }
+      if (androidApkKey !== expectedApkKey) {
+        throw new Error(`androidApkKey mismatch, expected=${expectedApkKey}, actual=${androidApkKey}`);
+      }
+      if (androidApkUrl !== expectedApkUrl) {
+        throw new Error(`androidApkUrl mismatch, expected=${expectedApkUrl}, actual=${androidApkUrl}`);
+      }
+
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        throw new Error(`Manifest verification failed at ${manifestUrl}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      sleep(3000);
+    }
+  }
+};
+
 const waitForFinished = (buildId) => {
   while (true) {
     const build = getBuildById(buildId);
@@ -170,6 +264,10 @@ const waitForFinished = (buildId) => {
 
 const main = () => {
   const opts = parseArgs();
+  if (opts.help) {
+    printHelp();
+    return;
+  }
   const appVersion = opts.appVersion || getExpoVersionFromAppJson();
   const envArgs = buildWranglerEnvArgs(opts.workerEnv);
 
@@ -203,21 +301,62 @@ const main = () => {
   console.log(`☁️ Uploading APK to R2: ${opts.bucket}/${apkKey}`);
   run('npx', ['wrangler', 'r2', 'object', 'put', `${opts.bucket}/${apkKey}`, '--file', artifactFile, '--remote']);
 
-  if (String(opts.secretMode).toLowerCase() === 'versioned') {
-    console.log('🔐 Updating Worker secrets (versioned)');
-    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
-    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
-    run('npx', ['wrangler', 'versions', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
+  const requiredSecretNames = [
+    'MOBILE_LATEST_VERSION',
+    'MOBILE_ANDROID_APK_KEY',
+    'MOBILE_ANDROID_APK_URL',
+  ];
+  const secretsFile = join(artifactDir, `worker-secrets-${appVersion}.json`);
+  writeFileSync(
+    secretsFile,
+    JSON.stringify(
+      {
+        MOBILE_LATEST_VERSION: appVersion,
+        MOBILE_ANDROID_APK_KEY: apkKey,
+        MOBILE_ANDROID_APK_URL: apkPublicUrl,
+      },
+      null,
+      2,
+    ),
+  );
 
+  if (String(opts.secretMode).toLowerCase() === 'versioned') {
+    console.log('🔐 Updating Worker secrets (versioned bulk)');
+    writeWorkerSecretsBulk({
+      workerName: opts.workerName,
+      envArgs,
+      secretMode: opts.secretMode,
+      secretsFile,
+    });
+
+    sleep(2000);
     const latestVersionId = getLatestWorkerVersionId(opts.workerName, envArgs);
     console.log(`🚚 Deploying worker version ${latestVersionId}`);
     run('npx', ['wrangler', 'versions', 'deploy', '--name', opts.workerName, '--version-id', latestVersionId, '--yes', ...envArgs]);
   } else {
-    console.log('🔐 Updating Worker secrets (classic, non-destructive)');
-    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_LATEST_VERSION', '--name', opts.workerName, ...envArgs], { input: `${appVersion}\n` });
-    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_ANDROID_APK_KEY', '--name', opts.workerName, ...envArgs], { input: `${apkKey}\n` });
-    run('npx', ['wrangler', 'secret', 'put', 'MOBILE_ANDROID_APK_URL', '--name', opts.workerName, ...envArgs], { input: `${apkPublicUrl}\n` });
+    console.log('🔐 Updating Worker secrets (classic bulk, non-destructive)');
+    writeWorkerSecretsBulk({
+      workerName: opts.workerName,
+      envArgs,
+      secretMode: opts.secretMode,
+      secretsFile,
+    });
   }
+
+  console.log('🔍 Verifying Worker secret keys exist');
+  verifyWorkerSecretsExist({
+    workerName: opts.workerName,
+    envArgs,
+    requiredNames: requiredSecretNames,
+  });
+
+  console.log('🔍 Verifying /mobile/latest.json reflects new values');
+  verifyMobileManifest({
+    apiBaseUrl: opts.apiBaseUrl,
+    expectedVersion: appVersion,
+    expectedApkKey: apkKey,
+    expectedApkUrl: apkPublicUrl,
+  });
 
   writeFileSync(
     join(artifactDir, `sync-result-${appVersion}.json`),
@@ -230,6 +369,9 @@ const main = () => {
       workerName: opts.workerName,
       workerEnv: opts.workerEnv || 'default',
       secretMode: String(opts.secretMode).toLowerCase() === 'versioned' ? 'versioned' : 'classic',
+      secretsWriteMethod: 'bulk',
+      secretsVerified: true,
+      manifestVerified: true,
       artifactUrl,
       syncedAt: new Date().toISOString(),
     }, null, 2),
