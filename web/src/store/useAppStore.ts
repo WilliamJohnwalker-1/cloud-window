@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase, supabaseConfigError } from '../lib/supabase';
+import { applyOrdersDateFilters } from '../utils/fetchOrdersDateParams';
 import { generateEAN13 } from '../utils/barcode';
 import { calculateRetailOrderTotals, getRetailUnitPrice } from '../utils/orderPricing';
 import { resolvePrice } from '../utils/priceResolver';
@@ -272,7 +273,7 @@ interface AppState {
   fetchCities: () => Promise<void>;
   moveCityOrder: (cityId: string, direction: 'up' | 'down') => Promise<{ error: Error | null }>;
   fetchProducts: () => Promise<void>;
-  fetchOrders: () => Promise<void>;
+  fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchStores: () => Promise<void>;
   fetchStoreInventory: (storeId: string) => Promise<void>;
   fetchStoreProductPrices: (storeId: string) => Promise<void>;
@@ -663,15 +664,19 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      fetchOrders: async () => {
+      fetchOrders: async (startDate?: string, endDate?: string) => {
         const { user } = get();
         if (!user) return;
 
-        const { data, error } = await supabase
+        let query = supabase
           .from('orders')
-          .select(orderSelect)
+          .select(orderSelect);
+
+        query = applyOrdersDateFilters(query, startDate, endDate);
+
+        const { data, error } = await query
           .order('created_at', { ascending: false })
-          .limit(300);
+          .limit(200);
         if (error || !data) return;
 
         let rows = data as OrderRow[];
@@ -688,11 +693,15 @@ export const useAppStore = create<AppState>()(
               )),
             );
 
-            const { data: refreshedRows, error: refreshedError } = await supabase
+            let refreshQuery = supabase
               .from('orders')
-              .select(orderSelect)
+              .select(orderSelect);
+
+            refreshQuery = applyOrdersDateFilters(refreshQuery, startDate, endDate);
+
+            const { data: refreshedRows, error: refreshedError } = await refreshQuery
               .order('created_at', { ascending: false })
-              .limit(300);
+              .limit(200);
 
             if (!refreshedError && refreshedRows) {
               rows = refreshedRows as OrderRow[];

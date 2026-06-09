@@ -3,7 +3,9 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { generateEAN13 } from '../utils/barcode';
+import { applyOrdersDateFilters } from '../utils/fetchOrdersDateParams';
 import { resolvePrice } from '../utils/priceResolver';
+import { buildStoreRetailOrderRpcItems } from '../utils/storeRetailOrder';
 import type {
   Profile,
   City,
@@ -22,6 +24,12 @@ interface CartCreateItem {
   productId: string;
   quantity: number;
   isSample?: boolean;
+}
+
+interface StoreRetailCreateItem {
+  product_id: string;
+  quantity: number;
+  price: number;
 }
 
 interface ProfileRow {
@@ -326,7 +334,7 @@ interface AppState {
   moveCityOrder: (cityId: string, direction: 'up' | 'down') => Promise<{ error: Error | null }>;
   fetchProducts: () => Promise<void>;
   fetchInventory: () => Promise<void>;
-  fetchOrders: () => Promise<void>;
+  fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchDistributors: () => Promise<void>;
   fetchStores: () => Promise<void>;
   fetchStoreInventory: (storeId: string) => Promise<void>;
@@ -379,6 +387,10 @@ interface AppState {
 
   backfillBarcodes: () => Promise<{ count: number; error: Error | null }>;
 
+  createStoreRetailOrder: (
+    storeId: string,
+    items: StoreRetailCreateItem[],
+  ) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
   modifyDistributionOrder: (orderId: string, items: { order_item_id: string; new_quantity: number }[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
@@ -731,7 +743,7 @@ export const useAppStore = create<AppState>()(
         if (!error && data) set({ inventory: data });
       },
 
-      fetchOrders: async () => {
+      fetchOrders: async (startDate?: string, endDate?: string) => {
         const { user } = get();
         if (!user) return;
 
@@ -746,9 +758,13 @@ export const useAppStore = create<AppState>()(
             )
           `;
 
-        const { data, error } = await supabase
+        let query = supabase
           .from('orders')
-          .select(orderSelect)
+          .select(orderSelect);
+
+        query = applyOrdersDateFilters(query, startDate, endDate);
+
+        const { data, error } = await query
           .order('created_at', { ascending: false })
           .limit(200);
 
@@ -768,9 +784,13 @@ export const useAppStore = create<AppState>()(
               )),
             );
 
-            const { data: refreshedRows, error: refreshedError } = await supabase
+            let refreshQuery = supabase
               .from('orders')
-              .select(orderSelect)
+              .select(orderSelect);
+
+            refreshQuery = applyOrdersDateFilters(refreshQuery, startDate, endDate);
+
+            const { data: refreshedRows, error: refreshedError } = await refreshQuery
               .order('created_at', { ascending: false })
               .limit(200);
 
@@ -1446,6 +1466,43 @@ export const useAppStore = create<AppState>()(
           return { count, error: null };
         } catch (error) {
           return { count: 0, error: error as Error };
+        }
+      },
+
+      createStoreRetailOrder: async (storeId, items) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前角色无店铺零售建单权限');
+          }
+
+          if (!storeId) {
+            throw new Error('店铺ID不能为空');
+          }
+
+          if (!Array.isArray(items) || items.length === 0) {
+            throw new Error('购物车为空');
+          }
+
+          const invalidItem = items.find((item) => !item.product_id || item.quantity <= 0);
+          if (invalidItem) {
+            throw new Error('订单商品参数无效');
+          }
+
+          const payload = buildStoreRetailOrderRpcItems(items);
+
+          const { error } = await supabase.rpc('create_store_retail_order_atomic', {
+            p_items: payload,
+            p_store_id: storeId,
+          });
+          if (error) throw error;
+
+          await get().fetchOrders();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
         }
       },
 
