@@ -40,12 +40,15 @@ export default function OrdersScreen() {
     orders,
     distributors,
     stores,
+    storeInventory,
     storeProductPrices,
     fetchProducts,
     fetchOrders,
     fetchDistributors,
     fetchStores,
+    fetchStoreInventory,
     fetchStoreProductPrices,
+    createStoreRetailOrder,
     createBatchOrders,
     deleteOrder,
     acceptOrder,
@@ -69,11 +72,18 @@ export default function OrdersScreen() {
   const [outboundQuantity, setOutboundQuantity] = useState('');
   const [outboundProduct, setOutboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingOutbound, setSubmittingOutbound] = useState(false);
+  const [retailModalVisible, setRetailModalVisible] = useState(false);
+  const [retailStoreId, setRetailStoreId] = useState<string | null>(null);
+  const [retailCart, setRetailCart] = useState<Map<string, number>>(new Map());
+  const [retailQtyInputMode, setRetailQtyInputMode] = useState<Map<string, string>>(new Map());
+  const [retailQtyEditingKey, setRetailQtyEditingKey] = useState<string | null>(null);
+  const [submittingRetailOrder, setSubmittingRetailOrder] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
   const [statsExpanded, setStatsExpanded] = useState(false);
+  const [statsMounted, setStatsMounted] = useState(false);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [orderModalDistributorId, setOrderModalDistributorId] = useState<string | null>(null);
   const [orderModalStoreId, setOrderModalStoreId] = useState<string | null>(null);
@@ -110,12 +120,13 @@ export default function OrdersScreen() {
       fetchStoreProductPrices(orderModalStoreId);
     }
   }, [orderModalStoreId, fetchStoreProductPrices]);
-
   useEffect(() => {
-    animatedHeight.setValue(statsExpanded ? 236 : 44);
-    animatedChevron.setValue(statsExpanded ? 180 : 0);
-    animatedOpacity.setValue(statsExpanded ? 1 : 0);
-  }, [animatedChevron, animatedHeight, animatedOpacity, statsExpanded]);
+    if (retailStoreId) {
+      fetchStoreInventory(retailStoreId);
+    }
+  }, [retailStoreId, fetchStoreInventory]);
+
+
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -126,6 +137,9 @@ export default function OrdersScreen() {
   const toggleStatsExpanded = () => {
     const nextValue = !statsExpanded;
     setStatsExpanded(nextValue);
+    if (nextValue) {
+      setStatsMounted(true);
+    }
 
     Animated.parallel([
       Animated.timing(animatedHeight, {
@@ -143,7 +157,11 @@ export default function OrdersScreen() {
         duration: 300,
         useNativeDriver: true,
       }),
-    ]).start();
+    ]).start(() => {
+      if (!nextValue) {
+        setStatsMounted(false);
+      }
+    });
   };
 
   const orderCityId = useMemo(() => {
@@ -863,6 +881,21 @@ export default function OrdersScreen() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>销售订单</Text>
         <View style={styles.headerActions}>
+          {isAdmin && (
+            <TouchableOpacity
+              onPress={() => {
+                setRetailStoreId(null);
+                setRetailCart(new Map());
+                setRetailModalVisible(true);
+              }}
+              activeOpacity={0.85}
+              style={styles.outboundButtonWrap}
+            >
+              <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
+                <Text style={styles.addButtonText}>零售建单</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
           {canCreateOrder && (
             <TouchableOpacity
               onPress={() => {
@@ -912,8 +945,9 @@ export default function OrdersScreen() {
               </Animated.View>
             </View>
           </TouchableOpacity>
-          <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
-            <View style={styles.statsRow}>
+          {statsMounted && (
+            <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
+              <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
                 <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>本月</Text>
                 <ScrollView
@@ -960,6 +994,7 @@ export default function OrdersScreen() {
               </View>
             </View>
           </Animated.View>
+        )}
         </Animated.View>
       )}
 
@@ -1518,6 +1553,207 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
+      <Modal visible={retailModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>零售建单</Text>
+              <TouchableOpacity onPress={() => setRetailModalVisible(false)}>
+                <Text style={styles.modalClose}>取消</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>选择店铺</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                {stores.filter(s => s.status === 'active').map(store => (
+                  <TouchableOpacity
+                    key={store.id}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, retailStoreId === store.id && styles.chipActive]}
+                    onPress={() => {
+                      setRetailStoreId(store.id);
+                      setRetailCart(new Map());
+                    }}
+                  >
+                    <Text style={[styles.chipText, { color: theme.textSecondary }, retailStoreId === store.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      {store.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {retailStoreId ? (
+              <FlatList
+                data={products.filter(p => p.city_id === stores.find(s => s.id === retailStoreId)?.city_id)}
+                keyExtractor={item => item.id}
+                style={styles.list}
+                renderItem={({ item }) => {
+                  const stock = storeInventory.find(inv => inv.product_id === item.id && inv.store_id === retailStoreId)?.quantity || 0;
+                  const qty = retailCart.get(item.id) || 0;
+                  const isZeroStock = stock <= 0;
+                  const editing = retailQtyEditingKey === item.id;
+                  const inputValue = retailQtyInputMode.get(item.id) || '';
+                  
+                  return (
+                    <View style={[styles.productRow, isZeroStock && { opacity: 0.5 }]}>
+                      {item.image_url ? (
+                        <Image source={{ uri: item.image_url }} style={styles.productThumb} />
+                      ) : (
+                        <View style={styles.productThumbPlaceholder}>
+                          <Text style={styles.productThumbPlaceholderText}>{item.name.charAt(0)}</Text>
+                        </View>
+                      )}
+                      <View style={styles.productRowInfo}>
+                        <Text style={[styles.productRowName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
+                        <Text style={[styles.productRowMeta, { color: theme.textSecondary }]}>
+                          库存: {stock} · 零售价: {item.price}元
+                        </Text>
+                      </View>
+                      <View style={styles.productRowActions}>
+                        {qty > 0 ? (
+                          <>
+                            <TouchableOpacity 
+                              style={styles.qtyBtn} 
+                              onPress={() => {
+                                setRetailCart(prev => {
+                                  const next = new Map(prev);
+                                  const newQty = qty - 1;
+                                  if (newQty <= 0) next.delete(item.id);
+                                  else next.set(item.id, newQty);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <Text style={styles.qtyBtnText}>-</Text>
+                            </TouchableOpacity>
+                            {editing ? (
+                              <TextInput
+                                style={styles.qtyInput}
+                                value={inputValue}
+                                onChangeText={text => {
+                                  setRetailQtyInputMode(prev => {
+                                    const next = new Map(prev);
+                                    next.set(item.id, text.replace(/[^0-9]/g, ''));
+                                    return next;
+                                  });
+                                }}
+                                onBlur={() => {
+                                  const val = parseInt(retailQtyInputMode.get(item.id) || '0', 10);
+                                  if (!isNaN(val) && val > 0) {
+                                    if (val > stock) {
+                                      Toast.show({ type: 'error', text1: '库存不足', text2: `当前库存仅 ${stock}` });
+                                    } else {
+                                      setRetailCart(prev => {
+                                        const next = new Map(prev);
+                                        next.set(item.id, val);
+                                        return next;
+                                      });
+                                    }
+                                  } else if (val === 0) {
+                                    setRetailCart(prev => {
+                                      const next = new Map(prev);
+                                      next.delete(item.id);
+                                      return next;
+                                    });
+                                  }
+                                  setRetailQtyEditingKey(null);
+                                }}
+                                keyboardType="number-pad"
+                                autoFocus
+                              />
+                            ) : (
+                              <TouchableOpacity onPress={() => {
+                                setRetailQtyInputMode(prev => {
+                                  const next = new Map(prev);
+                                  next.set(item.id, '');
+                                  return next;
+                                });
+                                setRetailQtyEditingKey(item.id);
+                              }}>
+                                <Text style={styles.qtyValue}>{qty}</Text>
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        ) : <Text style={styles.qtyEmpty}>0</Text>}
+                        <TouchableOpacity 
+                          disabled={isZeroStock || qty >= stock}
+                          onPress={() => {
+                            setRetailCart(prev => {
+                              const next = new Map(prev);
+                              next.set(item.id, qty + 1);
+                              return next;
+                            });
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <LinearGradient 
+                            colors={isZeroStock || qty >= stock ? ['#ccc', '#ccc'] : ['#FF6B9D', '#5B8DEF']} 
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} 
+                            style={styles.qtyBtnAdd}
+                          >
+                            <Text style={styles.qtyBtnAddText}>+1</Text>
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }}
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                <Text style={[styles.emptyText, { color: theme.textTertiary }]}>请先选择店铺</Text>
+              </View>
+            )}
+
+            <View style={[styles.modalButtons, { alignItems: 'center', justifyContent: 'space-between' }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '600' }}>
+                  共 {Array.from(retailCart.values()).reduce((a, b) => a + b, 0)} 件
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  合计: {Array.from(retailCart.entries()).reduce((sum, [id, qty]) => {
+                    const p = products.find(p => p.id === id);
+                    return sum + (p?.price || 0) * qty;
+                  }, 0).toFixed(2)}元
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.confirmButtonWrap, { flex: 1 }, (!retailStoreId || retailCart.size === 0 || submittingRetailOrder) && styles.disabledButton]}
+                onPress={async () => {
+                  if (!retailStoreId || retailCart.size === 0) return;
+                  setSubmittingRetailOrder(true);
+                  const items = Array.from(retailCart.entries()).map(([id, qty]) => {
+                    const p = products.find(p => p.id === id);
+                    return {
+                      product_id: id,
+                      quantity: qty,
+                      price: p?.price || 0,
+                    };
+                  });
+                  const { error } = await createStoreRetailOrder(retailStoreId, items);
+                  setSubmittingRetailOrder(false);
+                  if (error) {
+                    Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
+                  } else {
+                    Toast.show({ type: 'success', text1: '成功', text2: '零售订单已创建' });
+                    setRetailModalVisible(false);
+                    setRetailCart(new Map());
+                    fetchOrders();
+                  }
+                }}
+                disabled={!retailStoreId || retailCart.size === 0 || submittingRetailOrder}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>{submittingRetailOrder ? '处理中...' : '确认建单'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

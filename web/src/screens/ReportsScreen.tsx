@@ -3,14 +3,30 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { AlertTriangle, DollarSign, Download, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 
 export const ReportsScreen: React.FC = () => {
-  const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, user } = useAppStore();
+  const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, fetchOrders, user } = useAppStore();
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
+  const monthOptions = useMemo(() => {
+    const runtimeOptions = buildMonthOptions(orders);
+    if (allModeMonthOptions.length === 0) {
+      return runtimeOptions;
+    }
+
+    const merged = new Set<string>([...allModeMonthOptions, ...runtimeOptions]);
+    const sortedMonths = Array.from(merged)
+      .filter((monthOption) => monthOption !== 'all')
+      .sort((a, b) => (a > b ? -1 : 1));
+
+    return ['all', ...sortedMonths];
+  }, [allModeMonthOptions, orders]);
 
   const reportCities = useMemo(
     () =>
@@ -30,6 +46,26 @@ export const ReportsScreen: React.FC = () => {
   useEffect(() => {
     void fetchStores();
   }, [fetchStores]);
+
+  useEffect(() => {
+    if (selectedMonth === 'all') {
+      void fetchOrders();
+      return;
+    }
+
+    const monthRange = buildMonthDateRange(selectedMonth);
+    if (!monthRange) {
+      void fetchOrders();
+      return;
+    }
+
+    void fetchOrders(monthRange.startDate, monthRange.endDate);
+  }, [fetchOrders, selectedMonth]);
+
+  useEffect(() => {
+    if (selectedMonth !== 'all') return;
+    setAllModeMonthOptions(buildMonthOptions(orders));
+  }, [orders, selectedMonth]);
 
   useEffect(() => {
     if (!selectedStoreId) return;
@@ -233,7 +269,8 @@ export const ReportsScreen: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `product-volume-ranking-${new Date().toISOString().slice(0, 10)}.csv`;
+    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
+    link.download = `product-volume-ranking${monthSuffix}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -245,7 +282,8 @@ export const ReportsScreen: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `product-ranking-${new Date().toISOString().slice(0, 10)}.csv`;
+    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
+    link.download = `product-ranking${monthSuffix}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -277,7 +315,8 @@ export const ReportsScreen: React.FC = () => {
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, '利润报表');
-    XLSX.writeFile(workbook, `profit-report-${Date.now()}.xlsx`);
+    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
+    XLSX.writeFile(workbook, `profit-report${monthSuffix}-${Date.now()}.xlsx`);
   };
 
   const volumeTop3 = productVolumeRanking.slice(0, 3);
@@ -293,6 +332,22 @@ export const ReportsScreen: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        <p className="text-sm text-white/60 mb-2">月份筛选</p>
+        <div className="flex flex-wrap gap-2">
+          {monthOptions.map((monthOption) => (
+            <button
+              key={monthOption}
+              type="button"
+              onClick={() => setSelectedMonth(monthOption)}
+              className={`px-3 py-1.5 rounded-xl border text-sm ${selectedMonth === monthOption ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+            >
+              {monthOption === 'all' ? '全部' : monthOption}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <p className="text-sm text-white/60 mb-2">城市筛选</p>
