@@ -102,6 +102,12 @@ export interface Order {
   city_name?: string;
   order_kind: OrderKind;
   status: OrderStatus;
+  payment_method?: PaymentMethod | null;
+  payment_status?: PaymentStatus | null;
+  payment_transaction_id?: string | null;
+  payment_amount?: number | null;
+  payment_paid_at?: string | null;
+  payment_note?: string | null;
   total_retail_amount: number;
   total_discount_amount: number;
   created_at: string;

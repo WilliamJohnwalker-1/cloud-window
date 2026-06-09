@@ -81,7 +81,7 @@ export default function OrdersScreen() {
   const [modifyOrder, setModifyOrder] = useState<Order | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
-  const animatedHeight = useRef(new Animated.Value(40)).current;
+  const animatedHeight = useRef(new Animated.Value(44)).current;
   const animatedChevron = useRef(new Animated.Value(0)).current;
   const animatedOpacity = useRef(new Animated.Value(0)).current;
 
@@ -90,6 +90,12 @@ export default function OrdersScreen() {
 
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
+  };
+
+  const getPaymentMethodLabel = (method?: Order['payment_method']): string => {
+    if (method === 'wechat') return '微信';
+    if (method === 'alipay') return '支付宝';
+    return '-';
   };
 
   useEffect(() => {
@@ -106,7 +112,7 @@ export default function OrdersScreen() {
   }, [orderModalStoreId, fetchStoreProductPrices]);
 
   useEffect(() => {
-    animatedHeight.setValue(statsExpanded ? 236 : 40);
+    animatedHeight.setValue(statsExpanded ? 236 : 44);
     animatedChevron.setValue(statsExpanded ? 180 : 0);
     animatedOpacity.setValue(statsExpanded ? 1 : 0);
   }, [animatedChevron, animatedHeight, animatedOpacity, statsExpanded]);
@@ -123,7 +129,7 @@ export default function OrdersScreen() {
 
     Animated.parallel([
       Animated.timing(animatedHeight, {
-        toValue: nextValue ? 236 : 40,
+        toValue: nextValue ? 236 : 44,
         duration: 300,
         useNativeDriver: false,
       }),
@@ -918,8 +924,8 @@ export default function OrdersScreen() {
                 >
                   {monthlyStatsRows.length > 0 ? (
                     monthlyStatsRows.map((row) => (
-                      <View key={`m-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surfaceSecondary }]}> 
-                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2}>
+                      <View key={`m-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2} ellipsizeMode="tail">
                           {row.name}
                         </Text>
                         <Text style={styles.statsListQty}>{row.quantity}</Text>
@@ -940,8 +946,8 @@ export default function OrdersScreen() {
                 >
                   {cumulativeStatsRows.length > 0 ? (
                     cumulativeStatsRows.map((row) => (
-                      <View key={`c-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surfaceSecondary }]}> 
-                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2}>
+                      <View key={`c-${row.name}`} style={[styles.statsListItem, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+                        <Text style={[styles.statsListName, { color: theme.textPrimary }]} numberOfLines={2} ellipsizeMode="tail">
                           {row.name}
                         </Text>
                         <Text style={styles.statsListQty}>{row.quantity}</Text>
@@ -1391,11 +1397,20 @@ export default function OrdersScreen() {
                 </View>
                 <View style={styles.detailSection}>
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>下单账号</Text>
-                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
+                  <Text style={[styles.detailValue, { color: theme.textPrimary }]}> 
                     {detailOrder.distributor_email || detailOrder.distributor_id}
                     {detailOrder.distributor_store ? ` · ${detailOrder.distributor_store}` : ''}
                   </Text>
                 </View>
+
+                {(detailOrder.order_kind === 'retail' || detailOrder.payment_method) && (
+                  <View style={styles.detailSection}>
+                    <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>客户支付渠道</Text>
+                    <Text style={[styles.detailValue, { color: theme.textPrimary }]}> 
+                      {getPaymentMethodLabel(detailOrder.payment_method)}
+                    </Text>
+                  </View>
+                )}
 
                 <View style={styles.detailSection}>
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>商品明细</Text>
@@ -1585,7 +1600,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     marginBottom: 8,
     padding: 10,
-    minHeight: 40,
+    minHeight: 44,
+    overflow: 'hidden',
     ...Shadow.card,
   },
   statsHeader: {
@@ -1593,7 +1609,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  statsTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  statsTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   statsSubTitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
   statsRowText: { fontSize: 12, color: Colors.textPrimary, marginTop: 2, lineHeight: 17, flexShrink: 1 },
   statsRowPlaceholder: { color: Colors.textTertiary },
@@ -1608,6 +1624,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: Radius.md,
+    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 8,
     marginBottom: 6,
@@ -1619,6 +1636,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16,
     marginRight: 8,
+    overflow: 'hidden',
   },
   statsListQty: {
     minWidth: 28,

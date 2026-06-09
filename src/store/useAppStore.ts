@@ -65,7 +65,12 @@ interface OrderRow {
   cities?: { name: string } | Array<{ name: string }> | null;
   status?: Order['status'];
   order_kind?: Order['order_kind'] | null;
-  payment_status?: string | null;
+  payment_method?: Order['payment_method'];
+  payment_status?: Order['payment_status'];
+  payment_transaction_id?: string | null;
+  payment_amount?: number | string | null;
+  payment_paid_at?: string | null;
+  payment_note?: string | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   created_at: string;
@@ -470,6 +475,12 @@ const mapOrder = (raw: OrderRow): Order => {
     city_name: cityData?.name,
     status: raw.status || 'pending',
     order_kind: raw.order_kind || 'distribution',
+    payment_method: raw.payment_method ?? null,
+    payment_status: raw.payment_status ?? null,
+    payment_transaction_id: raw.payment_transaction_id ?? null,
+    payment_amount: raw.payment_amount == null ? null : Number(raw.payment_amount),
+    payment_paid_at: raw.payment_paid_at ?? null,
+    payment_note: raw.payment_note ?? null,
     total_retail_amount: Number(raw.total_retail_amount || 0),
     total_discount_amount: Number(raw.total_discount_amount || 0),
     created_at: raw.created_at,
