@@ -123,7 +123,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 23. 执行 `supabase/migrate-v4.3-store-super-admin-and-retail-store.sql`
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
-26. 执行 `supabase/storage-policies.sql`
+26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
+27. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -152,7 +153,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 23. 执行 `supabase/migrate-v4.3-store-super-admin-and-retail-store.sql`
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
-26. 执行 `supabase/storage-policies.sql`
+26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
+27. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -160,7 +162,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.21）
+### 5. 启动 Web 端（v1.2.22）
 
 ```bash
 npm run web:v2
@@ -344,6 +346,18 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.19 (2026-06-09) - 移动端零售建单 + 报表月度筛选 + 统计修复
+
+- 新增移动端“零售建单”入口（admin/super_admin）：按店铺选择商品、按店铺库存可用量下单，零售单自动 accepted
+- 报表页新增“全部 + 月份(YYYY-MM)”筛选，销售/利润/排行口径联动到所选月份
+- 订单统计卡折叠态内容改为条件挂载，彻底消除折叠残影
+
+### Web v1.2.22 (2026-06-09) - 报表月度筛选与导出命名对齐
+
+- 报表页新增“全部 + 月份(YYYY-MM)”筛选，选择月份后全页统计联动刷新
+- 报表导出文件名在选月时附加月份后缀（如 `profit-report-2026-06-*.xlsx`）
+- `fetchOrders(startDate, endDate)` 在 Web 端补齐并统一 200 条上限口径
 
 ### Mobile v2.1.18 (2026-06-09) - 订单统计折叠残影修复与支付渠道信息补齐
 

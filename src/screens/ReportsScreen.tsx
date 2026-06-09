@@ -19,6 +19,7 @@ import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
+import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 
 type ReportType = 'sales' | 'inventory' | 'profit';
 
@@ -46,6 +47,8 @@ export default function ReportsScreen() {
 
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const [floatingProductName, setFloatingProductName] = useState('');
 
   const activeStores = useMemo(() => stores.filter((store) => store.status === 'active'), [stores]);
@@ -62,6 +65,24 @@ export default function ReportsScreen() {
     if (!selectedCityId) return activeStores;
     return activeStores.filter((store) => store.city_id === selectedCityId);
   }, [activeStores, selectedCityId]);
+  const monthOptions = useMemo(() => {
+    const runtimeOptions = buildMonthOptions(orders);
+    if (allModeMonthOptions.length === 0) {
+      return runtimeOptions;
+    }
+
+    const merged = new Set<string>([...allModeMonthOptions, ...runtimeOptions]);
+    const sortedMonths = Array.from(merged)
+      .filter((monthOption) => monthOption !== 'all')
+      .sort((a, b) => (a > b ? -1 : 1));
+
+    return ['all', ...sortedMonths];
+  }, [allModeMonthOptions, orders]);
+
+  useEffect(() => {
+    if (selectedMonth !== 'all') return;
+    setAllModeMonthOptions(buildMonthOptions(orders));
+  }, [orders, selectedMonth]);
 
   const showFullProductName = (name: string) => {
     const normalized = String(name || '').trim();
@@ -80,9 +101,23 @@ export default function ReportsScreen() {
 
   useEffect(() => {
     fetchProducts();
-    fetchOrders();
     fetchStores();
-  }, [fetchOrders, fetchProducts, fetchStores]);
+  }, [fetchProducts, fetchStores]);
+
+  useEffect(() => {
+    if (selectedMonth === 'all') {
+      fetchOrders();
+      return;
+    }
+
+    const monthRange = buildMonthDateRange(selectedMonth);
+    if (!monthRange) {
+      fetchOrders();
+      return;
+    }
+
+    fetchOrders(monthRange.startDate, monthRange.endDate);
+  }, [fetchOrders, selectedMonth]);
 
   useEffect(() => {
     if (selectedStoreId) {
@@ -354,7 +389,8 @@ export default function ReportsScreen() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '利润报表');
       const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = `${FileSystem.cacheDirectory}profit-report-${Date.now()}.xlsx`;
+      const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
+      const uri = `${FileSystem.cacheDirectory}profit-report${monthSuffix}-${Date.now()}.xlsx`;
       await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
       await Sharing.shareAsync(uri, {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -399,7 +435,10 @@ export default function ReportsScreen() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+      const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
+      const newUri = `${FileSystem.cacheDirectory}profit-report${monthSuffix}-${Date.now()}.pdf`;
+      await FileSystem.moveAsync({ from: uri, to: newUri });
+      await Sharing.shareAsync(newUri, { mimeType: 'application/pdf' });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'PDF 导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
@@ -742,8 +781,29 @@ export default function ReportsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}> 
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>数据报表</Text>
+      </View>
+
+      <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderBottomColor: theme.divider }]}> 
+        <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>月份</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          {monthOptions.map((monthOption) => (
+            <TouchableOpacity
+              key={monthOption}
+              style={[
+                styles.filterChip,
+                { backgroundColor: theme.background, borderColor: theme.divider },
+                selectedMonth === monthOption && { backgroundColor: Colors.blue, borderColor: Colors.blue },
+              ]}
+              onPress={() => setSelectedMonth(monthOption)}
+            >
+              <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedMonth === monthOption && styles.filterChipTextActive]}>
+                {monthOption === 'all' ? '全部' : monthOption}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {!isDistributor && activeStores.length > 0 && (
