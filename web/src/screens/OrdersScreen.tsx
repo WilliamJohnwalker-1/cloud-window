@@ -976,8 +976,8 @@ export const OrdersScreen: React.FC = () => {
 
       {detailOrder && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between sticky top-0 z-10 bg-[#121217] py-1">
               <h3 className="text-xl font-bold">订单明细 #{detailOrder.id.slice(0, 8)}</h3>
               <button type="button" onClick={closeOrderDetail} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
                 <X size={16} />

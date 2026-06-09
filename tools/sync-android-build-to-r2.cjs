@@ -196,7 +196,7 @@ const writeWorkerSecretsBulk = ({ workerName, envArgs, secretMode, secretsFile }
 };
 
 const verifyWorkerSecretsExist = ({ workerName, envArgs, requiredNames }) => {
-  const output = run('npx', ['wrangler', 'secret', 'list', '--name', workerName, '--json', ...envArgs], { capture: true });
+  const output = run('npx', ['wrangler', 'secret', 'list', '--name', workerName, '--format', 'json', ...envArgs], { capture: true });
   const list = extractJson(output);
 
   if (!Array.isArray(list)) {
