@@ -124,7 +124,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
-27. 执行 `supabase/storage-policies.sql`
+27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -154,7 +155,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
-27. 执行 `supabase/storage-policies.sql`
+27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -162,7 +164,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.22）
+### 5. 启动 Web 端（v1.2.23）
 
 ```bash
 npm run web:v2
@@ -346,6 +348,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.20 (2026-06-13) - 分销建单搜索 + 店铺 Chip 选中态修复 + 成本自动同步
+
+- 修复分销建单商品搜索：弹窗内新增搜索框，支持按名称快速过滤商品
+- 修复店铺 Chip 选中态可见性：选中态改为渐变背景 + 白色文字，确保双色主题下清晰可见
+- 修复店铺专属价编辑回显：切换店铺时自动回填已配置的专属定价
+- 数据库：修复 `create_batch_order_atomic` 在无分销商绑定店铺下的校验逻辑
+- 数据库：新增商品成本变更自动同步触发器，并完成历史订单成本全量回填
+
+### Web v1.2.23 (2026-06-13) - 店铺专属价入口重构与弹窗滚动修复
+
+- 重构店铺专属价入口：从商品编辑弹窗移至商品卡片 `+` 按钮独立面板，操作更便捷
+- 修复商品编辑弹窗滚动：限制弹窗最大高度并支持内部滚动，解决长内容溢出无法操作问题
+- 数据库：同步 v4.7 成本自动同步与历史回填逻辑
 
 ### Mobile v2.1.19 (2026-06-09) - 移动端零售建单 + 报表月度筛选 + 统计修复
 
