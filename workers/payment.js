@@ -425,6 +425,25 @@ async function getOrderById(env, orderId) {
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
+async function getOrderWithItems(env, orderId) {
+  const orderRows = await supabaseRequest(
+    env,
+    `/orders?id=eq.${encodeURIComponent(orderId)}&select=id,request_id,store_id,order_kind,total_retail_amount,total_discount_amount,payment_amount,payment_status,payment_method,payment_transaction_id`,
+  );
+
+  if (!Array.isArray(orderRows) || orderRows.length === 0) return null;
+
+  const itemRows = await supabaseRequest(
+    env,
+    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&select=id,product_id,quantity,retail_price,discount_price`,
+  );
+
+  return {
+    ...orderRows[0],
+    items: Array.isArray(itemRows) ? itemRows : [],
+  };
+}
+
 async function patchOrderPayment(env, orderId, patch) {
   await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
     method: 'PATCH',
@@ -1143,6 +1162,204 @@ export default {
       }
 
       return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });
+    }
+
+    if (url.pathname === '/api/payment/refund-items' && request.method === 'POST') {
+      const body = await request.json();
+      const orderId = String(body.orderId || '').trim();
+      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
+      const orderItemIds = Array.isArray(body.orderItemIds)
+        ? Array.from(new Set(body.orderItemIds.map((itemId) => String(itemId || '').trim()).filter(Boolean)))
+        : [];
+
+      if (!orderId) {
+        return json({ success: false, status: 'failed', error: 'missing order id' }, { status: 400 });
+      }
+      if (orderItemIds.length === 0) {
+        return json({ success: false, status: 'failed', error: 'missing order item ids' }, { status: 400 });
+      }
+
+      const order = await getOrderWithItems(env, orderId);
+      if (!order) {
+        return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
+      }
+
+      if (String(order.order_kind || '').toLowerCase() !== 'retail') {
+        return json({ success: false, status: 'failed', error: '仅零售订单支持按商品退款' }, { status: 400 });
+      }
+
+      const orderPaymentStatus = String(order.payment_status || '').toLowerCase();
+      if (!['paid', 'partial_refunded'].includes(orderPaymentStatus)) {
+        return json({ success: false, status: 'failed', error: '仅已支付或部分退款订单可退款' }, { status: 400 });
+      }
+
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      const selectedItems = orderItems.filter((item) => orderItemIds.includes(String(item.id || '')));
+      if (selectedItems.length !== orderItemIds.length) {
+        return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
+      }
+
+      const refundAmount = Number(
+        selectedItems
+          .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
+          .toFixed(2),
+      );
+      if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+        return json({ success: false, status: 'failed', error: '退款金额无效' }, { status: 400 });
+      }
+
+      const totalAmount = Number(order.payment_amount || order.total_retail_amount || 0);
+      let finalStatus = 'failed';
+      let refundNo = null;
+      let outTradeNo = orderId;
+      let providerPayload = null;
+      let isRefundSuccess = false;
+
+      if (order.payment_method === 'wechat') {
+        const missing = getMissingEnv(env, [
+          'WECHAT_MCH_ID',
+          'WECHAT_SERIAL_NO',
+          'WECHAT_PRIVATE_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        outTradeNo = toWechatOutTradeNo(orderId);
+        const refundedAmount = await getRefundedAmount(env, outTradeNo);
+        const remainAmount = Number((totalAmount - refundedAmount).toFixed(2));
+        if (remainAmount <= 0) {
+          return json({ success: false, status: 'failed', error: '该订单已无可退款金额' }, { status: 400 });
+        }
+        if (refundAmount - remainAmount > 0.000001) {
+          return json({ success: false, status: 'failed', error: `退款金额不能大于剩余可退金额 ${remainAmount.toFixed(2)}` }, { status: 400 });
+        }
+
+        refundNo = `R${outTradeNo.slice(0, 20)}${Date.now().toString().slice(-12)}`;
+        const refundPayload = {
+          out_trade_no: outTradeNo,
+          out_refund_no: refundNo,
+          reason,
+          notify_url: env.WECHAT_REFUND_NOTIFY_URL || undefined,
+          amount: {
+            refund: Math.round(refundAmount * 100),
+            total: Math.round(totalAmount * 100),
+            currency: 'CNY',
+          },
+        };
+
+        const refundResult = await postWechatRequest(env, 'POST', '/v3/refund/domestic/refunds', refundPayload);
+        if (!refundResult.ok) {
+          const requestIdSuffix = refundResult.requestId ? `（Request-ID: ${refundResult.requestId}）` : '';
+          return json({ success: false, status: 'failed', error: `${refundResult.error || '微信退款失败'}${requestIdSuffix}` }, { status: 400 });
+        }
+
+        const refundState = String(refundResult.data?.status || '').toUpperCase();
+        isRefundSuccess = refundState === 'SUCCESS';
+        finalStatus = isRefundSuccess ? 'partial_refunded' : 'partial_refund_pending';
+        providerPayload = refundResult.data;
+      } else if (order.payment_method === 'alipay') {
+        const missing = getMissingEnv(env, [
+          'ALIPAY_APP_ID',
+          'ALIPAY_PRIVATE_KEY',
+          'ALIPAY_PUBLIC_KEY',
+        ]);
+        if (missing.length > 0) {
+          return json({ success: false, status: 'failed', error: `missing env: ${missing.join(',')}` }, { status: 500 });
+        }
+
+        outTradeNo = orderId;
+        const refundedAmount = await getRefundedAmount(env, outTradeNo);
+        const remainAmount = Number((totalAmount - refundedAmount).toFixed(2));
+        if (remainAmount <= 0) {
+          return json({ success: false, status: 'failed', error: '该订单已无可退款金额' }, { status: 400 });
+        }
+        if (refundAmount - remainAmount > 0.000001) {
+          return json({ success: false, status: 'failed', error: `退款金额不能大于剩余可退金额 ${remainAmount.toFixed(2)}` }, { status: 400 });
+        }
+
+        refundNo = `R${orderId.slice(0, 8)}${Date.now()}`;
+        const refundResult = await postAlipayRefundRequest(env, {
+          out_trade_no: orderId,
+          trade_no: order.payment_transaction_id || undefined,
+          refund_amount: refundAmount.toFixed(2),
+          refund_reason: reason,
+          out_request_no: refundNo,
+        });
+
+        if (!refundResult.ok) {
+          return json({ success: false, status: 'failed', error: refundResult.error || '支付宝退款失败' }, { status: 400 });
+        }
+
+        isRefundSuccess = refundResult.status === 'refunded';
+        finalStatus = isRefundSuccess ? 'partial_refunded' : 'partial_refund_pending';
+        providerPayload = refundResult.data;
+      } else {
+        return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });
+      }
+
+      let orderDeleted = false;
+      let remainingDiscountAmount = Number(order.total_discount_amount || 0);
+      if (isRefundSuccess) {
+        const mutationRows = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_order_id: orderId,
+            p_order_item_ids: orderItemIds,
+          }),
+        });
+
+        const mutationResult = Array.isArray(mutationRows) ? mutationRows[0] : mutationRows;
+        orderDeleted = Boolean(mutationResult?.order_deleted);
+        remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
+
+        if (!orderDeleted) {
+          const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
+          finalStatus = nextStatus;
+          await patchOrderPayment(env, orderId, { payment_status: nextStatus });
+        } else {
+          finalStatus = 'refunded';
+        }
+      } else {
+        await patchOrderPayment(env, orderId, {
+          payment_status: 'partial_refund_pending',
+        });
+      }
+
+      await upsertPaymentEvent(env, {
+        idempotency_key: buildPaymentEventKey({
+          channel: order.payment_method,
+          eventType: 'refund',
+          outTradeNo,
+          notifyId: refundNo,
+          tradeNo: order.payment_transaction_id || null,
+        }),
+        channel: order.payment_method,
+        out_trade_no: outTradeNo,
+        transaction_id: order.payment_transaction_id || null,
+        notify_id: null,
+        event_type: 'refund',
+        status: finalStatus,
+        amount: refundAmount,
+        processed: true,
+        payload: {
+          orderItemIds,
+          provider: providerPayload,
+          orderDeleted,
+          remainingDiscountAmount,
+        },
+      });
+
+      return json({
+        success: true,
+        status: finalStatus,
+        orderId,
+        refundAmount,
+        orderDeleted,
+        remainingDiscountAmount,
+        refundedItemIds: orderItemIds,
+        refundNo,
+      });
     }
 
     if (url.pathname.startsWith('/api/payment/status/') && request.method === 'GET') {
