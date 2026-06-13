@@ -47,3 +47,8 @@ yarn-error.*
 IP.ai
 *.txt
 !README.md
+
+# local agent/workflow data (never commit)
+.omo/
+.playwright-mcp/
+artifacts/

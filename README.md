@@ -164,7 +164,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.24）
+### 5. 启动 Web 端（v1.2.25）
 
 ```bash
 npm run web:v2
@@ -361,6 +361,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.25 (2026-06-13) - 按商品退款与营收口径修正
+
+- Web 订单页退款交互改为“按商品勾选退款”，不再以手输金额作为主入口
+- 订单页统计卡营业额口径调整：排除 `payment_status in (refunded, refund_pending)` 的订单
+- 报表页总零售额/折扣成交额/城市店铺销售分布/商品排行/利润聚合同步使用同一排除口径
+- 报表卡片文案新增“营收订单 X 笔”，便于核对统计范围
 
 ### Web v1.2.24 (2026-06-13) - 收款台抹零金额一致性与退款交互热更
 
