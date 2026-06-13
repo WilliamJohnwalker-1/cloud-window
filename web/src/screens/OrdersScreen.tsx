@@ -38,6 +38,7 @@ export const OrdersScreen: React.FC = () => {
   const [refundModalOrderId, setRefundModalOrderId] = useState<string | null>(null);
   const [refundAmountInput, setRefundAmountInput] = useState('');
   const [refundReasonInput, setRefundReasonInput] = useState('收银台退款');
+  const [hiddenRefundedOrderIds, setHiddenRefundedOrderIds] = useState<Set<string>>(new Set());
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
@@ -121,8 +122,10 @@ export const OrdersScreen: React.FC = () => {
     if (selectedFilterStoreId) {
       result = result.filter((order) => order.store_id === selectedFilterStoreId);
     }
-    return result.filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange, selectedFilterCityId, selectedFilterStoreId]);
+    return result
+      .filter((order) => matchesStatsRange(order.created_at))
+      .filter((order) => !hiddenRefundedOrderIds.has(order.id));
+  }, [baseOrders, hiddenRefundedOrderIds, matchesStatsRange, selectedFilterCityId, selectedFilterStoreId]);
 
   const totalRetail = useMemo(() => {
     return filteredOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
@@ -298,6 +301,9 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
+    const confirmed = window.confirm(`确认退款订单 #${order.id.slice(0, 8)}，金额 ¥${amount.toFixed(2)}？`);
+    if (!confirmed) return;
+
     setRefundingOrderId(order.id);
     try {
       const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund`, {
@@ -325,13 +331,34 @@ export const OrdersScreen: React.FC = () => {
           : `退款申请已提交，状态：${String(payload.status || 'refund_pending')}，本次退款 ¥${Number(payload.refundAmount || 0).toFixed(2)}`,
       });
 
-      await fetchOrders();
-      const latest = await fetchOrderDetail(order.id);
-      if (latest) {
-        setDetailCache((prev) => ({ ...prev, [order.id]: latest }));
-        setDetailOrderData(latest);
+      if (payload.status === 'refunded') {
+        setHiddenRefundedOrderIds((prev) => {
+          const next = new Set(prev);
+          next.add(order.id);
+          return next;
+        });
       }
+
       closeRefundModal();
+
+      try {
+        await fetchOrders();
+        const latest = await fetchOrderDetail(order.id);
+        if (latest) {
+          setDetailCache((prev) => ({ ...prev, [order.id]: latest }));
+          setDetailOrderData(latest);
+        } else if (payload.status === 'refunded') {
+          closeOrderDetail();
+        }
+      } catch {
+        setPageNotice((prev) => {
+          if (!prev || prev.type !== 'success') return prev;
+          return {
+            ...prev,
+            text: `${prev.text}（列表刷新失败，请手动刷新）`,
+          };
+        });
+      }
     } catch (error) {
       setPageNotice({ type: 'error', text: `退款异常：${error instanceof Error ? error.message : '未知错误'}` });
     } finally {

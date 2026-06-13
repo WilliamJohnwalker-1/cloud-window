@@ -10,6 +10,7 @@ export const ProductsScreen: React.FC = () => {
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [showCreate, setShowCreate] = useState(false);
+  const [showPricingPanel, setShowPricingPanel] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('');
   const [customStorePrice, setCustomStorePrice] = useState<string>('');
@@ -86,6 +87,7 @@ export const ProductsScreen: React.FC = () => {
     setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
+    setShowPricingPanel(false);
     setShowCreate(true);
   };
 
@@ -104,6 +106,7 @@ export const ProductsScreen: React.FC = () => {
     });
     setSelectedStoreId('');
     setCustomStorePrice('');
+    setShowPricingPanel(false);
     setShowCreate(true);
   };
 
@@ -257,17 +260,16 @@ export const ProductsScreen: React.FC = () => {
                   <span className="text-[10px] text-white/40 uppercase font-bold tracking-tighter">分销折扣价</span>
                   <span className="text-sm font-bold text-white/80">¥{product.discount_price}</span>
                 </div>
-                {isAdminOrManager && (
+                {user?.role === 'admin' && (
                   <button
                     type="button"
-                    onClick={async (event) => {
+                    onClick={(event) => {
                       event.stopPropagation();
-                      const next = Number(product.quantity || 0) + 5;
-                      const { error } = await updateInventoryByProduct(product.id, next, {
-                        action: 'quick_add',
-                        note: '商品页快捷补货 +5',
-                      });
-                      if (error) window.alert(`补货失败：${error.message}`);
+                      setEditingProductId(product.id);
+                      setSelectedStoreId('');
+                      setCustomStorePrice('');
+                      setShowCreate(false);
+                      setShowPricingPanel(true);
                     }}
                     className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors"
                   >
@@ -288,9 +290,51 @@ export const ProductsScreen: React.FC = () => {
         </div>
       )}
 
+      {showPricingPanel && user?.role === 'admin' && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold">店铺专属定价</h3>
+              <button type="button" onClick={() => setShowPricingPanel(false)} className="text-white/40 hover:text-white">关闭</button>
+            </div>
+            <div className="mt-2">
+              <div className="flex flex-wrap gap-2 mb-4">
+                {stores.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSelectedStoreId(s.id)}
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === s.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
+                  >
+                    {s.name}（{s.city_name || '未知城市'}）
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={customStorePrice}
+                  onChange={(e) => setCustomStorePrice(e.target.value)}
+                  placeholder="输入专属定价(元)"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                  type="number"
+                  step="0.01"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveStorePrice}
+                  className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold transition-colors"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCreate && isAdminOrManager && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
             <h3 className="text-xl font-bold">{editingProductId ? '编辑商品' : '新增商品'}</h3>
             <div className="grid grid-cols-2 gap-3">
               <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="商品名" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
@@ -314,40 +358,6 @@ export const ProductsScreen: React.FC = () => {
                 </div>
               </div>
             </div>
-            {editingProductId && user?.role === 'admin' && (
-              <div className="mt-6 pt-4 border-t border-white/10">
-                <h4 className="text-sm font-bold text-white/60 mb-3">店铺专属定价(元)</h4>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {stores.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setSelectedStoreId(s.id)}
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${selectedStoreId === s.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-                    >
-                      {s.name}（{s.city_name || '未知城市'}）
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={customStorePrice}
-                    onChange={(e) => setCustomStorePrice(e.target.value)}
-                    placeholder="输入专属定价(元)"
-                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2"
-                    type="number"
-                    step="0.01"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveStorePrice}
-                    className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold transition-colors"
-                  >
-                    保存
-                  </button>
-                </div>
-              </div>
-            )}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
               <button type="button" onClick={handleSaveProduct} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
