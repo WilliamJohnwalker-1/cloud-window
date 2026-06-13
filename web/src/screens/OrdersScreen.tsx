@@ -317,9 +317,6 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
-    const confirmed = window.confirm(`确认退款订单 #${order.id.slice(0, 8)} 的 ${orderItemIds.length} 个商品项，金额 ¥${refundAmount.toFixed(2)}？`);
-    if (!confirmed) return;
-
     setRefundingOrderId(order.id);
     try {
       const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund-items`, {
@@ -411,7 +408,7 @@ export const OrdersScreen: React.FC = () => {
     const latestOrder = await fetchOrderDetail(orderId);
     const targetOrder = latestOrder || getResolvedOrder(orderId);
     if (!targetOrder) {
-      window.alert('未找到订单，无法导出');
+      setPageNotice({ type: 'error', text: '未找到订单，无法导出' });
       return;
     }
 
@@ -499,13 +496,13 @@ export const OrdersScreen: React.FC = () => {
 
   const handleCreateOrder = async (): Promise<void> => {
     if (cartItems.length === 0) {
-      window.alert('请先选择商品');
+      setPageNotice({ type: 'error', text: '请先选择商品' });
       return;
     }
 
     const invalid = cartItems.find((item) => !item.isSample && item.quantity % 5 !== 0);
     if (invalid) {
-      window.alert(`${invalid.product.name} 数量必须是5的倍数`);
+      setPageNotice({ type: 'error', text: `${invalid.product.name} 数量必须是5的倍数` });
       return;
     }
 
@@ -518,7 +515,7 @@ export const OrdersScreen: React.FC = () => {
       selectedStoreId
     );
     if (result.error) {
-      window.alert(`下单失败：${result.error.message}`);
+      setPageNotice({ type: 'error', text: `下单失败：${result.error.message}` });
       return;
     }
 
@@ -526,7 +523,7 @@ export const OrdersScreen: React.FC = () => {
     setSearchKeyword('');
     setShowCreateModal(false);
     setSelectedStoreId(null);
-    window.alert('订单已创建');
+    setPageNotice({ type: 'success', text: '订单已创建' });
   };
 
   const handleModifyOrder = async (): Promise<void> => {
@@ -758,10 +755,10 @@ export const OrdersScreen: React.FC = () => {
                     onClick={async () => {
                       const { error } = await acceptOrder(order.id);
                       if (error) {
-                        window.alert(`接单失败：${error.message}`);
+                        setPageNotice({ type: 'error', text: `接单失败：${error.message}` });
                         return;
                       }
-                      window.alert('接单成功');
+                      setPageNotice({ type: 'success', text: '接单成功' });
                     }}
                     className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold"
                   >
@@ -853,8 +850,8 @@ export const OrdersScreen: React.FC = () => {
       </div>
 
       {showCreateModal && canCreateOrder && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold">新建分销订单</h3>
               <button type="button" onClick={() => setShowCreateModal(false)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
@@ -1018,7 +1015,7 @@ export const OrdersScreen: React.FC = () => {
       )}
 
       {detailOrder && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between sticky top-0 z-10 bg-[#121217] py-1">
               <h3 className="text-xl font-bold">订单明细 #{detailOrder.id.slice(0, 8)}</h3>
@@ -1098,8 +1095,8 @@ export const OrdersScreen: React.FC = () => {
       )}
 
       {deleteConfirmOrderId && (
-        <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">确认删除订单</h3>
               <button type="button" onClick={() => setDeleteConfirmOrderId(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
@@ -1131,8 +1128,8 @@ export const OrdersScreen: React.FC = () => {
       )}
 
       {refundModalOrderId && (
-        <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/70 z-[80] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">确认退款</h3>
               <button type="button" onClick={closeRefundModal} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
@@ -1238,8 +1235,8 @@ export const OrdersScreen: React.FC = () => {
         </div>
       )}
       {modifyOrder && (
-        <div className="fixed inset-0 bg-black/70 z-[90] flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/70 z-[90] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-3xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">修改订单 #{modifyOrder.id.slice(0, 8)}</h3>
               <button type="button" onClick={() => setModifyOrder(null)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">

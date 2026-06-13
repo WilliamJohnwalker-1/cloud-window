@@ -164,7 +164,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.25）
+### 5. 启动 Web 端（v1.2.26）
 
 ```bash
 npm run web:v2
@@ -361,6 +361,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.26 (2026-06-13) - 订单弹窗统一站内交互
+
+- 移除订单页剩余原生浏览器弹窗：导出失败改为站内 `pageNotice` 提示
+- 退款提交流程移除二次 `window.confirm`，统一使用站内退款弹窗作为确认入口
+- 分销下单/接单/退款/删除等核心交互统一走站内 UI 反馈，避免浏览器原生弹窗打断
 
 ### Web v1.2.25 (2026-06-13) - 按商品退款与营收口径修正
 

@@ -35,6 +35,15 @@ interface ScanEventRecord {
   code: string;
   result: string;
 }
+
+interface ActiveOrderItemDraft {
+  id: string;
+  productName: string;
+  quantity: number;
+  retailPrice: number;
+  discountPrice: number;
+  draftDiscountPrice: string;
+}
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
 const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
@@ -47,12 +56,12 @@ const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | nul
 };
 
 export const PaymentScreen: React.FC = () => {
-  const { user, products, createRetailOrders, fetchOrders } = useAppStore();
+  const { user, products, createRetailOrders, fetchOrders, fetchOrderDetail, orders } = useAppStore();
   const [productScanCode, setProductScanCode] = useState('');
   const [paymentAuthCode, setPaymentAuthCode] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
-  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number } | null>(null);
-  const [manualAmountInput, setManualAmountInput] = useState('');
+  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number; items: ActiveOrderItemDraft[] } | null>(null);
+  const [isApplyingItemRounding, setIsApplyingItemRounding] = useState(false);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
   const [status, setStatus] = useState<WebPaymentStatus>('pending');
@@ -296,8 +305,7 @@ export const PaymentScreen: React.FC = () => {
     productInputRef.current?.focus();
   };
 
-  const resolveCreatedOrder = (amount: number): { id: string; amount: number; originalAmount: number } | null => {
-    const { orders } = useAppStore.getState();
+  const resolveCreatedOrderId = (amount: number): string | null => {
     const now = Date.now();
     const recentOrders = [...orders].sort((left, right) => {
       return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
@@ -310,12 +318,7 @@ export const PaymentScreen: React.FC = () => {
       return Math.abs(Number(order.total_discount_amount || 0) - amount) < 0.01;
     });
 
-    if (!matched) return null;
-    return {
-      id: matched.id,
-      amount: Number(matched.total_discount_amount || amount),
-      originalAmount: Number(matched.total_discount_amount || amount),
-    };
+    return matched?.id || null;
   };
 
   const handleCreateOrder = async (): Promise<void> => {
@@ -348,21 +351,45 @@ export const PaymentScreen: React.FC = () => {
       if (!result.orderId) {
         await fetchOrders();
       }
-      const created = result.orderId
-        ? { id: result.orderId, amount: totalAmount, originalAmount: totalAmount }
-        : resolveCreatedOrder(totalAmount);
-      if (!created) {
+      const orderId = result.orderId || resolveCreatedOrderId(totalAmount);
+      if (!orderId) {
         setStatus('failed');
         setStatusMessage('订单已创建，但未能自动定位订单号，请到订单列表确认');
         return;
       }
 
-      setActiveOrder(created);
-      setManualAmountInput(created.amount.toFixed(2));
+      const detail = await fetchOrderDetail(orderId);
+      if (!detail || detail.items.length === 0) {
+        setStatus('failed');
+        setStatusMessage('订单已创建，但未能加载商品明细，请到订单页刷新后重试');
+        return;
+      }
+
+      const orderItems: ActiveOrderItemDraft[] = detail.items.map((item) => {
+        const discountPrice = Number(item.discount_price || 0);
+        return {
+          id: item.id,
+          productName: item.product_name || '云窗文创',
+          quantity: Number(item.quantity || 0),
+          retailPrice: Number(item.retail_price || 0),
+          discountPrice,
+          draftDiscountPrice: discountPrice.toFixed(2),
+        };
+      });
+
+      const originalAmount = Number(detail.total_retail_amount || totalAmount);
+      const discountedAmount = Number(detail.payment_amount || detail.total_discount_amount || totalAmount);
+
+      setActiveOrder({
+        id: orderId,
+        amount: discountedAmount,
+        originalAmount,
+        items: orderItems,
+      });
       setTransactionId('');
       setPaymentAuthCode('');
       setStatus('pending');
-      setStatusMessage(`零售订单已创建：#${created.id.slice(0, 8)}，请扫描客户付款码`);
+      setStatusMessage(`零售订单已创建：#${orderId.slice(0, 8)}，请扫描客户付款码`);
       paymentInputRef.current?.focus();
     } finally {
       setIsCreatingOrder(false);
@@ -474,66 +501,78 @@ export const PaymentScreen: React.FC = () => {
     }
   }, [activeOrder, bumpDiagnostics, paymentAuthCode, paymentMethod, pollUntilSettled, pushScanEvent]);
 
-  const applyManualAmount = (): void => {
-    if (!activeOrder || !canAdjustAmount) return;
+  const updateItemDraftPrice = (itemId: string, value: string): void => {
+    if (!activeOrder || isApplyingItemRounding) return;
+    const sanitized = value.replace(/[^0-9.]/g, '');
+    setActiveOrder({
+      ...activeOrder,
+      items: activeOrder.items.map((item) => (item.id === itemId ? { ...item, draftDiscountPrice: sanitized } : item)),
+    });
+  };
 
-    const normalized = manualAmountInput.replace(/[^0-9.]/g, '');
-    if (!normalized) {
+  const applyItemLevelRounding = (): void => {
+    if (!activeOrder || !canAdjustAmount || isApplyingItemRounding) return;
+
+    const nextItems = activeOrder.items.map((item) => {
+      const parsed = Number(item.draftDiscountPrice);
+      const parsedValue = Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : Number.NaN;
+      return {
+        ...item,
+        parsedValue,
+      };
+    });
+
+    const invalidItem = nextItems.find((item) => Number.isNaN(item.parsedValue) || item.parsedValue < 0 || item.parsedValue > item.retailPrice);
+    if (invalidItem) {
       setStatus('failed');
-      setStatusMessage('请输入有效抹零金额');
+      setStatusMessage(`${invalidItem.productName} 单价不合法（应在 0 到 ¥${invalidItem.retailPrice.toFixed(2)} 之间）`);
       return;
     }
 
-    const parsed = Number(normalized);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setStatus('failed');
-      setStatusMessage('抹零后金额必须大于 0');
-      return;
-    }
-
-    if (parsed > activeOrder.originalAmount) {
-      setStatus('failed');
-      setStatusMessage(`抹零金额不能高于原订单金额 ¥${activeOrder.originalAmount.toFixed(2)}`);
-      return;
-    }
-
-    const nextAmount = Number(parsed.toFixed(2));
+    const nextAmount = Number(nextItems.reduce((sum, item) => sum + item.parsedValue * item.quantity, 0).toFixed(2));
     const diff = Number((activeOrder.originalAmount - nextAmount).toFixed(2));
     const note = diff > 0
-      ? `收款台抹零：原金额¥${activeOrder.originalAmount.toFixed(2)}，实收¥${nextAmount.toFixed(2)}，抹零¥${diff.toFixed(2)}`
+      ? `收款台按商品抹零：原金额¥${activeOrder.originalAmount.toFixed(2)}，实收¥${nextAmount.toFixed(2)}，抹零¥${diff.toFixed(2)}`
       : null;
 
+    setIsApplyingItemRounding(true);
     void (async () => {
-      const { error } = await supabase.rpc('set_order_payment_note_atomic', {
-        p_order_id: activeOrder.id,
-        p_payment_note: note,
-      });
+      try {
+        const payloadItems = nextItems.map((item) => ({
+          order_item_id: item.id,
+          new_discount_price: item.parsedValue,
+        }));
 
-      if (error) {
-        setStatus('failed');
-        setStatusMessage(`抹零备注保存失败：${error.message}`);
-        return;
+        const { data, error } = await supabase.rpc('set_retail_order_item_prices_atomic', {
+          p_order_id: activeOrder.id,
+          p_items: payloadItems,
+          p_payment_note: note,
+        });
+
+        if (error) {
+          setStatus('failed');
+          setStatusMessage(`按商品抹零保存失败：${error.message}`);
+          return;
+        }
+
+        const row = Array.isArray(data) ? data[0] : data;
+        const nextOrderAmount = Number(row?.total_discount_amount || nextAmount);
+
+        setActiveOrder({
+          ...activeOrder,
+          amount: nextOrderAmount,
+          items: nextItems.map((item) => ({
+            ...item,
+            discountPrice: item.parsedValue,
+            draftDiscountPrice: item.parsedValue.toFixed(2),
+          })),
+        });
+        setStatus('pending');
+        setStatusMessage(diff > 0 ? `已按商品抹零，实收金额：¥${nextOrderAmount.toFixed(2)}` : '已恢复商品原始价格');
+        await fetchOrders();
+      } finally {
+        setIsApplyingItemRounding(false);
       }
-
-      const { error: amountSyncError } = await supabase
-        .from('orders')
-        .update({
-          payment_amount: nextAmount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', activeOrder.id);
-
-      if (amountSyncError) {
-        setStatus('failed');
-        setStatusMessage(`抹零金额同步失败：${amountSyncError.message}`);
-        return;
-      }
-
-      setActiveOrder({ ...activeOrder, amount: nextAmount });
-      setManualAmountInput(nextAmount.toFixed(2));
-      setStatus('pending');
-      setStatusMessage(diff > 0 ? `已应用抹零金额：¥${nextAmount.toFixed(2)}` : '已恢复原始金额');
-      await fetchOrders();
     })();
   };
 
@@ -796,24 +835,36 @@ export const PaymentScreen: React.FC = () => {
           </div>
 
           {activeOrder && canAdjustAmount && (
-            <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 space-y-2">
-              <p className="text-xs text-white/60">管理员抹零（可手动改应收）</p>
-              <div className="flex items-center gap-2">
-                <input
-                  value={manualAmountInput}
-                  onChange={(event) => setManualAmountInput(event.target.value)}
-                  placeholder="输入抹零后金额"
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
-                />
+            <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-white/60">管理员按商品抹零（逐个商品单价调整）</p>
                 <button
                   type="button"
-                  onClick={applyManualAmount}
-                  className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm font-semibold"
+                  onClick={applyItemLevelRounding}
+                  disabled={isApplyingItemRounding}
+                  className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/20 text-xs font-semibold disabled:opacity-50"
                 >
-                  应用
+                  {isApplyingItemRounding ? '保存中...' : '应用抹零'}
                 </button>
               </div>
-              <p className="text-[11px] text-white/40">原始订单金额：¥{activeOrder.originalAmount.toFixed(2)}（仅允许向下抹零）</p>
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                {activeOrder.items.map((item) => (
+                  <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs">
+                    <div className="min-w-0">
+                      <p className="truncate text-white/90">{item.productName} × {item.quantity}</p>
+                      <p className="text-white/40">零售价 ¥{item.retailPrice.toFixed(2)} / 当前实收 ¥{item.discountPrice.toFixed(2)}</p>
+                    </div>
+                    <input
+                      value={item.draftDiscountPrice}
+                      onChange={(event) => updateItemDraftPrice(item.id, event.target.value)}
+                      placeholder="实收单价"
+                      className="w-24 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-right"
+                    />
+                    <span className="text-white/60 w-20 text-right">¥{(Number(item.draftDiscountPrice || 0) * item.quantity).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-white/40">原始总额：¥{activeOrder.originalAmount.toFixed(2)}，当前应收：¥{activeOrder.amount.toFixed(2)}（仅允许不高于零售价）</p>
             </div>
           )}
 
