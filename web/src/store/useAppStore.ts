@@ -178,8 +178,7 @@ const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;
 const unpaidRetailAutoDeleteMs = 30 * 60 * 1000;
-const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'refunded']);
-const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
+const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_pending', 'refunded', 'refund_pending']);
 
 let sessionGraceUntil = 0;
 
@@ -242,7 +241,6 @@ const shouldAutoDeleteStaleRetailOrder = (row: Pick<OrderRow, 'order_kind' | 'pa
 
   const paymentStatus = String(row.payment_status || '').toLowerCase();
   if (paidRetailStatuses.has(paymentStatus)) return false;
-  if (!unpaidRetailStatuses.has(paymentStatus)) return false;
 
   const createdAtMs = new Date(row.created_at).getTime();
   if (!Number.isFinite(createdAtMs)) return false;
