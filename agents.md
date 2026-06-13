@@ -34,6 +34,20 @@ npm install                  # Install dependencies
 npx expo install <pkg>       # Install Expo-compatible package
 ```
 
+## AUTOMATION SAFETY RULES (MANDATORY)
+
+- **禁止创建测试账号（含子任务/子代理）**：
+  - 不允许在 Supabase Auth 中注册任何临时账号
+  - 不允许向 `profiles`/`auth.users` 写入测试用户
+  - 账号相关联调仅使用已有业务账号，由人工执行
+- **禁止污染生产/共享数据库**：
+  - 不执行“注册、插入测试用户、提权测试用户”等脚本
+  - 若发现此类临时脚本，必须先删除并汇报
+- **双端推送策略（npm run push:both）**：
+  - Gitee 正常推送
+  - GitHub 若失败，**只允许单次尝试，不自动重试**
+  - 失败后立即通知人工接管
+
 **No test framework configured** — manual testing required.
 
 ## CODE STYLE
@@ -227,11 +241,12 @@ Before committing:
 - [ ] Manual test: Distributor login -> Create order -> Admin accept
 - [ ] npm run payment:precheck --prefix web
 - [ ] Web manual test: barcode outbound flow + payment mock flow
+- [ ] 验证未创建任何测试账号/测试用户写入脚本
 
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.20`
-- Current web baseline: `v1.2.23`
+- Current web baseline: `v1.2.24`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 库存/订单/报表三页筛选统一升级为“城市→店铺”二级筛选，口径对齐移动端
