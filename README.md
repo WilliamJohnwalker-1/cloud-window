@@ -124,7 +124,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
-27. 执行 `supabase/storage-policies.sql`
+27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -154,7 +155,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 24. 执行 `supabase/migrate-v4.4-retail-default-yunchuang-store.sql`
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
-27. 执行 `supabase/storage-policies.sql`
+27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -162,7 +164,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.22）
+### 5. 启动 Web 端（v1.2.24）
 
 ```bash
 npm run web:v2
@@ -337,6 +339,19 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
   2. 管理员通知中心接单
   3. 分销商收到“已接单”通知
 
+## 自动化安全约束（强制）
+
+- 禁止创建测试账号（含子任务/子代理）：
+  - 不允许在 Supabase Auth 注册临时账号
+  - 不允许向 `profiles` / `auth.users` 写入测试用户
+  - 账号联调仅使用人工提供的已有业务账号
+- 禁止污染共享数据库：
+  - 禁止运行“注册测试用户/提权测试用户/写入测试档案”脚本
+  - 发现此类临时脚本必须先删除并汇报
+- 双端推送策略：
+  - 使用 `npm run push:both`
+  - GitHub 失败仅允许单次尝试，不自动重试，立即通知人工接管
+
 ## 后续规划
 
 - [ ] 直营店 Web 收款生产加固：微信付款码支付（签名、幂等、对账、异常补偿）
@@ -346,6 +361,27 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.24 (2026-06-13) - 收款台抹零金额一致性与退款交互热更
+
+- 修复收款金额不匹配：管理员抹零后会同步 `orders.payment_amount`，后端校验金额与收款台实收金额保持一致
+- 增加退款二次确认：提交退款前新增确认提示，降低误操作风险
+- 修复退款成功后误报异常：退款成功提示与列表刷新异常解耦，避免“客户已到账但前端提示 failed to fetch”
+- 退款后列表即时收敛：全额退款订单在前端列表中即时隐藏，并在后续刷新后保持一致
+
+### Mobile v2.1.20 (2026-06-13) - 分销建单搜索 + 店铺 Chip 选中态修复 + 成本自动同步
+
+- 修复分销建单商品搜索：弹窗内新增搜索框，支持按名称快速过滤商品
+- 修复店铺 Chip 选中态可见性：选中态改为渐变背景 + 白色文字，确保双色主题下清晰可见
+- 修复店铺专属价编辑回显：切换店铺时自动回填已配置的专属定价
+- 数据库：修复 `create_batch_order_atomic` 在无分销商绑定店铺下的校验逻辑
+- 数据库：新增商品成本变更自动同步触发器，并完成历史订单成本全量回填
+
+### Web v1.2.23 (2026-06-13) - 店铺专属价入口重构与弹窗滚动修复
+
+- 重构店铺专属价入口：从商品编辑弹窗移至商品卡片 `+` 按钮独立面板，操作更便捷
+- 修复商品编辑弹窗滚动：限制弹窗最大高度并支持内部滚动，解决长内容溢出无法操作问题
+- 数据库：同步 v4.7 成本自动同步与历史回填逻辑
 
 ### Mobile v2.1.19 (2026-06-09) - 移动端零售建单 + 报表月度筛选 + 统计修复
 

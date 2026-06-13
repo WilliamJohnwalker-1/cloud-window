@@ -48,9 +48,11 @@ export default function ProductsScreen() {
     products,
     cities,
     stores,
+    storeProductPrices,
     fetchProducts,
     fetchCities,
     fetchStores,
+    fetchStoreProductPrices,
     addProduct,
     updateProduct,
     deleteProduct,
@@ -63,9 +65,11 @@ export default function ProductsScreen() {
       products: state.products,
       cities: state.cities,
       stores: state.stores,
+      storeProductPrices: state.storeProductPrices,
       fetchProducts: state.fetchProducts,
       fetchCities: state.fetchCities,
       fetchStores: state.fetchStores,
+      fetchStoreProductPrices: state.fetchStoreProductPrices,
       addProduct: state.addProduct,
       updateProduct: state.updateProduct,
       deleteProduct: state.deleteProduct,
@@ -124,6 +128,27 @@ export default function ProductsScreen() {
       setHasPinnedOwnCity(true);
     }
   }, [hasPinnedOwnCity, isDistributor, user?.city_id]);
+
+  useEffect(() => {
+    if (selectedStoreId) {
+      fetchStoreProductPrices(selectedStoreId);
+    }
+  }, [selectedStoreId, fetchStoreProductPrices]);
+
+  useEffect(() => {
+    if (selectedStoreId && editingProduct) {
+      const storePrice = storeProductPrices.find(
+        (p) => p.store_id === selectedStoreId && p.product_id === editingProduct.id
+      );
+      if (storePrice && storePrice.override_price !== undefined && storePrice.override_price !== null) {
+        setCustomStorePrice(String(storePrice.override_price));
+      } else {
+        setCustomStorePrice('');
+      }
+    } else {
+      setCustomStorePrice('');
+    }
+  }, [selectedStoreId, editingProduct, storeProductPrices]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -638,9 +663,13 @@ export default function ProductsScreen() {
                         style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedStoreId === s.id && styles.cityItemSelected]}
                         onPress={() => setSelectedStoreId(s.id)}
                       >
-                        <Text style={[styles.cityItemText, { color: theme.textSecondary }, selectedStoreId === s.id && styles.cityItemTextSelected]}>
-                          {s.name}
-                        </Text>
+                        {selectedStoreId === s.id ? (
+                          <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalCityGradientChip}>
+                            <Text style={styles.cityItemTextSelected}>{s.name}</Text>
+                          </LinearGradient>
+                        ) : (
+                          <Text style={[styles.cityItemText, { color: theme.textSecondary }]}>{s.name}</Text>
+                        )}
                       </TouchableOpacity>
                     ))}
                   </ScrollView>

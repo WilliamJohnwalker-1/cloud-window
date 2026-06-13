@@ -79,6 +79,7 @@ export default function OrdersScreen() {
   const [retailQtyEditingKey, setRetailQtyEditingKey] = useState<string | null>(null);
   const [submittingRetailOrder, setSubmittingRetailOrder] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [modalSearchText, setModalSearchText] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [quantityInputMode, setQuantityInputMode] = useState<Map<string, string>>(new Map());
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
@@ -186,6 +187,12 @@ export default function OrdersScreen() {
     }
     return inStock;
   }, [products, orderCityId]);
+
+  const filteredAvailableProducts = useMemo(() => {
+    if (!modalSearchText.trim()) return availableProducts;
+    const lowerSearch = modalSearchText.toLowerCase().trim();
+    return availableProducts.filter(p => p.name.toLowerCase().includes(lowerSearch));
+  }, [availableProducts, modalSearchText]);
 
   useEffect(() => {
     clearCart();
@@ -521,6 +528,7 @@ export default function OrdersScreen() {
 
     Toast.show({ type: 'success', text1: '成功', text2: '订单已创建（本次购物车合并为一条订单）' });
     clearCart();
+    setModalSearchText('');
     setModalVisible(false);
   };
 
@@ -911,7 +919,7 @@ export default function OrdersScreen() {
             </TouchableOpacity>
           )}
           {canCreateOrder && (
-            <TouchableOpacity onPress={() => setModalVisible(true)} activeOpacity={0.85}>
+            <TouchableOpacity onPress={() => { setModalSearchText(''); setModalVisible(true); }} activeOpacity={0.85}>
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
                 <Text style={styles.addButtonText}>+ 新建订单</Text>
               </LinearGradient>
@@ -1231,7 +1239,7 @@ export default function OrdersScreen() {
           <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>新建分销订单（合并为单条）</Text>
-              <TouchableOpacity onPress={() => { clearCart(); setModalVisible(false); }}>
+              <TouchableOpacity onPress={() => { clearCart(); setModalSearchText(''); setModalVisible(false); }}>
                 <Text style={styles.modalClose}>关闭</Text>
               </TouchableOpacity>
             </View>
@@ -1287,8 +1295,20 @@ export default function OrdersScreen() {
                 </View>
             </View>
 
+            <View style={[styles.searchContainer, styles.searchContainerCompact, { backgroundColor: theme.surfaceSecondary, marginHorizontal: 15, marginBottom: 10 }] }>
+              <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
+              <TextInput
+                style={[styles.searchInput, { color: theme.textPrimary }]}
+                placeholder="搜索商品名称..."
+                placeholderTextColor={theme.textTertiary}
+                value={modalSearchText}
+                onChangeText={setModalSearchText}
+                textAlignVertical="center"
+              />
+            </View>
+
             <FlatList
-              data={availableProducts}
+              data={filteredAvailableProducts}
               keyExtractor={(item) => item.id}
               renderItem={renderProductRow}
               style={styles.productList}

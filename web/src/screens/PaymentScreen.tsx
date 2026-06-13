@@ -515,6 +515,20 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
+      const { error: amountSyncError } = await supabase
+        .from('orders')
+        .update({
+          payment_amount: nextAmount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeOrder.id);
+
+      if (amountSyncError) {
+        setStatus('failed');
+        setStatusMessage(`抹零金额同步失败：${amountSyncError.message}`);
+        return;
+      }
+
       setActiveOrder({ ...activeOrder, amount: nextAmount });
       setManualAmountInput(nextAmount.toFixed(2));
       setStatus('pending');
