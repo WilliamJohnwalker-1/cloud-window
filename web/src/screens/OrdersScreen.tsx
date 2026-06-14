@@ -518,6 +518,7 @@ export const OrdersScreen: React.FC = () => {
         const backendErrorText = extractRefundErrorText(payload);
         const normalizedErrorText = backendErrorText.toLowerCase();
         const alreadyRefunded = /已.*全额.*退款/.test(backendErrorText)
+          || backendErrorText.includes('已无可退款金额')
           || normalizedErrorText.includes('already refunded')
           || normalizedErrorText.includes('full refund');
 
