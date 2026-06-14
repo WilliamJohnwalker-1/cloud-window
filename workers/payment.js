@@ -1212,14 +1212,6 @@ export default {
         retail_price: Number(item.retail_price || 0),
         discount_price: Number(item.discount_price || 0),
       }));
-      const refundedItemsSnapshot = selectedItems.map((item) => ({
-        order_item_id: String(item.id || ''),
-        product_id: String(item.product_id || ''),
-        product_name: String(item?.products?.name || ''),
-        quantity: Number(item.quantity || 0),
-        retail_price: Number(item.retail_price || 0),
-        discount_price: Number(item.discount_price || 0),
-      }));
 
       const requestedAmount = Number(
         selectedItems
@@ -1941,6 +1933,13 @@ export default {
 
       const order = await getOrderById(env, orderId);
       if (!order) return json({ status: 'failed', error: 'order not found' }, { status: 404 });
+      const currentStatus = String(order.payment_status || '').toLowerCase();
+      if (currentStatus === 'refunded'
+        || currentStatus === 'partial_refunded'
+        || currentStatus === 'refund_pending'
+        || currentStatus === 'partial_refund_pending') {
+        return json({ status: currentStatus, transactionId: order.payment_transaction_id || undefined });
+      }
       if (order.payment_status === 'paid') {
         return json({ status: 'paid', transactionId: order.payment_transaction_id || undefined });
       }
