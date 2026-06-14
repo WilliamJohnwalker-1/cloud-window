@@ -489,6 +489,137 @@ async function patchOrderPayment(env, orderId, patch) {
   });
 }
 
+async function increaseInventoryByProduct(env, productId, deltaQuantity) {
+  const rows = await supabaseRequest(
+    env,
+    `/inventory?product_id=eq.${encodeURIComponent(productId)}&select=product_id,quantity&limit=1`,
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const currentQuantity = Number(rows[0]?.quantity || 0);
+  await supabaseRequest(env, `/inventory?product_id=eq.${encodeURIComponent(productId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      quantity: currentQuantity + Number(deltaQuantity || 0),
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
+async function increaseStoreInventoryByProduct(env, storeId, productId, deltaQuantity) {
+  const rows = await supabaseRequest(
+    env,
+    `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}&select=store_id,product_id,quantity&limit=1`,
+  );
+  if (Array.isArray(rows) && rows.length > 0) {
+    const currentQuantity = Number(rows[0]?.quantity || 0);
+    await supabaseRequest(
+      env,
+      `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          quantity: currentQuantity + Number(deltaQuantity || 0),
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+    return;
+  }
+
+  await supabaseRequest(env, '/store_inventory', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      store_id: storeId,
+      product_id: productId,
+      quantity: Number(deltaQuantity || 0),
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
+async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
+  const orderId = String(order?.id || '').trim();
+  if (!orderId) throw new Error('fallback missing order id');
+
+  const orderItems = Array.isArray(order?.items) ? order.items : [];
+  const targetItems = orderItems.filter((item) => refundItemIds.includes(String(item.id || '')));
+  if (targetItems.length === 0) throw new Error('fallback no valid refund items');
+
+  const restoreByProduct = new Map();
+  targetItems.forEach((item) => {
+    const productId = String(item.product_id || '').trim();
+    if (!productId) return;
+    const quantity = Number(item.quantity || 0);
+    restoreByProduct.set(productId, Number(restoreByProduct.get(productId) || 0) + quantity);
+  });
+
+  const isStoreRetail = String(order?.store_id || '').trim()
+    && String(order?.request_id || '').startsWith('msr:');
+  if (isStoreRetail) {
+    for (const [productId, quantity] of restoreByProduct.entries()) {
+      await increaseStoreInventoryByProduct(env, String(order.store_id), productId, quantity);
+    }
+  } else {
+    for (const [productId, quantity] of restoreByProduct.entries()) {
+      await increaseInventoryByProduct(env, productId, quantity);
+    }
+  }
+
+  const encodedIds = refundItemIds.map((id) => encodeURIComponent(id)).join(',');
+  await supabaseRequest(env, `/order_items?id=in.(${encodedIds})`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' },
+  });
+
+  const remainingItems = await supabaseRequest(
+    env,
+    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&select=id,quantity,retail_price,discount_price`,
+  );
+  const safeRemaining = Array.isArray(remainingItems) ? remainingItems : [];
+
+  if (safeRemaining.length === 0) {
+    await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        total_retail_amount: 0,
+        total_discount_amount: 0,
+        payment_amount: 0,
+      }),
+    });
+    return { order_deleted: false, remaining_discount_amount: 0 };
+  }
+
+  const remainingRetailAmount = Number(
+    safeRemaining
+      .reduce((sum, item) => sum + Number(item.retail_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+  const remainingDiscountAmount = Number(
+    safeRemaining
+      .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+
+  await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      total_retail_amount: remainingRetailAmount,
+      total_discount_amount: remainingDiscountAmount,
+      payment_amount: remainingRetailAmount,
+    }),
+  });
+
+  return {
+    order_deleted: false,
+    remaining_discount_amount: remainingDiscountAmount,
+  };
+}
+
 async function getPaymentEventByKey(env, idempotencyKey) {
   const rows = await supabaseRequest(
     env,
@@ -1078,6 +1209,13 @@ export default {
       if (selectedItems.length !== orderItemIds.length) {
         return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
       }
+      const refundedItemsSnapshot = selectedItems.map((item) => ({
+        order_item_id: String(item.id || ''),
+        product_id: String(item.product_id || ''),
+        quantity: Number(item.quantity || 0),
+        retail_price: Number(item.retail_price || 0),
+        discount_price: Number(item.discount_price || 0),
+      }));
 
       const requestedAmount = Number(
         selectedItems
@@ -1681,25 +1819,12 @@ export default {
       let remainingDiscountAmount = Number(order.total_discount_amount || 0);
       if (isRefundSuccess) {
         try {
-          const mutationRows = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
-            method: 'POST',
-            body: JSON.stringify({
-              p_order_id: orderId,
-              p_order_item_ids: orderItemIds,
-            }),
-          });
-
-          const mutationResult = Array.isArray(mutationRows) ? mutationRows[0] : mutationRows;
+          const mutationResult = await applyRetailRefundItemsFallback(env, order, orderItemIds);
           orderDeleted = Boolean(mutationResult?.order_deleted);
           remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
-
-          if (!orderDeleted) {
-            const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
-            finalStatus = nextStatus;
-            await patchOrderPayment(env, orderId, { payment_status: nextStatus });
-          } else {
-            finalStatus = 'refunded';
-          }
+          const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
+          finalStatus = nextStatus;
+          await patchOrderPayment(env, orderId, { payment_status: nextStatus });
         } catch (error) {
           finalStatus = 'partial_refunded';
           mutationWarning = `退款已受理，但订单明细同步失败：${error instanceof Error ? error.message : 'unknown mutation error'}`;
@@ -1737,7 +1862,9 @@ export default {
           amount: refundAmount,
           processed: true,
           payload: {
+            orderId,
             orderItemIds,
+            refundedItems: refundedItemsSnapshot,
             provider: providerPayload,
             orderDeleted,
             remainingDiscountAmount,
@@ -1785,6 +1912,7 @@ export default {
         orderDeleted,
         remainingDiscountAmount,
         refundedItemIds: orderItemIds,
+        refundedItems: refundedItemsSnapshot,
         refundNo,
         warning: mutationWarning,
       });
