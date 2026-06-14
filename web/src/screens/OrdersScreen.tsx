@@ -1339,6 +1339,34 @@ export const OrdersScreen: React.FC = () => {
               </table>
             </div>
 
+            {Array.isArray(detailOrder.refunded_items) && detailOrder.refunded_items.length > 0 && (
+              <div className="border border-amber-400/20 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 bg-amber-500/10 text-amber-100 text-sm font-semibold">已退款商品明细</div>
+                <table className="w-full text-sm">
+                  <thead className="bg-white/[0.03]">
+                    <tr>
+                      <th className="text-left px-4 py-3 text-white/50">商品</th>
+                      <th className="text-right px-4 py-3 text-white/50">退款数量</th>
+                      <th className="text-right px-4 py-3 text-white/50">退款单价</th>
+                      <th className="text-right px-4 py-3 text-white/50">退款小计</th>
+                      <th className="text-right px-4 py-3 text-white/50">退款时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailOrder.refunded_items.map((item, index) => (
+                      <tr key={`${item.order_item_id}-${item.refunded_at || index}`} className="border-t border-white/5">
+                        <td className="px-4 py-3">{resolveItemName(item.product_id, item.product_name)}</td>
+                        <td className="px-4 py-3 text-right">{item.quantity}</td>
+                        <td className="px-4 py-3 text-right">¥{item.discount_price.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right">¥{(item.discount_price * item.quantity).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right text-white/60">{item.refunded_at ? new Date(item.refunded_at).toLocaleString() : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             <div className="flex justify-end gap-6 text-sm">
               <p><span className="text-white/50">零售总额：</span>¥{detailOrder.total_retail_amount.toFixed(2)}</p>
               <p><span className="text-white/50">折扣总额：</span><span className="text-accent font-bold">¥{detailOrder.total_discount_amount.toFixed(2)}</span></p>
