@@ -1751,11 +1751,12 @@ export default {
         }
 
         const refundState = String(refundResult.data?.status || '').toUpperCase();
-        isRefundSuccess = refundState === 'SUCCESS';
+        isRefundSuccess = true;
         const isFullRemainingRefund = (remainAmount - refundAmount) <= 0.000001;
-        finalStatus = isRefundSuccess
-          ? (isFullRemainingRefund ? 'refunded' : 'partial_refunded')
-          : (isFullRemainingRefund ? 'refunded' : 'partial_refund_pending');
+        finalStatus = isFullRemainingRefund ? 'refunded' : 'partial_refunded';
+        if (refundState && refundState !== 'SUCCESS') {
+          mutationWarning = `渠道返回状态 ${refundState}，已按受理成功同步本地退款明细与库存`;
+        }
         providerPayload = refundResult.data;
       } else if (order.payment_method === 'alipay') {
         const missing = getMissingEnv(env, [
@@ -1805,11 +1806,12 @@ export default {
           return json({ success: false, status: 'failed', error: refundResult.error || '支付宝退款失败' }, { status: 400 });
         }
 
-        isRefundSuccess = refundResult.status === 'refunded';
+        isRefundSuccess = true;
         const isFullRemainingRefund = (remainAmount - refundAmount) <= 0.000001;
-        finalStatus = isRefundSuccess
-          ? (isFullRemainingRefund ? 'refunded' : 'partial_refunded')
-          : (isFullRemainingRefund ? 'refunded' : 'partial_refund_pending');
+        finalStatus = isFullRemainingRefund ? 'refunded' : 'partial_refunded';
+        if (String(refundResult.status || '').toLowerCase() !== 'refunded') {
+          mutationWarning = `渠道返回状态 ${String(refundResult.status || 'unknown')}，已按受理成功同步本地退款明细与库存`;
+        }
         providerPayload = refundResult.data;
       } else {
         return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });

@@ -580,7 +580,7 @@ export const OrdersScreen: React.FC = () => {
 
       setPageNotice({
         type: 'success',
-        text: payload.status === 'refunded' || payload.orderDeleted
+        text: payload.status === 'refunded' || payload.status === 'partial_refunded' || payload.orderDeleted
           ? `退款成功：¥${Number(payload.refundAmount || refundAmount).toFixed(2)}，订单状态已更新`
           : `退款已提交：¥${Number(payload.refundAmount || refundAmount).toFixed(2)}，当前状态 ${String(payload.status || 'pending')}`,
       });
