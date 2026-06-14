@@ -128,7 +128,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 28. 执行 `supabase/migrate-v4.8-retail-item-level-rounding-and-refund.sql`
 29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
 30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
-31. 执行 `supabase/storage-policies.sql`
+31. 执行 `supabase/migrate-v4.11-refund-delete-no-double-restore.sql`
+32. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -162,7 +163,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 28. 执行 `supabase/migrate-v4.8-retail-item-level-rounding-and-refund.sql`
 29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
 30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
-31. 执行 `supabase/storage-policies.sql`
+31. 执行 `supabase/migrate-v4.11-refund-delete-no-double-restore.sql`
+32. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -367,6 +369,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.29 (2026-06-14) - 退款链路稳定性与测试端口兼容
+
+- 订单页退款请求路由调整：本地测试端口且支付网关与当前站点不同源时，优先直连 `VITE_PAYMENT_API_URL`，避免误打同源 `/api/payment/refund-items` 导致 404 空响应。
+- 退款失败提示增强：兼容 `error/message/msg/detail/rawText` 多字段解析，并在失败前增加订单状态复核，避免“已退款到账但前端误报失败”。
+- 退款幂等优化：当后端返回“订单已全额退款（requestID）”等重复退款语义时，前端按幂等成功处理并刷新订单状态。
+- 收银台相关体验修复：扫码建单后自动聚焦收款码输入，避免“抹零输入串入付款码输入框”的视觉干扰。
 
 ### Web v1.2.28 (2026-06-14) - 退款语义纠偏（商户侧申请）
 

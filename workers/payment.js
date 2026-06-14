@@ -444,6 +444,21 @@ async function getOrderWithItems(env, orderId) {
   };
 }
 
+async function resolveRefundApproverUserId(env, order) {
+  if (order?.store_id) {
+    const storeRows = await supabaseRequest(
+      env,
+      `/stores?id=eq.${encodeURIComponent(String(order.store_id))}&select=distributor_id&limit=1`,
+    );
+    const storeApproverId = Array.isArray(storeRows) && storeRows.length > 0
+      ? String(storeRows[0]?.distributor_id || '').trim()
+      : '';
+    if (storeApproverId) return storeApproverId;
+  }
+
+  return String(order?.distributor_id || '').trim();
+}
+
 async function insertNotification(env, { userId, type, orderId, message }) {
   if (!userId) return;
   await supabaseRequest(env, '/notifications', {
@@ -548,6 +563,8 @@ export default {
 
     const url = new URL(request.url);
     const isMock = env.PAYMENT_MOCK !== 'false';
+
+    try {
 
     if (url.pathname === '/health') {
       return json({ ok: true, mock: isMock, ts: Date.now() });
@@ -1045,6 +1062,7 @@ export default {
       if (!order) {
         return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
       }
+      const merchantUserId = await resolveRefundApproverUserId(env, order);
 
       if (String(order.order_kind || '').toLowerCase() !== 'retail') {
         return json({ success: false, status: 'failed', error: '仅零售订单支持退款申请' }, { status: 400 });
@@ -1071,7 +1089,7 @@ export default {
         return json({ success: false, status: 'failed', error: '退款金额无效' }, { status: 400 });
       }
 
-      const approverUserId = String(order.distributor_id || '').trim();
+      const approverUserId = await resolveRefundApproverUserId(env, order);
       if (!approverUserId) {
         return json({ success: false, status: 'failed', error: '订单未找到收款账号，无法发起审批' }, { status: 400 });
       }
@@ -1456,6 +1474,7 @@ export default {
     }
 
     if (url.pathname === '/api/payment/refund-items' && request.method === 'POST') {
+      try {
       const body = await request.json();
       const orderId = String(body.orderId || '').trim();
       const requesterUserId = String(body.requesterUserId || '').trim();
@@ -1475,6 +1494,7 @@ export default {
       if (!order) {
         return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
       }
+      const merchantUserId = await resolveRefundApproverUserId(env, order);
 
       if (String(order.order_kind || '').toLowerCase() !== 'retail') {
         return json({ success: false, status: 'failed', error: '仅零售订单支持按商品退款' }, { status: 400 });
@@ -1506,6 +1526,7 @@ export default {
       let outTradeNo = orderId;
       let providerPayload = null;
       let isRefundSuccess = false;
+      let mutationWarning = null;
 
       if (order.payment_method === 'wechat') {
         const missing = getMissingEnv(env, [
@@ -1593,62 +1614,101 @@ export default {
       let orderDeleted = false;
       let remainingDiscountAmount = Number(order.total_discount_amount || 0);
       if (isRefundSuccess) {
-        const mutationRows = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
-          method: 'POST',
-          body: JSON.stringify({
-            p_order_id: orderId,
-            p_order_item_ids: orderItemIds,
-          }),
-        });
+        try {
+          const mutationRows = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
+            method: 'POST',
+            body: JSON.stringify({
+              p_order_id: orderId,
+              p_order_item_ids: orderItemIds,
+            }),
+          });
 
-        const mutationResult = Array.isArray(mutationRows) ? mutationRows[0] : mutationRows;
-        orderDeleted = Boolean(mutationResult?.order_deleted);
-        remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
+          const mutationResult = Array.isArray(mutationRows) ? mutationRows[0] : mutationRows;
+          orderDeleted = Boolean(mutationResult?.order_deleted);
+          remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
 
-        if (!orderDeleted) {
-          const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
-          finalStatus = nextStatus;
-          await patchOrderPayment(env, orderId, { payment_status: nextStatus });
-        } else {
-          finalStatus = 'refunded';
+          if (!orderDeleted) {
+            const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
+            finalStatus = nextStatus;
+            await patchOrderPayment(env, orderId, { payment_status: nextStatus });
+          } else {
+            finalStatus = 'refunded';
+          }
+        } catch (error) {
+          finalStatus = 'partial_refunded';
+          mutationWarning = `退款已受理，但订单明细同步失败：${error instanceof Error ? error.message : 'unknown mutation error'}`;
+          try {
+            await patchOrderPayment(env, orderId, { payment_status: finalStatus });
+          } catch (patchError) {
+            mutationWarning = `${mutationWarning}；状态回写失败：${patchError instanceof Error ? patchError.message : 'unknown patch error'}`;
+          }
         }
       } else {
-        await patchOrderPayment(env, orderId, {
-          payment_status: 'partial_refund_pending',
-        });
+        try {
+          await patchOrderPayment(env, orderId, {
+            payment_status: 'partial_refund_pending',
+          });
+        } catch (patchError) {
+          mutationWarning = `退款处理中，状态回写失败：${patchError instanceof Error ? patchError.message : 'unknown patch error'}`;
+        }
       }
 
-      await upsertPaymentEvent(env, {
-        idempotency_key: buildPaymentEventKey({
+      try {
+        await upsertPaymentEvent(env, {
+          idempotency_key: buildPaymentEventKey({
+            channel: order.payment_method,
+            eventType: 'refund',
+            outTradeNo,
+            notifyId: refundNo,
+            tradeNo: order.payment_transaction_id || null,
+          }),
           channel: order.payment_method,
-          eventType: 'refund',
-          outTradeNo,
-          notifyId: refundNo,
-          tradeNo: order.payment_transaction_id || null,
-        }),
-        channel: order.payment_method,
-        out_trade_no: outTradeNo,
-        transaction_id: order.payment_transaction_id || null,
-        notify_id: null,
-        event_type: 'refund',
-        status: finalStatus,
-        amount: refundAmount,
-        processed: true,
-        payload: {
-          orderItemIds,
-          provider: providerPayload,
-          orderDeleted,
-          remainingDiscountAmount,
-        },
-      });
-
-      if (requesterUserId) {
-        await insertNotification(env, {
-          userId: requesterUserId,
-          type: 'refund_approved',
-          orderId,
-          message: `订单 #${orderId.slice(0, 8)} 的退款申请已由${order.payment_method === 'wechat' ? '微信' : '支付宝'}商户账号受理，当前状态：${finalStatus}。`,
+          out_trade_no: outTradeNo,
+          transaction_id: order.payment_transaction_id || null,
+          notify_id: null,
+          event_type: 'refund',
+          status: finalStatus,
+          amount: refundAmount,
+          processed: true,
+          payload: {
+            orderItemIds,
+            provider: providerPayload,
+            orderDeleted,
+            remainingDiscountAmount,
+          },
         });
+      } catch (eventError) {
+        mutationWarning = `${mutationWarning ? `${mutationWarning}；` : ''}退款事件写入失败：${eventError instanceof Error ? eventError.message : 'unknown event error'}`;
+      }
+
+      if (merchantUserId) {
+        try {
+          await insertNotification(env, {
+            userId: merchantUserId,
+            type: isRefundSuccess ? 'refund_completed' : 'refund_failed',
+            orderId,
+            message: isRefundSuccess
+              ? `订单 #${orderId.slice(0, 8)} 退款已受理，金额 ¥${refundAmount.toFixed(2)}，状态 ${finalStatus}。`
+              : `订单 #${orderId.slice(0, 8)} 退款申请提交后仍在处理，请稍后核对状态。`,
+          });
+        } catch (notifyError) {
+          mutationWarning = `${mutationWarning ? `${mutationWarning}；` : ''}商户通知失败：${notifyError instanceof Error ? notifyError.message : 'unknown notify error'}`;
+        }
+      }
+
+      if (requesterUserId && requesterUserId !== merchantUserId) {
+        try {
+          await insertNotification(env, {
+            userId: requesterUserId,
+            type: isRefundSuccess ? 'refund_approved' : 'refund_failed',
+            orderId,
+            message: isRefundSuccess
+              ? `订单 #${orderId.slice(0, 8)} 的退款申请已由${order.payment_method === 'wechat' ? '微信' : '支付宝'}商户账号受理，当前状态：${finalStatus}。`
+              : `订单 #${orderId.slice(0, 8)} 退款申请暂未完成，当前状态：${finalStatus}。`,
+          });
+        } catch (notifyError) {
+          mutationWarning = `${mutationWarning ? `${mutationWarning}；` : ''}发起人通知失败：${notifyError instanceof Error ? notifyError.message : 'unknown notify error'}`;
+        }
       }
 
       return json({
@@ -1660,7 +1720,15 @@ export default {
         remainingDiscountAmount,
         refundedItemIds: orderItemIds,
         refundNo,
+        warning: mutationWarning,
       });
+      } catch (error) {
+        return json({
+          success: false,
+          status: 'failed',
+          error: `refund-items runtime error: ${error instanceof Error ? error.message : 'unknown error'}`,
+        }, { status: 500 });
+      }
     }
 
     if (url.pathname.startsWith('/api/payment/status/') && request.method === 'GET') {
@@ -2002,5 +2070,12 @@ export default {
     }
 
     return json({ error: 'not found' }, { status: 404 });
+    } catch (error) {
+      return json({
+        success: false,
+        status: 'failed',
+        error: `worker runtime error: ${error instanceof Error ? error.message : 'unknown error'}`,
+      }, { status: 500 });
+    }
   },
 };
