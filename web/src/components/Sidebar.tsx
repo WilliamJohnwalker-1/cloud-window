@@ -28,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'products', label: '商品', icon: Package },
     { id: 'inventory', label: '库存', icon: Database, roles: ['admin', 'super_admin', 'inventory_manager'] },
     { id: 'orders', label: '订单', icon: ShoppingCart },
-    { id: 'payment', label: '收款台', icon: ScanLine, roles: ['admin', 'super_admin', 'inventory_manager'] },
+    { id: 'payment', label: '收银台', icon: ScanLine, roles: ['admin', 'super_admin', 'inventory_manager'] },
     { id: 'reports', label: '报表', icon: BarChart3, roles: ['admin', 'super_admin'] },
     { id: 'profile', label: '我的', icon: User },
     { id: 'stores', label: '店铺', icon: Store, roles: ['admin', 'super_admin'] },

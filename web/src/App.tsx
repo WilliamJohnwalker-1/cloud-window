@@ -232,7 +232,7 @@ function App() {
       case 'orders':
         return '订单中心';
       case 'payment':
-        return '扫码收款台';
+        return '扫码收银台';
       case 'reports':
         return '数据报表';
       case 'profile':

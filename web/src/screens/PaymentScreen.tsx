@@ -388,6 +388,7 @@ export const PaymentScreen: React.FC = () => {
       });
       setTransactionId('');
       setPaymentAuthCode('');
+      setScanTarget('payment');
       setStatus('pending');
       setStatusMessage(`零售订单已创建：#${orderId.slice(0, 8)}，请扫描客户付款码`);
       paymentInputRef.current?.focus();
@@ -532,7 +533,7 @@ export const PaymentScreen: React.FC = () => {
     const nextAmount = Number(nextItems.reduce((sum, item) => sum + item.parsedValue * item.quantity, 0).toFixed(2));
     const diff = Number((activeOrder.originalAmount - nextAmount).toFixed(2));
     const note = diff > 0
-      ? `收款台按商品抹零：原金额¥${activeOrder.originalAmount.toFixed(2)}，实收¥${nextAmount.toFixed(2)}，抹零¥${diff.toFixed(2)}`
+      ? `收银台按商品抹零：原金额¥${activeOrder.originalAmount.toFixed(2)}，实收¥${nextAmount.toFixed(2)}，抹零¥${diff.toFixed(2)}`
       : null;
 
     setIsApplyingItemRounding(true);
@@ -657,7 +658,7 @@ export const PaymentScreen: React.FC = () => {
   if (!canUseCashier) {
     return (
       <div className="bg-white/5 border border-white/10 rounded-3xl p-6 text-white/70">
-        当前账号无收款权限，仅管理员/库存管理员可使用扫码收款台。
+        当前账号无收款权限，仅管理员/库存管理员可使用扫码收银台。
       </div>
     );
   }
@@ -666,7 +667,7 @@ export const PaymentScreen: React.FC = () => {
     <div className="space-y-6">
       <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-xl font-bold">扫码收款台（Web）</h3>
+          <h3 className="text-xl font-bold">扫码收银台（Web）</h3>
           <p className="text-sm text-white/50 mt-1">流程：扫商品条码建单 → 扫客户付款码收款（支持微信/支付宝）</p>
           <p className="text-xs text-white/40 mt-2">{configMessage}</p>
         </div>

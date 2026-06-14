@@ -16,18 +16,6 @@ interface CartDraftItem {
 type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
-interface RefundApprovalRequest {
-  id: string;
-  order_id: string;
-  requester_user_id: string;
-  approver_user_id: string;
-  status: 'pending' | 'approved' | 'rejected' | 'completed' | 'failed';
-  reason: string;
-  requested_item_ids: string[];
-  requested_amount: number;
-  created_at: string;
-}
-
 export const OrdersScreen: React.FC = () => {
   const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
@@ -56,9 +44,6 @@ export const OrdersScreen: React.FC = () => {
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
-  const [pendingRefundRequests, setPendingRefundRequests] = useState<RefundApprovalRequest[]>([]);
-  const [loadingRefundRequests, setLoadingRefundRequests] = useState(false);
-  const [processingRefundRequestId, setProcessingRefundRequestId] = useState<string | null>(null);
 
   const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
     return kind === 'retail' ? '零售订单' : '分销订单';
@@ -334,7 +319,7 @@ export const OrdersScreen: React.FC = () => {
 
     setRefundingOrderId(order.id);
     try {
-      const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund-request`, {
+      const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund-items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -349,22 +334,26 @@ export const OrdersScreen: React.FC = () => {
 
       const payload = await response.json();
       if (!response.ok || !payload.success) {
-        setPageNotice({ type: 'error', text: `退款申请失败：${String(payload.error || '未知错误')}` });
+        setPageNotice({ type: 'error', text: `退款失败：${String(payload.error || '未知错误')}` });
         return;
       }
 
       setPageNotice({
         type: 'success',
-        text: `退款申请已提交给收款账号，待同意后执行退款（¥${Number(payload.requestedAmount || refundAmount).toFixed(2)}）`,
+        text: payload.status === 'refunded' || payload.orderDeleted
+          ? `退款成功：¥${Number(payload.refundAmount || 0).toFixed(2)}，订单已移除`
+          : `退款申请已提交至${order.payment_method === 'wechat' ? '微信' : '支付宝'}商户账号：¥${Number(payload.refundAmount || refundAmount).toFixed(2)}，状态 ${String(payload.status || 'pending')}`,
       });
 
-      closeRefundModal();
-
-      try {
-        await fetchPendingRefundRequests();
-      } catch {
-        // no-op
+      if (payload.status === 'refunded' || payload.orderDeleted) {
+        setHiddenRefundedOrderIds((prev) => {
+          const next = new Set(prev);
+          next.add(order.id);
+          return next;
+        });
       }
+
+      closeRefundModal();
 
       try {
         await fetchOrders();
@@ -372,6 +361,8 @@ export const OrdersScreen: React.FC = () => {
         if (latest) {
           setDetailCache((prev) => ({ ...prev, [order.id]: latest }));
           setDetailOrderData(latest);
+        } else if (payload.status === 'refunded' || payload.orderDeleted) {
+          closeOrderDetail();
         }
       } catch {
         setPageNotice((prev) => {
@@ -388,124 +379,6 @@ export const OrdersScreen: React.FC = () => {
       setRefundingOrderId(null);
     }
   };
-
-  const fetchPendingRefundRequests = useCallback(async (): Promise<void> => {
-    if (!user?.id) {
-      setPendingRefundRequests([]);
-      return;
-    }
-
-    setLoadingRefundRequests(true);
-    try {
-      const response = await fetch(
-        `${getPaymentApiEndpoint()}/api/payment/refund-requests?approverUserId=${encodeURIComponent(user.id)}&status=pending&limit=30`,
-        {
-          method: 'GET',
-        },
-      );
-
-      const payload = await response.json();
-      if (!response.ok || !payload.success) {
-        setPendingRefundRequests([]);
-        return;
-      }
-
-      setPendingRefundRequests(Array.isArray(payload.requests) ? payload.requests : []);
-    } catch {
-      setPendingRefundRequests([]);
-    } finally {
-      setLoadingRefundRequests(false);
-    }
-  }, [user?.id]);
-
-  const handleApproveRefundRequest = async (requestId: string): Promise<void> => {
-    if (!user?.id || processingRefundRequestId) return;
-    setProcessingRefundRequestId(requestId);
-    try {
-      const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund-request/approve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requestId,
-          operatorUserId: user.id,
-        }),
-      });
-
-      const payload = await response.json();
-      if (!response.ok || !payload.success) {
-        setPageNotice({ type: 'error', text: `同意退款失败：${String(payload.error || '未知错误')}` });
-        return;
-      }
-
-      const refundResult = payload.refundResult || {};
-      if (refundResult.status === 'refunded' || refundResult.orderDeleted) {
-        setHiddenRefundedOrderIds((prev) => {
-          const next = new Set(prev);
-          if (refundResult.orderId) {
-            next.add(String(refundResult.orderId));
-          }
-          return next;
-        });
-      }
-
-      setPageNotice({
-        type: 'success',
-        text: `已同意并执行退款：¥${Number(refundResult.refundAmount || 0).toFixed(2)}`,
-      });
-
-      await Promise.all([fetchOrders(), fetchPendingRefundRequests()]);
-
-      if (refundResult.orderId) {
-        const latest = await fetchOrderDetail(String(refundResult.orderId));
-        if (latest) {
-          setDetailCache((prev) => ({ ...prev, [String(refundResult.orderId)]: latest }));
-          setDetailOrderData(latest);
-        } else if (refundResult.status === 'refunded' || refundResult.orderDeleted) {
-          closeOrderDetail();
-        }
-      }
-    } catch (error) {
-      setPageNotice({ type: 'error', text: `同意退款异常：${error instanceof Error ? error.message : '未知错误'}` });
-    } finally {
-      setProcessingRefundRequestId(null);
-    }
-  };
-
-  const handleRejectRefundRequest = async (requestId: string): Promise<void> => {
-    if (!user?.id || processingRefundRequestId) return;
-    setProcessingRefundRequestId(requestId);
-    try {
-      const response = await fetch(`${getPaymentApiEndpoint()}/api/payment/refund-request/reject`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requestId,
-          operatorUserId: user.id,
-        }),
-      });
-
-      const payload = await response.json();
-      if (!response.ok || !payload.success) {
-        setPageNotice({ type: 'error', text: `拒绝退款失败：${String(payload.error || '未知错误')}` });
-        return;
-      }
-
-      setPageNotice({ type: 'success', text: '已拒绝退款申请' });
-      await fetchPendingRefundRequests();
-    } catch (error) {
-      setPageNotice({ type: 'error', text: `拒绝退款异常：${error instanceof Error ? error.message : '未知错误'}` });
-    } finally {
-      setProcessingRefundRequestId(null);
-    }
-  };
-
-  useEffect(() => {
-    void fetchPendingRefundRequests();
-  }, [fetchPendingRefundRequests]);
 
   const exportOrdersXlsx = async (): Promise<void> => {
     const XLSX = await import('xlsx');
@@ -832,59 +705,6 @@ export const OrdersScreen: React.FC = () => {
             <p className="text-xs text-white/50">{rangeLabel}折扣总价</p>
             <p className="text-xl font-black text-accent">¥{totalDiscount.toFixed(2)}</p>
           </div>
-        </div>
-      </div>
-
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">待处理退款审批</h3>
-          <button
-            type="button"
-            onClick={() => {
-              void fetchPendingRefundRequests();
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-white/10 bg-white/5 hover:bg-white/10"
-          >
-            刷新
-          </button>
-        </div>
-
-        {loadingRefundRequests && <p className="text-sm text-white/50">正在加载退款审批...</p>}
-        {!loadingRefundRequests && pendingRefundRequests.length === 0 && (
-          <p className="text-sm text-white/50">暂无待审批退款申请</p>
-        )}
-
-        <div className="space-y-2">
-          {pendingRefundRequests.map((request) => (
-            <div key={request.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">订单 #{String(request.order_id || '').slice(0, 8)} 退款申请</p>
-                <p className="text-xs text-white/60 mt-1">金额 ¥{Number(request.requested_amount || 0).toFixed(2)} · {request.reason || '无原因'} · {new Date(request.created_at).toLocaleString()}</p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleRejectRefundRequest(request.id);
-                  }}
-                  disabled={processingRefundRequestId === request.id}
-                  className="px-3 py-1.5 rounded-lg border border-red-400/30 bg-red-500/15 text-red-100 text-xs font-bold disabled:opacity-60"
-                >
-                  拒绝
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleApproveRefundRequest(request.id);
-                  }}
-                  disabled={processingRefundRequestId === request.id}
-                  className="px-3 py-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/15 text-emerald-100 text-xs font-bold disabled:opacity-60"
-                >
-                  同意并退款
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 
@@ -1317,7 +1137,7 @@ export const OrdersScreen: React.FC = () => {
                 <X size={16} />
               </button>
             </div>
-            <p className="text-sm text-white/60">订单 #{refundModalOrderId.slice(0, 8)} 请选择要退款的商品。提交后会发给收款账号审批，同意后才会执行退款。</p>
+            <p className="text-sm text-white/60">订单 #{refundModalOrderId.slice(0, 8)} 请选择要退款的商品。提交后会向微信/支付宝商户账号发起退款申请。</p>
             {(() => {
               const order = getResolvedOrder(refundModalOrderId);
               if (!order) {

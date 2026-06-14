@@ -1457,8 +1457,8 @@ export default {
 
     if (url.pathname === '/api/payment/refund-items' && request.method === 'POST') {
       const body = await request.json();
-      const approvedRequestId = String(body.approvedRequestId || '').trim();
       const orderId = String(body.orderId || '').trim();
+      const requesterUserId = String(body.requesterUserId || '').trim();
       const orderItemIds = Array.isArray(body.orderItemIds)
         ? Array.from(new Set(body.orderItemIds.map((itemId) => String(itemId || '').trim()).filter(Boolean)))
         : [];
@@ -1469,36 +1469,7 @@ export default {
       if (orderItemIds.length === 0) {
         return json({ success: false, status: 'failed', error: 'missing order item ids' }, { status: 400 });
       }
-
-      if (!approvedRequestId) {
-        return json({ success: false, status: 'failed', error: '请先提交退款申请并由收款账号审批通过' }, { status: 403 });
-      }
-
-      const requestRow = await getRefundRequestById(env, approvedRequestId);
-      if (!requestRow) {
-        return json({ success: false, status: 'failed', error: '退款审批单不存在' }, { status: 404 });
-      }
-
-      if (String(requestRow.status || '').toLowerCase() !== 'approved') {
-        return json({ success: false, status: 'failed', error: '退款审批单未通过，无法执行退款' }, { status: 409 });
-      }
-
-      if (String(requestRow.order_id || '') !== orderId) {
-        return json({ success: false, status: 'failed', error: '退款审批单与订单不匹配' }, { status: 400 });
-      }
-
-      const approvedItemIds = Array.isArray(requestRow.requested_item_ids)
-        ? requestRow.requested_item_ids.map((itemId) => String(itemId || '').trim()).filter(Boolean)
-        : [];
-      const approvedSet = new Set(approvedItemIds);
-      const requestMatch = approvedItemIds.length === orderItemIds.length
-        && orderItemIds.every((itemId) => approvedSet.has(itemId));
-
-      if (!requestMatch) {
-        return json({ success: false, status: 'failed', error: '退款商品与审批单不一致' }, { status: 400 });
-      }
-
-      const reason = String(body.reason || requestRow.reason || '门店退款').trim().slice(0, 128);
+      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
 
       const order = await getOrderWithItems(env, orderId);
       if (!order) {
@@ -1670,6 +1641,15 @@ export default {
           remainingDiscountAmount,
         },
       });
+
+      if (requesterUserId) {
+        await insertNotification(env, {
+          userId: requesterUserId,
+          type: 'refund_approved',
+          orderId,
+          message: `订单 #${orderId.slice(0, 8)} 的退款申请已由${order.payment_method === 'wechat' ? '微信' : '支付宝'}商户账号受理，当前状态：${finalStatus}。`,
+        });
+      }
 
       return json({
         success: true,

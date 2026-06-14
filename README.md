@@ -170,7 +170,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.27）
+### 5. 启动 Web 端（v1.2.28）
 
 ```bash
 npm run web:v2
@@ -367,6 +367,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.28 (2026-06-14) - 退款语义纠偏（商户侧申请）
+
+- 退款流程从“平台内审批”调整为“直接向微信/支付宝商户账号发起退款申请”
+- 移除订单页“待处理退款审批”平台审批区，退款入口恢复为直接提交商户侧申请
+- 退款申请被商户侧受理后，向平台发起人发送“申请通过/已受理”通知
 
 ### Web v1.2.27 (2026-06-14) - 退款审批上线与抹零保存修复
 
