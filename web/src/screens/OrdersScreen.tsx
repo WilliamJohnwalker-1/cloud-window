@@ -394,7 +394,7 @@ export const OrdersScreen: React.FC = () => {
   const openRefundModal = (order: (typeof orders)[number]): void => {
     const resolvedOrder = getResolvedOrder(order.id) || order;
     setRefundModalOrderId(order.id);
-    setRefundSelectedItemIds(new Set(resolvedOrder.items.map((item) => item.id)));
+    setRefundSelectedItemIds(new Set(resolvedOrder.items.filter((item) => Number(item.quantity || 0) > 0).map((item) => item.id)));
     setRefundReasonInput('收银台退款');
   };
 
@@ -1320,6 +1320,7 @@ export const OrdersScreen: React.FC = () => {
                       <td className="px-4 py-3">
                         {resolveItemName(item.product_id, item.product_name)}
                         {item.is_sample ? <span className="ml-2 text-[10px] text-cyan-300">样品</span> : null}
+                        {Number(item.quantity || 0) <= 0 ? <span className="ml-2 text-[10px] text-amber-300">已退款</span> : null}
                       </td>
                       <td className="px-4 py-3 text-right">{item.quantity}</td>
                       <td className="px-4 py-3 text-right">¥{item.retail_price}</td>
@@ -1423,32 +1424,33 @@ export const OrdersScreen: React.FC = () => {
                 return <p className="text-sm text-red-200">订单详情未加载，请关闭后重试。</p>;
               }
 
-              const allItemIds = order.items.map((item) => item.id);
-              const selectedCount = order.items.filter((item) => refundSelectedItemIds.has(item.id)).length;
-              const selectedAmount = order.items
+              const refundableItems = order.items.filter((item) => Number(item.quantity || 0) > 0);
+              const allItemIds = refundableItems.map((item) => item.id);
+              const selectedCount = refundableItems.filter((item) => refundSelectedItemIds.has(item.id)).length;
+              const selectedAmount = refundableItems
                 .filter((item) => refundSelectedItemIds.has(item.id))
                 .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0);
 
               return (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/60">已选 {selectedCount}/{order.items.length} 项 · 退款金额 ¥{selectedAmount.toFixed(2)}</span>
+                    <span className="text-white/60">已选 {selectedCount}/{refundableItems.length} 项 · 退款金额 ¥{selectedAmount.toFixed(2)}</span>
                     <button
                       type="button"
                       onClick={() => {
                         setRefundSelectedItemIds((prev) => {
-                          if (prev.size === allItemIds.length) return new Set();
+                          if (allItemIds.length > 0 && prev.size === allItemIds.length) return new Set();
                           return new Set(allItemIds);
                         });
                       }}
                       className="text-accent hover:text-accent/80"
                     >
-                      {refundSelectedItemIds.size === allItemIds.length ? '取消全选' : '全选'}
+                      {allItemIds.length > 0 && refundSelectedItemIds.size === allItemIds.length ? '取消全选' : '全选'}
                     </button>
                   </div>
 
                   <div className="max-h-48 overflow-y-auto space-y-2 border border-white/10 rounded-xl p-3 bg-white/[0.02]">
-                    {order.items.map((item) => {
+                    {refundableItems.map((item) => {
                       const checked = refundSelectedItemIds.has(item.id);
                       return (
                         <label key={item.id} className="flex items-center justify-between gap-3 text-sm cursor-pointer">
@@ -1474,6 +1476,9 @@ export const OrdersScreen: React.FC = () => {
                         </label>
                       );
                     })}
+                    {refundableItems.length === 0 && (
+                      <p className="text-xs text-white/50">当前无可退款商品（已全部退款）</p>
+                    )}
                   </div>
                 </div>
               );
