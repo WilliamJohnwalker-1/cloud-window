@@ -246,7 +246,7 @@ Before committing:
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.20`
-- Current web baseline: `v1.2.27`
+- Current web baseline: `v1.2.28`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 库存/订单/报表三页筛选统一升级为“城市→店铺”二级筛选，口径对齐移动端
