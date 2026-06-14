@@ -1933,6 +1933,13 @@ export default {
 
       const order = await getOrderById(env, orderId);
       if (!order) return json({ status: 'failed', error: 'order not found' }, { status: 404 });
+      const currentStatus = String(order.payment_status || '').toLowerCase();
+      if (currentStatus === 'refunded'
+        || currentStatus === 'partial_refunded'
+        || currentStatus === 'refund_pending'
+        || currentStatus === 'partial_refund_pending') {
+        return json({ status: currentStatus, transactionId: order.payment_transaction_id || undefined });
+      }
       if (order.payment_status === 'paid') {
         return json({ status: 'paid', transactionId: order.payment_transaction_id || undefined });
       }
