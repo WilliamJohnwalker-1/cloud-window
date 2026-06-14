@@ -181,9 +181,7 @@ export const OrdersScreen: React.FC = () => {
       result = result.filter((order) => {
         const paymentStatus = String(order.payment_status || '').toLowerCase();
         const isRefundedOrder = paymentStatus === 'refunded'
-          || paymentStatus === 'refund_pending'
-          || paymentStatus === 'partial_refunded'
-          || paymentStatus === 'partial_refund_pending';
+          || paymentStatus === 'refund_pending';
         return refundViewFilter === 'refunded' ? isRefundedOrder : !isRefundedOrder;
       });
     }
@@ -195,8 +193,7 @@ export const OrdersScreen: React.FC = () => {
     return filteredOrders.filter((order) => {
       const paymentStatus = String(order.payment_status || '').toLowerCase();
       return paymentStatus !== 'refunded'
-        && paymentStatus !== 'refund_pending'
-        && paymentStatus !== 'partial_refund_pending';
+        && paymentStatus !== 'refund_pending';
     });
   }, [filteredOrders]);
 
@@ -481,9 +478,9 @@ export const OrdersScreen: React.FC = () => {
         }
       })();
       const sameOriginAllowed = remoteOrigin === window.location.origin;
-      const candidateUrls = (isLocalLikeHost && !sameOriginAllowed
-        ? [remoteUrl]
-        : [remoteUrl, sameOriginUrl])
+      const candidateUrls = (sameOriginAllowed
+        ? [remoteUrl, sameOriginUrl]
+        : [remoteUrl])
         .filter((url, index, arr) => arr.indexOf(url) === index);
 
       let response: Response | null = null;

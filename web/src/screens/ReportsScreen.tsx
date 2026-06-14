@@ -91,9 +91,7 @@ export const ReportsScreen: React.FC = () => {
     const revenueOrders = scopedOrders.filter((order) => {
       const paymentStatus = String(order.payment_status || '').toLowerCase();
       return paymentStatus !== 'refunded'
-        && paymentStatus !== 'refund_pending'
-        && paymentStatus !== 'partial_refunded'
-        && paymentStatus !== 'partial_refund_pending';
+        && paymentStatus !== 'refund_pending';
     });
     const totalRetail = revenueOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = revenueOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
