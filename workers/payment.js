@@ -629,6 +629,55 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
   };
 }
 
+async function syncRetailRefundOrderState(env, orderId) {
+  const remainingItems = await supabaseRequest(
+    env,
+    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&quantity=gt.0&select=id,quantity,retail_price,discount_price`,
+  );
+  const safeRemaining = Array.isArray(remainingItems) ? remainingItems : [];
+
+  if (safeRemaining.length === 0) {
+    await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        total_retail_amount: 0,
+        total_discount_amount: 0,
+        payment_amount: 0,
+        payment_status: 'refunded',
+      }),
+    });
+    return { payment_status: 'refunded', remaining_discount_amount: 0 };
+  }
+
+  const remainingRetailAmount = Number(
+    safeRemaining
+      .reduce((sum, item) => sum + Number(item.retail_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+  const remainingDiscountAmount = Number(
+    safeRemaining
+      .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+
+  await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      total_retail_amount: remainingRetailAmount,
+      total_discount_amount: remainingDiscountAmount,
+      payment_amount: remainingRetailAmount,
+      payment_status: 'partial_refunded',
+    }),
+  });
+
+  return {
+    payment_status: 'partial_refunded',
+    remaining_discount_amount: remainingDiscountAmount,
+  };
+}
+
 async function getPaymentEventByKey(env, idempotencyKey) {
   const rows = await supabaseRequest(
     env,
@@ -1827,8 +1876,9 @@ export default {
         try {
           const mutationResult = await applyRetailRefundItemsFallback(env, order, orderItemIds);
           orderDeleted = Boolean(mutationResult?.order_deleted);
-          remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
-          finalStatus = String(mutationResult?.payment_status || (remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded'));
+          const syncedOrderState = await syncRetailRefundOrderState(env, orderId);
+          remainingDiscountAmount = Number(syncedOrderState?.remaining_discount_amount || mutationResult?.remaining_discount_amount || 0);
+          finalStatus = String(syncedOrderState?.payment_status || mutationResult?.payment_status || (remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded'));
         } catch (error) {
           finalStatus = 'partial_refunded';
           mutationWarning = `退款已受理，但订单明细同步失败：${error instanceof Error ? error.message : 'unknown mutation error'}`;
