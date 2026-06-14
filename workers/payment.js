@@ -1572,7 +1572,22 @@ export default {
         const refundedAmount = await getRefundedAmount(env, outTradeNo);
         const remainAmount = Number((totalAmount - refundedAmount).toFixed(2));
         if (remainAmount <= 0) {
-          return json({ success: false, status: 'failed', error: '该订单已无可退款金额' }, { status: 400 });
+          let syncWarning = null;
+          try {
+            await patchOrderPayment(env, orderId, { payment_status: 'refunded' });
+          } catch (patchError) {
+            syncWarning = `已无可退款金额，但状态回写失败：${patchError instanceof Error ? patchError.message : 'unknown patch error'}`;
+          }
+          return json({
+            success: true,
+            status: 'refunded',
+            orderId,
+            refundAmount: 0,
+            refundedAmount,
+            remainAmount: 0,
+            warning: syncWarning,
+            message: '该订单已无可退款金额，按已退款处理',
+          });
         }
         if (refundAmount - remainAmount > 0.000001) {
           return json({ success: false, status: 'failed', error: `退款金额不能大于剩余可退金额 ${remainAmount.toFixed(2)}` }, { status: 400 });
@@ -1599,7 +1614,10 @@ export default {
 
         const refundState = String(refundResult.data?.status || '').toUpperCase();
         isRefundSuccess = refundState === 'SUCCESS';
-        finalStatus = isRefundSuccess ? 'partial_refunded' : 'partial_refund_pending';
+        const isFullRemainingRefund = (remainAmount - refundAmount) <= 0.000001;
+        finalStatus = isRefundSuccess
+          ? (isFullRemainingRefund ? 'refunded' : 'partial_refunded')
+          : (isFullRemainingRefund ? 'refunded' : 'partial_refund_pending');
         providerPayload = refundResult.data;
       } else if (order.payment_method === 'alipay') {
         const missing = getMissingEnv(env, [
@@ -1615,7 +1633,22 @@ export default {
         const refundedAmount = await getRefundedAmount(env, outTradeNo);
         const remainAmount = Number((totalAmount - refundedAmount).toFixed(2));
         if (remainAmount <= 0) {
-          return json({ success: false, status: 'failed', error: '该订单已无可退款金额' }, { status: 400 });
+          let syncWarning = null;
+          try {
+            await patchOrderPayment(env, orderId, { payment_status: 'refunded' });
+          } catch (patchError) {
+            syncWarning = `已无可退款金额，但状态回写失败：${patchError instanceof Error ? patchError.message : 'unknown patch error'}`;
+          }
+          return json({
+            success: true,
+            status: 'refunded',
+            orderId,
+            refundAmount: 0,
+            refundedAmount,
+            remainAmount: 0,
+            warning: syncWarning,
+            message: '该订单已无可退款金额，按已退款处理',
+          });
         }
         if (refundAmount - remainAmount > 0.000001) {
           return json({ success: false, status: 'failed', error: `退款金额不能大于剩余可退金额 ${remainAmount.toFixed(2)}` }, { status: 400 });
@@ -1635,7 +1668,10 @@ export default {
         }
 
         isRefundSuccess = refundResult.status === 'refunded';
-        finalStatus = isRefundSuccess ? 'partial_refunded' : 'partial_refund_pending';
+        const isFullRemainingRefund = (remainAmount - refundAmount) <= 0.000001;
+        finalStatus = isRefundSuccess
+          ? (isFullRemainingRefund ? 'refunded' : 'partial_refunded')
+          : (isFullRemainingRefund ? 'refunded' : 'partial_refund_pending');
         providerPayload = refundResult.data;
       } else {
         return json({ success: false, status: 'failed', error: '订单未记录支付渠道，无法退款' }, { status: 400 });
@@ -1676,7 +1712,7 @@ export default {
       } else {
         try {
           await patchOrderPayment(env, orderId, {
-            payment_status: 'partial_refund_pending',
+            payment_status: finalStatus,
           });
         } catch (patchError) {
           mutationWarning = `退款处理中，状态回写失败：${patchError instanceof Error ? patchError.message : 'unknown patch error'}`;
