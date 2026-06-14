@@ -562,13 +562,16 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
 
   const encodedIds = refundItemIds.map((id) => encodeURIComponent(id)).join(',');
   await supabaseRequest(env, `/order_items?id=in.(${encodedIds})`, {
-    method: 'DELETE',
+    method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      quantity: 0,
+    }),
   });
 
   const remainingItems = await supabaseRequest(
     env,
-    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&select=id,quantity,retail_price,discount_price`,
+    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&quantity=gt.0&select=id,quantity,retail_price,discount_price`,
   );
   const safeRemaining = Array.isArray(remainingItems) ? remainingItems : [];
 
