@@ -375,6 +375,7 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 订单页退款请求路由调整：本地测试端口且支付网关与当前站点不同源时，优先直连 `VITE_PAYMENT_API_URL`，避免误打同源 `/api/payment/refund-items` 导致 404 空响应。
 - 退款失败提示增强：兼容 `error/message/msg/detail/rawText` 多字段解析，并在失败前增加订单状态复核，避免“已退款到账但前端误报失败”。
 - 退款幂等优化：当后端返回“订单已全额退款（requestID）”等重复退款语义时，前端按幂等成功处理并刷新订单状态。
+- 退款重复点击幂等修复：当后端判定“当前已无可退款金额”时按已退款成功返回，并强制同步订单状态到 `refunded`，不再停留 `partial_refund_pending`。
 - 收银台相关体验修复：扫码建单后自动聚焦收款码输入，避免“抹零输入串入付款码输入框”的视觉干扰。
 
 ### Web v1.2.28 (2026-06-14) - 退款语义纠偏（商户侧申请）
