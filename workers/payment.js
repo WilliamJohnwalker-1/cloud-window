@@ -435,7 +435,7 @@ async function getOrderWithItems(env, orderId) {
 
   const itemRows = await supabaseRequest(
     env,
-    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&select=id,product_id,quantity,retail_price,discount_price`,
+    `/order_items?order_id=eq.${encodeURIComponent(orderId)}&select=id,product_id,quantity,retail_price,discount_price,products(name)`,
   );
 
   return {
@@ -556,16 +556,8 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
     restoreByProduct.set(productId, Number(restoreByProduct.get(productId) || 0) + quantity);
   });
 
-  const isStoreRetail = String(order?.store_id || '').trim()
-    && String(order?.request_id || '').startsWith('msr:');
-  if (isStoreRetail) {
-    for (const [productId, quantity] of restoreByProduct.entries()) {
-      await increaseStoreInventoryByProduct(env, String(order.store_id), productId, quantity);
-    }
-  } else {
-    for (const [productId, quantity] of restoreByProduct.entries()) {
-      await increaseInventoryByProduct(env, productId, quantity);
-    }
+  for (const [productId, quantity] of restoreByProduct.entries()) {
+    await increaseInventoryByProduct(env, productId, quantity);
   }
 
   const encodedIds = refundItemIds.map((id) => encodeURIComponent(id)).join(',');
@@ -588,9 +580,10 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
         total_retail_amount: 0,
         total_discount_amount: 0,
         payment_amount: 0,
+        payment_status: 'refunded',
       }),
     });
-    return { order_deleted: false, remaining_discount_amount: 0 };
+    return { order_deleted: false, remaining_discount_amount: 0, payment_status: 'refunded' };
   }
 
   const remainingRetailAmount = Number(
@@ -611,12 +604,14 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
       total_retail_amount: remainingRetailAmount,
       total_discount_amount: remainingDiscountAmount,
       payment_amount: remainingRetailAmount,
+      payment_status: 'partial_refunded',
     }),
   });
 
   return {
     order_deleted: false,
     remaining_discount_amount: remainingDiscountAmount,
+    payment_status: 'partial_refunded',
   };
 }
 
@@ -1212,6 +1207,7 @@ export default {
       const refundedItemsSnapshot = selectedItems.map((item) => ({
         order_item_id: String(item.id || ''),
         product_id: String(item.product_id || ''),
+        product_name: String(item?.products?.name || ''),
         quantity: Number(item.quantity || 0),
         retail_price: Number(item.retail_price || 0),
         discount_price: Number(item.discount_price || 0),
@@ -1824,9 +1820,7 @@ export default {
           const mutationResult = await applyRetailRefundItemsFallback(env, order, orderItemIds);
           orderDeleted = Boolean(mutationResult?.order_deleted);
           remainingDiscountAmount = Number(mutationResult?.remaining_discount_amount || 0);
-          const nextStatus = remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded';
-          finalStatus = nextStatus;
-          await patchOrderPayment(env, orderId, { payment_status: nextStatus });
+          finalStatus = String(mutationResult?.payment_status || (remainingDiscountAmount <= 0.000001 ? 'refunded' : 'partial_refunded'));
         } catch (error) {
           finalStatus = 'partial_refunded';
           mutationWarning = `退款已受理，但订单明细同步失败：${error instanceof Error ? error.message : 'unknown mutation error'}`;
