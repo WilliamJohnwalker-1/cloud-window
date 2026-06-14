@@ -1,11 +1,10 @@
 const { spawnSync } = require('node:child_process');
 
 const run = (command, args) => {
-  const shell = process.platform === 'win32';
   const result = spawnSync(command, args, {
-    shell,
     stdio: 'inherit',
     env: process.env,
+    windowsHide: true,
   });
   return result.status || 0;
 };
