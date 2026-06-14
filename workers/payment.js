@@ -384,6 +384,17 @@ function maybeUuidFromOutTradeNo(outTradeNo) {
   return normalized;
 }
 
+function buildRefundedItemsSnapshot(selectedItems) {
+  return selectedItems.map((item) => ({
+    order_item_id: String(item.id || ''),
+    product_id: String(item.product_id || ''),
+    product_name: String(item?.products?.name || ''),
+    quantity: Number(item.quantity || 0),
+    retail_price: Number(item.retail_price || 0),
+    discount_price: Number(item.discount_price || 0),
+  }));
+}
+
 const wechatAuthCodePattern = /^1[0-5][0-9]{16}$/;
 const alipayAuthCodePattern = /^(?:2[5-9]|30)[0-9]{14,22}$/;
 
@@ -1207,22 +1218,7 @@ export default {
       if (selectedItems.length !== orderItemIds.length) {
         return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
       }
-      const refundedItemsSnapshot = selectedItems.map((item) => ({
-        order_item_id: String(item.id || ''),
-        product_id: String(item.product_id || ''),
-        product_name: String(item?.products?.name || ''),
-        quantity: Number(item.quantity || 0),
-        retail_price: Number(item.retail_price || 0),
-        discount_price: Number(item.discount_price || 0),
-      }));
-      const refundedItemsSnapshot = selectedItems.map((item) => ({
-        order_item_id: String(item.id || ''),
-        product_id: String(item.product_id || ''),
-        product_name: String(item?.products?.name || ''),
-        quantity: Number(item.quantity || 0),
-        retail_price: Number(item.retail_price || 0),
-        discount_price: Number(item.discount_price || 0),
-      }));
+      const refundedItemsSnapshot = buildRefundedItemsSnapshot(selectedItems);
 
       const requestedAmount = Number(
         selectedItems
@@ -1685,6 +1681,7 @@ export default {
       if (selectedItems.length !== orderItemIds.length) {
         return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
       }
+      const refundedItemsSnapshot = buildRefundedItemsSnapshot(selectedItems);
 
       const refundAmount = Number(
         selectedItems
