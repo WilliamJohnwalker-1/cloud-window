@@ -91,6 +91,16 @@ export interface OrderItem {
   one_time_cost: number;
 }
 
+export interface RefundedOrderItem {
+  order_item_id: string;
+  product_id: string;
+  product_name?: string;
+  quantity: number;
+  retail_price: number;
+  discount_price: number;
+  refunded_at?: string;
+}
+
 export interface Order {
   id: string;
   distributor_id: string;
@@ -112,6 +122,7 @@ export interface Order {
   payment_note?: string;
   created_at: string;
   items: OrderItem[];
+  refunded_items?: RefundedOrderItem[];
 }
 
 export interface ProductWithDetails extends Product {

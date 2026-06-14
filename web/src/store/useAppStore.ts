@@ -11,6 +11,7 @@ import type {
   Notification,
   Order,
   OrderItem,
+  RefundedOrderItem,
   ProductCreateInput,
   ProfileUpdateInput,
   ProductWithDetails,
@@ -818,6 +819,42 @@ export const useAppStore = create<AppState>()(
 
         const base = mapOrder(orderRow as OrderRow);
         const row = orderRow as OrderRow;
+        const wechatOutTradeNo = orderId.replace(/-/g, '');
+        const { data: refundEvents } = await supabase
+          .from('payment_events')
+          .select('created_at,payload,status,out_trade_no,event_type,processed')
+          .eq('event_type', 'refund')
+          .eq('processed', true)
+          .in('out_trade_no', [orderId, wechatOutTradeNo])
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        const refundedItemsFromEvents: RefundedOrderItem[] = (refundEvents || [])
+          .flatMap((event: {
+            created_at?: string;
+            payload?: {
+              refundedItems?: Array<{
+                order_item_id?: string;
+                product_id?: string;
+                product_name?: string;
+                quantity?: number | string;
+                retail_price?: number | string;
+                discount_price?: number | string;
+              }>;
+            } | null;
+          }) => {
+            const items = Array.isArray(event?.payload?.refundedItems) ? event.payload.refundedItems : [];
+            return items.map((item) => ({
+              order_item_id: String(item.order_item_id || ''),
+              product_id: String(item.product_id || ''),
+              product_name: item.product_name ? String(item.product_name) : undefined,
+              quantity: Number(item.quantity || 0),
+              retail_price: Number(item.retail_price || 0),
+              discount_price: Number(item.discount_price || 0),
+              refunded_at: event.created_at,
+            }));
+          })
+          .filter((item) => item.order_item_id && item.product_id && item.quantity > 0);
 
         const { data: itemRows, error: itemError } = await supabase
           .from('order_items')
@@ -897,6 +934,7 @@ export const useAppStore = create<AppState>()(
           return {
             ...base,
             items,
+            refunded_items: refundedItemsFromEvents,
           };
         }
 
@@ -928,12 +966,14 @@ export const useAppStore = create<AppState>()(
                 one_time_cost: 0,
               },
             ],
+            refunded_items: refundedItemsFromEvents,
           };
         }
 
         return {
           ...base,
           items: [],
+          refunded_items: refundedItemsFromEvents,
         };
       },
 
