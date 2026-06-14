@@ -37,6 +37,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v4.8-retail-item-level-rounding-and-refund.sql`: item-level rounding + item-level refund mutation.
 - `migrate-v4.9-refund-approval.sql`: refund request approval workflow + refund notification types.
 - `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`: fix RPC writes to non-existent orders.updated_at.
+- `migrate-v4.11-refund-delete-no-double-restore.sql`: avoid double inventory restore when deleting fully refunded orders.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -72,7 +73,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 28. `migrate-v4.8-retail-item-level-rounding-and-refund.sql`
 29. `migrate-v4.9-refund-approval.sql`
 30. `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
-31. `storage-policies.sql`
+31. `migrate-v4.11-refund-delete-no-double-restore.sql`
+32. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -105,7 +107,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 28. `migrate-v4.8-retail-item-level-rounding-and-refund.sql`
 29. `migrate-v4.9-refund-approval.sql`
 30. `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
-31. `storage-policies.sql`
+31. `migrate-v4.11-refund-delete-no-double-restore.sql`
+32. `storage-policies.sql`
 
 ## TABLES
 
