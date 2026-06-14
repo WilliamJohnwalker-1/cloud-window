@@ -428,7 +428,7 @@ async function getOrderById(env, orderId) {
 async function getOrderWithItems(env, orderId) {
   const orderRows = await supabaseRequest(
     env,
-    `/orders?id=eq.${encodeURIComponent(orderId)}&select=id,request_id,store_id,order_kind,total_retail_amount,total_discount_amount,payment_amount,payment_status,payment_method,payment_transaction_id`,
+    `/orders?id=eq.${encodeURIComponent(orderId)}&select=id,distributor_id,request_id,store_id,order_kind,total_retail_amount,total_discount_amount,payment_amount,payment_status,payment_method,payment_transaction_id`,
   );
 
   if (!Array.isArray(orderRows) || orderRows.length === 0) return null;
@@ -442,6 +442,28 @@ async function getOrderWithItems(env, orderId) {
     ...orderRows[0],
     items: Array.isArray(itemRows) ? itemRows : [],
   };
+}
+
+async function insertNotification(env, { userId, type, orderId, message }) {
+  if (!userId) return;
+  await supabaseRequest(env, '/notifications', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      user_id: userId,
+      type,
+      order_id: orderId || null,
+      message: String(message || '').trim() || '系统通知',
+    }),
+  });
+}
+
+async function getRefundRequestById(env, requestId) {
+  const rows = await supabaseRequest(
+    env,
+    `/refund_requests?id=eq.${encodeURIComponent(requestId)}&select=*`,
+  );
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
 async function patchOrderPayment(env, orderId, patch) {
@@ -980,6 +1002,275 @@ export default {
       });
     }
 
+    if (url.pathname === '/api/payment/refund-requests' && request.method === 'GET') {
+      const approverUserId = String(url.searchParams.get('approverUserId') || '').trim();
+      const status = String(url.searchParams.get('status') || 'pending').trim();
+      const limitRaw = Number(url.searchParams.get('limit') || 30);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.floor(limitRaw))) : 30;
+      if (!approverUserId) {
+        return json({ success: false, status: 'failed', error: 'missing approver user id' }, { status: 400 });
+      }
+
+      const rows = await supabaseRequest(
+        env,
+        `/refund_requests?approver_user_id=eq.${encodeURIComponent(approverUserId)}&status=eq.${encodeURIComponent(status)}&select=*&order=created_at.desc&limit=${limit}`,
+      );
+
+      return json({
+        success: true,
+        requests: Array.isArray(rows) ? rows : [],
+      });
+    }
+
+    if (url.pathname === '/api/payment/refund-request' && request.method === 'POST') {
+      const body = await request.json();
+      const orderId = String(body.orderId || '').trim();
+      const requesterUserId = String(body.requesterUserId || '').trim();
+      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
+      const orderItemIds = Array.isArray(body.orderItemIds)
+        ? Array.from(new Set(body.orderItemIds.map((itemId) => String(itemId || '').trim()).filter(Boolean)))
+        : [];
+
+      if (!orderId) {
+        return json({ success: false, status: 'failed', error: 'missing order id' }, { status: 400 });
+      }
+      if (!requesterUserId) {
+        return json({ success: false, status: 'failed', error: 'missing requester user id' }, { status: 400 });
+      }
+      if (orderItemIds.length === 0) {
+        return json({ success: false, status: 'failed', error: 'missing order item ids' }, { status: 400 });
+      }
+
+      const order = await getOrderWithItems(env, orderId);
+      if (!order) {
+        return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
+      }
+
+      if (String(order.order_kind || '').toLowerCase() !== 'retail') {
+        return json({ success: false, status: 'failed', error: '仅零售订单支持退款申请' }, { status: 400 });
+      }
+
+      const orderPaymentStatus = String(order.payment_status || '').toLowerCase();
+      if (!['paid', 'partial_refunded'].includes(orderPaymentStatus)) {
+        return json({ success: false, status: 'failed', error: '仅已支付或部分退款订单可提交退款申请' }, { status: 400 });
+      }
+
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      const selectedItems = orderItems.filter((item) => orderItemIds.includes(String(item.id || '')));
+      if (selectedItems.length !== orderItemIds.length) {
+        return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
+      }
+
+      const requestedAmount = Number(
+        selectedItems
+          .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
+          .toFixed(2),
+      );
+
+      if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+        return json({ success: false, status: 'failed', error: '退款金额无效' }, { status: 400 });
+      }
+
+      const approverUserId = String(order.distributor_id || '').trim();
+      if (!approverUserId) {
+        return json({ success: false, status: 'failed', error: '订单未找到收款账号，无法发起审批' }, { status: 400 });
+      }
+
+      const existingRows = await supabaseRequest(
+        env,
+        `/refund_requests?order_id=eq.${encodeURIComponent(orderId)}&status=eq.pending&select=id&limit=1`,
+      );
+      if (Array.isArray(existingRows) && existingRows.length > 0) {
+        return json({ success: false, status: 'failed', error: '该订单已有待审批退款申请，请先处理现有申请' }, { status: 409 });
+      }
+
+      const insertRows = await supabaseRequest(env, '/refund_requests?select=*', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          order_id: orderId,
+          requester_user_id: requesterUserId,
+          approver_user_id: approverUserId,
+          status: 'pending',
+          reason,
+          requested_item_ids: orderItemIds,
+          requested_amount: requestedAmount,
+        }),
+      });
+
+      const requestRow = Array.isArray(insertRows) && insertRows.length > 0 ? insertRows[0] : null;
+      if (!requestRow?.id) {
+        return json({ success: false, status: 'failed', error: '退款申请创建失败' }, { status: 500 });
+      }
+
+      await insertNotification(env, {
+        userId: approverUserId,
+        type: 'refund_requested',
+        orderId,
+        message: `订单 #${orderId.slice(0, 8)} 收到退款审批申请，金额 ¥${requestedAmount.toFixed(2)}，请处理。`,
+      });
+
+      return json({
+        success: true,
+        requestId: requestRow.id,
+        approverUserId,
+        requestedAmount,
+      });
+    }
+
+    if (url.pathname === '/api/payment/refund-request/reject' && request.method === 'POST') {
+      const body = await request.json();
+      const requestId = String(body.requestId || '').trim();
+      const operatorUserId = String(body.operatorUserId || '').trim();
+      const rejectReason = String(body.rejectReason || '收款账号拒绝退款').trim().slice(0, 128);
+
+      if (!requestId) {
+        return json({ success: false, status: 'failed', error: 'missing request id' }, { status: 400 });
+      }
+      if (!operatorUserId) {
+        return json({ success: false, status: 'failed', error: 'missing operator user id' }, { status: 400 });
+      }
+
+      const requestRow = await getRefundRequestById(env, requestId);
+      if (!requestRow) {
+        return json({ success: false, status: 'failed', error: '退款申请不存在' }, { status: 404 });
+      }
+      if (String(requestRow.status || '').toLowerCase() !== 'pending') {
+        return json({ success: false, status: 'failed', error: '退款申请状态不是待审批，无法拒绝' }, { status: 409 });
+      }
+      if (String(requestRow.approver_user_id || '') !== operatorUserId) {
+        return json({ success: false, status: 'failed', error: '仅收款账号可拒绝该退款申请' }, { status: 403 });
+      }
+
+      await supabaseRequest(env, `/refund_requests?id=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          status: 'rejected',
+          reject_reason: rejectReason,
+          rejected_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      await insertNotification(env, {
+        userId: requestRow.requester_user_id,
+        type: 'refund_rejected',
+        orderId: requestRow.order_id,
+        message: `订单 #${String(requestRow.order_id || '').slice(0, 8)} 的退款申请已被收款账号拒绝。`,
+      });
+
+      return json({ success: true, status: 'rejected' });
+    }
+
+    if (url.pathname === '/api/payment/refund-request/approve' && request.method === 'POST') {
+      const body = await request.json();
+      const requestId = String(body.requestId || '').trim();
+      const operatorUserId = String(body.operatorUserId || '').trim();
+
+      if (!requestId) {
+        return json({ success: false, status: 'failed', error: 'missing request id' }, { status: 400 });
+      }
+      if (!operatorUserId) {
+        return json({ success: false, status: 'failed', error: 'missing operator user id' }, { status: 400 });
+      }
+
+      const requestRow = await getRefundRequestById(env, requestId);
+      if (!requestRow) {
+        return json({ success: false, status: 'failed', error: '退款申请不存在' }, { status: 404 });
+      }
+      if (String(requestRow.status || '').toLowerCase() !== 'pending') {
+        return json({ success: false, status: 'failed', error: '退款申请状态不是待审批，无法同意' }, { status: 409 });
+      }
+      if (String(requestRow.approver_user_id || '') !== operatorUserId) {
+        return json({ success: false, status: 'failed', error: '仅收款账号可同意该退款申请' }, { status: 403 });
+      }
+
+      await supabaseRequest(env, `/refund_requests?id=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      const refundResultResponse = await fetch(`${url.origin}/api/payment/refund-items`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          approvedRequestId: requestId,
+          orderId: requestRow.order_id,
+          orderItemIds: Array.isArray(requestRow.requested_item_ids) ? requestRow.requested_item_ids : [],
+          reason: requestRow.reason || '门店退款',
+        }),
+      });
+
+      const refundPayload = await refundResultResponse.json();
+      if (!refundResultResponse.ok || !refundPayload.success) {
+        await supabaseRequest(env, `/refund_requests?id=eq.${encodeURIComponent(requestId)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            status: 'failed',
+            processed_at: new Date().toISOString(),
+            provider_response: refundPayload || null,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+
+        await insertNotification(env, {
+          userId: requestRow.approver_user_id,
+          type: 'refund_failed',
+          orderId: requestRow.order_id,
+          message: `订单 #${String(requestRow.order_id || '').slice(0, 8)} 退款执行失败，请重试。`,
+        });
+
+        return json({
+          success: false,
+          status: 'failed',
+          error: String(refundPayload?.error || '退款执行失败'),
+          refundResult: refundPayload || null,
+        }, { status: 400 });
+      }
+
+      await supabaseRequest(env, `/refund_requests?id=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          status: 'completed',
+          processed_at: new Date().toISOString(),
+          provider_response: refundPayload || null,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      await insertNotification(env, {
+        userId: requestRow.approver_user_id,
+        type: 'refund_completed',
+        orderId: requestRow.order_id,
+        message: `订单 #${String(requestRow.order_id || '').slice(0, 8)} 退款已执行，金额 ¥${Number(refundPayload.refundAmount || requestRow.requested_amount || 0).toFixed(2)}。`,
+      });
+
+      if (requestRow.requester_user_id && requestRow.requester_user_id !== requestRow.approver_user_id) {
+        await insertNotification(env, {
+          userId: requestRow.requester_user_id,
+          type: 'refund_approved',
+          orderId: requestRow.order_id,
+          message: `订单 #${String(requestRow.order_id || '').slice(0, 8)} 退款申请已通过并执行退款。`,
+        });
+      }
+
+      return json({
+        success: true,
+        status: 'completed',
+        refundResult: refundPayload,
+      });
+    }
+
     if (url.pathname === '/api/payment/refund' && request.method === 'POST') {
       const body = await request.json();
       const orderId = String(body.orderId || '').trim();
@@ -1166,8 +1457,8 @@ export default {
 
     if (url.pathname === '/api/payment/refund-items' && request.method === 'POST') {
       const body = await request.json();
+      const approvedRequestId = String(body.approvedRequestId || '').trim();
       const orderId = String(body.orderId || '').trim();
-      const reason = String(body.reason || '门店退款').trim().slice(0, 128);
       const orderItemIds = Array.isArray(body.orderItemIds)
         ? Array.from(new Set(body.orderItemIds.map((itemId) => String(itemId || '').trim()).filter(Boolean)))
         : [];
@@ -1178,6 +1469,36 @@ export default {
       if (orderItemIds.length === 0) {
         return json({ success: false, status: 'failed', error: 'missing order item ids' }, { status: 400 });
       }
+
+      if (!approvedRequestId) {
+        return json({ success: false, status: 'failed', error: '请先提交退款申请并由收款账号审批通过' }, { status: 403 });
+      }
+
+      const requestRow = await getRefundRequestById(env, approvedRequestId);
+      if (!requestRow) {
+        return json({ success: false, status: 'failed', error: '退款审批单不存在' }, { status: 404 });
+      }
+
+      if (String(requestRow.status || '').toLowerCase() !== 'approved') {
+        return json({ success: false, status: 'failed', error: '退款审批单未通过，无法执行退款' }, { status: 409 });
+      }
+
+      if (String(requestRow.order_id || '') !== orderId) {
+        return json({ success: false, status: 'failed', error: '退款审批单与订单不匹配' }, { status: 400 });
+      }
+
+      const approvedItemIds = Array.isArray(requestRow.requested_item_ids)
+        ? requestRow.requested_item_ids.map((itemId) => String(itemId || '').trim()).filter(Boolean)
+        : [];
+      const approvedSet = new Set(approvedItemIds);
+      const requestMatch = approvedItemIds.length === orderItemIds.length
+        && orderItemIds.every((itemId) => approvedSet.has(itemId));
+
+      if (!requestMatch) {
+        return json({ success: false, status: 'failed', error: '退款商品与审批单不一致' }, { status: 400 });
+      }
+
+      const reason = String(body.reason || requestRow.reason || '门店退款').trim().slice(0, 128);
 
       const order = await getOrderWithItems(env, orderId);
       if (!order) {
