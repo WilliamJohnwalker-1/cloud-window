@@ -409,6 +409,34 @@ const mapStoreProductPrice = (row: StoreProductPriceRow): StoreProductPrice => (
   updated_at: row.updated_at,
 });
 
+const applyRetailRefundProjection = (order: Order, refundedItems: RefundedOrderItem[] = []): Order => {
+  if (order.order_kind !== 'retail') return order;
+
+  const hasRefundEvidence = refundedItems.length > 0
+    || order.items.some((item) => Number(item.quantity || 0) <= 0);
+  if (!hasRefundEvidence) return order;
+
+  const remainingItems = order.items.filter((item) => Number(item.quantity || 0) > 0);
+  const remainingRetailTotal = Number(
+    remainingItems
+      .reduce((sum, item) => sum + Number(item.retail_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+  const remainingDiscountTotal = Number(
+    remainingItems
+      .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
+      .toFixed(2),
+  );
+
+  return {
+    ...order,
+    total_retail_amount: remainingRetailTotal,
+    total_discount_amount: remainingDiscountTotal,
+    payment_amount: remainingRetailTotal,
+    payment_status: remainingItems.length === 0 ? 'refunded' : 'partial_refunded',
+  };
+};
+
 const mapOrder = (row: OrderRow): Order => {
   const itemsFromRelation: OrderItem[] = (row.order_items || []).map((item) => {
     const productInfo = item.products || item.product;
@@ -431,7 +459,7 @@ const mapOrder = (row: OrderRow): Order => {
   const cityData = pickFirstRelation(row.cities);
   const storeData = pickFirstRelation(row.stores);
 
-  return {
+  const mappedOrder: Order = {
     id: row.id,
     distributor_id: row.distributor_id,
     distributor_email: profileData?.email,
@@ -453,6 +481,8 @@ const mapOrder = (row: OrderRow): Order => {
     created_at: row.created_at,
     items: itemsFromRelation,
   };
+
+  return applyRetailRefundProjection(mappedOrder);
 };
 
 const mapInventoryLog = (row: InventoryLogRow): InventoryLog => ({
@@ -931,11 +961,11 @@ export const useAppStore = create<AppState>()(
             }
           }
 
-          return {
+          return applyRetailRefundProjection({
             ...base,
             items,
             refunded_items: refundedItemsFromEvents,
-          };
+          }, refundedItemsFromEvents);
         }
 
         if (row.product_id && Number(row.quantity || 0) > 0) {
@@ -950,7 +980,7 @@ export const useAppStore = create<AppState>()(
           const discountTotal = Number(row.total_discount_amount || row.total_amount || retailPrice * qty || 0);
           const discountPrice = qty > 0 ? discountTotal / qty : retailPrice;
 
-          return {
+          return applyRetailRefundProjection({
             ...base,
             items: [
               {
@@ -967,14 +997,14 @@ export const useAppStore = create<AppState>()(
               },
             ],
             refunded_items: refundedItemsFromEvents,
-          };
+          }, refundedItemsFromEvents);
         }
 
-        return {
+        return applyRetailRefundProjection({
           ...base,
           items: [],
           refunded_items: refundedItemsFromEvents,
-        };
+        }, refundedItemsFromEvents);
       },
 
       fetchAllData: async () => {
