@@ -32,6 +32,11 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v4.3-store-super-admin-and-retail-store.sql`: add super_admin role + store contact + retail store binding support.
 - `migrate-v4.4-retail-default-yunchuang-store.sql`: default retail order store to 云窗 + backfill historical retail store_id.
 - `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`: retail delete rollback fix (total inventory only) + schema gate update.
+- `migrate-v4.6-store-retail-order.sql`: retail order flow adjustments.
+- `migrate-v4.7-batch-order-fix-and-cost-sync.sql`: batch order fix + cost sync.
+- `migrate-v4.8-retail-item-level-rounding-and-refund.sql`: item-level rounding + item-level refund mutation.
+- `migrate-v4.9-refund-approval.sql`: refund request approval workflow + refund notification types.
+- `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`: fix RPC writes to non-existent orders.updated_at.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -62,7 +67,12 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 23. `migrate-v4.3-store-super-admin-and-retail-store.sql`
 24. `migrate-v4.4-retail-default-yunchuang-store.sql`
 25. `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
-26. `storage-policies.sql`
+26. `migrate-v4.6-store-retail-order.sql`
+27. `migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. `migrate-v4.8-retail-item-level-rounding-and-refund.sql`
+29. `migrate-v4.9-refund-approval.sql`
+30. `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
+31. `storage-policies.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -90,7 +100,12 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 23. `migrate-v4.3-store-super-admin-and-retail-store.sql`
 24. `migrate-v4.4-retail-default-yunchuang-store.sql`
 25. `migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
-26. `storage-policies.sql`
+26. `migrate-v4.6-store-retail-order.sql`
+27. `migrate-v4.7-batch-order-fix-and-cost-sync.sql`
+28. `migrate-v4.8-retail-item-level-rounding-and-refund.sql`
+29. `migrate-v4.9-refund-approval.sql`
+30. `migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
+31. `storage-policies.sql`
 
 ## TABLES
 

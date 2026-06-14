@@ -125,7 +125,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
 27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
-28. 执行 `supabase/storage-policies.sql`
+28. 执行 `supabase/migrate-v4.8-retail-item-level-rounding-and-refund.sql`
+29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
+30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
+31. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -156,7 +159,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 25. 执行 `supabase/migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql`
 26. 执行 `supabase/migrate-v4.6-store-retail-order.sql`
 27. 执行 `supabase/migrate-v4.7-batch-order-fix-and-cost-sync.sql`
-28. 执行 `supabase/storage-policies.sql`
+28. 执行 `supabase/migrate-v4.8-retail-item-level-rounding-and-refund.sql`
+29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
+30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
+31. 执行 `supabase/storage-policies.sql`
 
 ### 4. 启动应用
 
@@ -164,7 +170,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.26）
+### 5. 启动 Web 端（v1.2.27）
 
 ```bash
 npm run web:v2
@@ -361,6 +367,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.27 (2026-06-14) - 退款审批上线与抹零保存修复
+
+- Web 订单页退款由“直接退款”升级为“提交申请 -> 收款账号审批 -> 执行退款”流程
+- 新增待审批退款列表与审批操作（同意并退款 / 拒绝）
+- 修复按商品抹零保存失败：移除 RPC 对 `orders.updated_at` 的写入（该列不存在）
+- 新增迁移：`migrate-v4.9-refund-approval.sql`、`migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
 
 ### Web v1.2.26 (2026-06-13) - 订单弹窗统一站内交互
 

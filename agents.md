@@ -221,7 +221,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. migrate-v4.3-store-super-admin-and-retail-store.sql -> 24. migrate-v4.4-retail-default-yunchuang-store.sql -> 25. migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql -> 26. migrate-v4.6-store-retail-order.sql -> 27. migrate-v4.7-batch-order-fix-and-cost-sync.sql -> 28. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. migrate-v4.3-store-super-admin-and-retail-store.sql -> 24. migrate-v4.4-retail-default-yunchuang-store.sql -> 25. migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql -> 26. migrate-v4.6-store-retail-order.sql -> 27. migrate-v4.7-batch-order-fix-and-cost-sync.sql -> 28. migrate-v4.8-retail-item-level-rounding-and-refund.sql -> 29. migrate-v4.9-refund-approval.sql -> 30. migrate-v4.10-retail-rounding-orders-updated-at-fix.sql -> 31. storage-policies.sql
 
 **Upgrade v1->v2:**
 1. migrate-v2.sql -> 2-28 same as above
@@ -246,7 +246,7 @@ Before committing:
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.1.20`
-- Current web baseline: `v1.2.26`
+- Current web baseline: `v1.2.27`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 库存/订单/报表三页筛选统一升级为“城市→店铺”二级筛选，口径对齐移动端
