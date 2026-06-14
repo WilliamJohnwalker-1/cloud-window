@@ -589,6 +589,15 @@ export const PaymentScreen: React.FC = () => {
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target as EventTarget | null;
+      const editableTarget = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable);
+      if (editableTarget && target !== productInputRef.current && target !== paymentInputRef.current) {
+        return;
+      }
+
       if (event.ctrlKey || event.altKey || event.metaKey) return;
       const isDigit = /^\d$/.test(event.key);
       const now = Date.now();

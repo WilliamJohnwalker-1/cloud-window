@@ -90,7 +90,10 @@ export const ReportsScreen: React.FC = () => {
     const scopedOrders = selectedStoreId ? cityScopedOrders.filter((order) => order.store_id === selectedStoreId) : cityScopedOrders;
     const revenueOrders = scopedOrders.filter((order) => {
       const paymentStatus = String(order.payment_status || '').toLowerCase();
-      return paymentStatus !== 'refunded' && paymentStatus !== 'refund_pending';
+      return paymentStatus !== 'refunded'
+        && paymentStatus !== 'refund_pending'
+        && paymentStatus !== 'partial_refunded'
+        && paymentStatus !== 'partial_refund_pending';
     });
     const totalRetail = revenueOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = revenueOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
@@ -232,8 +235,8 @@ export const ReportsScreen: React.FC = () => {
 
     return {
       stats: [
-        { label: '总零售额', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `营收订单 ${revenueOrders.length} 笔`, isUp: true },
-        { label: '折扣成交额', value: `¥${totalDiscount.toFixed(2)}`, icon: Package, trend: `待处理 ${pendingCount} 笔`, isUp: true },
+        { label: '总零售额（已排除退款单）', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `有效营收订单 ${revenueOrders.length} 笔`, isUp: true },
+        { label: '折扣成交额（已排除退款单）', value: `¥${totalDiscount.toFixed(2)}`, icon: Package, trend: `待处理 ${pendingCount} 笔`, isUp: true },
         { label: '折扣差额', value: `¥${(totalRetail - totalDiscount).toFixed(2)}`, icon: TrendingUp, trend: '零售额 - 折扣额', isUp: totalRetail - totalDiscount >= 0 },
         { label: '待处理订单', value: String(pendingCount), icon: TrendingDown, trend: 'pending', isUp: pendingCount === 0 },
       ],
