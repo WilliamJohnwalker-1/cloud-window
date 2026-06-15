@@ -19,7 +19,6 @@ export const ProductsScreen: React.FC = () => {
     price: '',
     cost: '',
     one_time_cost: '0',
-    discount_price: '',
     city_id: '',
   });
 
@@ -36,16 +35,21 @@ export const ProductsScreen: React.FC = () => {
 
   useEffect(() => {
     if (selectedStoreId && editingProductId) {
+      const selectedStore = stores.find((store) => store.id === selectedStoreId);
+      const editingProduct = products.find((product) => product.id === editingProductId);
       const existingPrice = storeProductPrices.find(
         (p) => p.store_id === selectedStoreId && p.product_id === editingProductId
       );
       if (existingPrice && existingPrice.override_price !== undefined && existingPrice.override_price !== null) {
         setCustomStorePrice(String(existingPrice.override_price));
+      } else if (selectedStore && editingProduct) {
+        const fallbackPrice = Math.floor(Number(selectedStore.discount_rate || 1) * Number(editingProduct.price || 0) * 100) / 100;
+        setCustomStorePrice(String(fallbackPrice));
       } else {
         setCustomStorePrice('');
       }
     }
-  }, [selectedStoreId, editingProductId, storeProductPrices]);
+  }, [selectedStoreId, editingProductId, storeProductPrices, stores, products]);
 
 
   const filteredProducts = useMemo(() => {
@@ -63,7 +67,7 @@ export const ProductsScreen: React.FC = () => {
       price: Number(form.price),
       cost: Number(form.cost),
       one_time_cost: Number(form.one_time_cost || 0),
-      discount_price: Number(form.discount_price || form.price),
+      discount_price: Number(form.price),
       city_id: form.city_id,
     };
 
@@ -79,12 +83,12 @@ export const ProductsScreen: React.FC = () => {
     }
     await fetchProducts();
     setShowCreate(false);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '' });
   };
 
   const openCreateModal = (): void => {
     setEditingProductId(null);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', discount_price: '', city_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
     setShowPricingPanel(false);
@@ -101,7 +105,6 @@ export const ProductsScreen: React.FC = () => {
       price: String(product.price),
       cost: String(product.cost),
       one_time_cost: String(product.one_time_cost || 0),
-      discount_price: String(product.discount_price),
       city_id: product.city_id,
     });
     setSelectedStoreId('');
@@ -117,7 +120,7 @@ export const ProductsScreen: React.FC = () => {
         price: Number(form.price),
         cost: Number(form.cost),
         one_time_cost: Number(form.one_time_cost || 0),
-        discount_price: Number(form.discount_price || form.price),
+        discount_price: Number(form.price),
         city_id: form.city_id,
       };
 
@@ -255,11 +258,7 @@ export const ProductsScreen: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-auto flex items-center justify-between pt-4 border-t border-white/5">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-white/40 uppercase font-bold tracking-tighter">分销折扣价</span>
-                  <span className="text-sm font-bold text-white/80">¥{product.discount_price}</span>
-                </div>
+              <div className="mt-auto flex items-center justify-end pt-4 border-t border-white/5">
                 {user?.role === 'admin' && (
                   <button
                     type="button"
@@ -340,7 +339,6 @@ export const ProductsScreen: React.FC = () => {
               <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="商品名" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.price} onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))} placeholder="零售价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.cost} onChange={(event) => setForm((prev) => ({ ...prev, cost: event.target.value }))} placeholder="成本价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.discount_price} onChange={(event) => setForm((prev) => ({ ...prev, discount_price: event.target.value }))} placeholder="折扣价(可选)" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               <div className="col-span-2 space-y-2">
                 <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择城市</p>

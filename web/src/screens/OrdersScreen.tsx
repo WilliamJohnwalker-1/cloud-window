@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import type { OrderKind } from '../types';
 import { getPaymentApiEndpoint } from '../lib/payment';
 import { resolvePrice } from '../utils/priceResolver';
 
@@ -66,13 +67,17 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFilterCityId, setSelectedFilterCityId] = useState<string | null>(null);
   const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [settlementStoreId, setSettlementStoreId] = useState<string | null>(null);
+  const [settlementCart, setSettlementCart] = useState<Map<string, number>>(new Map());
+  const [submittingSettlementOrder, setSubmittingSettlementOrder] = useState(false);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [detailOrderData, setDetailOrderData] = useState<(typeof orders)[number] | null>(null);
   const [detailCache, setDetailCache] = useState<Record<string, (typeof orders)[number]>>({});
@@ -84,6 +89,7 @@ export const OrdersScreen: React.FC = () => {
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
+  const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | 'all'>('all');
   const [refundModalOrderId, setRefundModalOrderId] = useState<string | null>(null);
   const [refundSelectedItemIds, setRefundSelectedItemIds] = useState<Set<string>>(new Set());
   const [refundReasonInput, setRefundReasonInput] = useState('收银台退款');
@@ -100,8 +106,10 @@ export const OrdersScreen: React.FC = () => {
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
 
-  const getOrderKindLabel = (kind: 'distribution' | 'retail'): string => {
-    return kind === 'retail' ? '零售订单' : '分销订单';
+  const getOrderKindLabel = (kind: OrderKind): string => {
+    if (kind === 'settlement') return '结算单';
+    if (kind === 'retail') return '零售单';
+    return '供货单';
   };
 
   const baseOrders = useMemo(() => {
@@ -171,6 +179,9 @@ export const OrdersScreen: React.FC = () => {
 
   const filteredOrders = useMemo(() => {
     let result = baseOrders;
+    if (selectedOrderKind !== 'all') {
+      result = result.filter((order) => order.order_kind === selectedOrderKind);
+    }
     if (selectedFilterCityId) {
       result = result.filter((order) => order.city_id === selectedFilterCityId);
     }
@@ -187,7 +198,7 @@ export const OrdersScreen: React.FC = () => {
     }
     return result
       .filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange, refundViewFilter, selectedFilterCityId, selectedFilterStoreId]);
+  }, [baseOrders, matchesStatsRange, refundViewFilter, selectedFilterCityId, selectedFilterStoreId, selectedOrderKind]);
 
   const revenueOrders = useMemo(() => {
     return filteredOrders.filter((order) => {
@@ -280,6 +291,21 @@ export const OrdersScreen: React.FC = () => {
     });
   }, [products, searchKeyword, selectedStoreId, stores]);
 
+  const filteredSettlementProducts = useMemo(() => {
+    if (!settlementStoreId) return [];
+    const selectedStore = stores.find((store) => store.id === settlementStoreId);
+    if (!selectedStore) return [];
+
+    const keyword = searchKeyword.trim().toLowerCase();
+    return products
+      .filter((product) => product.city_id === selectedStore.city_id)
+      .filter((product) => {
+        if (!keyword) return true;
+        const haystack = [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase();
+        return haystack.includes(keyword);
+      });
+  }, [products, searchKeyword, settlementStoreId, stores]);
+
   const cartItems = useMemo(() => {
     const parseCartKey = (cartKey: string): { productId: string; lineType: CartLineType } => {
       const splitIndex = cartKey.lastIndexOf(':');
@@ -359,6 +385,12 @@ export const OrdersScreen: React.FC = () => {
       void fetchStoreProductPrices(selectedStoreId);
     }
   }, [selectedStoreId, fetchStoreProductPrices]);
+
+  useEffect(() => {
+    if (settlementStoreId) {
+      void fetchStoreInventory(settlementStoreId);
+    }
+  }, [settlementStoreId, fetchStoreInventory]);
 
 
   const openOrderDetail = async (orderId: string): Promise<void> => {
@@ -640,30 +672,142 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
-    const XLSX = await import('xlsx');
-    const headers = ['商品名称', '送货数量', '单价', '查收'];
-    const dataRows = targetOrder.items.map((item) => [
-      resolveItemName(item.product_id, item.product_name),
-      item.quantity,
-      item.discount_price,
-      '',
-    ]);
-    const sheetData = [headers, ...dataRows];
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+    const excelModule = await import('exceljs');
+    const ExcelJS = 'default' in excelModule ? excelModule.default : excelModule;
+    const workbook = new ExcelJS.Workbook();
+    const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
 
-    const colWidths = headers.map((header, colIdx) => {
-      let maxLen = header.length * 2;
-      dataRows.forEach((row) => {
-        const len = String(row[colIdx] ?? '').length;
-        if (len > maxLen) maxLen = len;
+    const downloadWorkbook = async (filename: string): Promise<void> => {
+      const buffer = await workbook.xlsx.writeBuffer({ useStyles: true });
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
-      return { wch: Math.max(maxLen + 2, 12) };
-    });
-    worksheet['!cols'] = colWidths;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '送货单');
-    XLSX.writeFile(workbook, `delivery-${targetOrder.id.slice(0, 8)}-${Date.now()}.xlsx`);
+    if (targetOrder.order_kind === 'distribution') {
+      const boundStore = targetOrder.store_id ? stores.find((store) => store.id === targetOrder.store_id) : null;
+      const storeNameRaw = targetOrder.store_name || boundStore?.name || '未指定店铺';
+      const safeStoreName = storeNameRaw.replace(/[\\/:*?"<>|]/g, '-').trim() || '未指定店铺';
+
+      const exportDate = new Date(targetOrder.created_at);
+      const year = String(exportDate.getFullYear());
+      const month = String(exportDate.getMonth() + 1).padStart(2, '0');
+      const day = String(exportDate.getDate()).padStart(2, '0');
+      const exportBaseName = `云窗&${safeStoreName}*${year}*${month}*${day}上货单`;
+
+      const worksheet = workbook.addWorksheet('上货单');
+      worksheet.columns = [
+        { width: 8 },
+        { width: 24 },
+        { width: 12 },
+        { width: 12 },
+        { width: 12 },
+        { width: 14 },
+        { width: 14 },
+      ];
+
+      const headers = ['序号', '商品名称', '送货数量', '零售价', '结算价', '零售总价', '结算总价'];
+      worksheet.addRow(headers);
+
+      targetOrder.items.forEach((item, index) => {
+        const quantity = Number(item.quantity || 0);
+        const retailPrice = Number(item.retail_price || 0);
+
+        let settlementPrice = Number(item.discount_price || 0);
+        if (!item.is_sample && settlementPrice <= 0) {
+          const product = products.find((entry) => entry.id === item.product_id);
+          const storeOverride = targetOrder.store_id
+            ? storeProductPrices.find((entry) => entry.store_id === targetOrder.store_id && entry.product_id === item.product_id)
+            : undefined;
+          settlementPrice = product
+            ? resolvePrice({
+              price: Number(product.price || 0),
+              discount_price: product.discount_price,
+              discount_rate: boundStore?.discount_rate,
+              override_price: storeOverride?.override_price,
+            }).price
+            : 0;
+        }
+
+        const retailTotal = retailPrice * quantity;
+        const settlementTotal = settlementPrice * quantity;
+
+        worksheet.addRow([
+          index + 1,
+          resolveItemName(item.product_id, item.product_name),
+          quantity,
+          Number(retailPrice.toFixed(2)),
+          Number(settlementPrice.toFixed(2)),
+          Number(retailTotal.toFixed(2)),
+          Number(settlementTotal.toFixed(2)),
+        ]);
+      });
+
+      const sumRetailTotal = targetOrder.items.reduce((sum, item) => sum + Number(item.retail_price || 0) * Number(item.quantity || 0), 0);
+      const sumSettlementTotal = targetOrder.items.reduce((sum, item) => {
+        let settlementPrice = Number(item.discount_price || 0);
+        if (!item.is_sample && settlementPrice <= 0) {
+          const product = products.find((entry) => entry.id === item.product_id);
+          const storeOverride = targetOrder.store_id
+            ? storeProductPrices.find((entry) => entry.store_id === targetOrder.store_id && entry.product_id === item.product_id)
+            : undefined;
+          settlementPrice = product
+            ? resolvePrice({
+              price: Number(product.price || 0),
+              discount_price: product.discount_price,
+              discount_rate: boundStore?.discount_rate,
+              override_price: storeOverride?.override_price,
+            }).price
+            : 0;
+        }
+        return sum + settlementPrice * Number(item.quantity || 0);
+      }, 0);
+      const sumRow = ['合计', '', '', '', '', Number(sumRetailTotal.toFixed(2)), Number(sumSettlementTotal.toFixed(2))];
+      worksheet.addRow(sumRow);
+
+      worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          cell.alignment = centered;
+        });
+      });
+
+      await downloadWorkbook(`${exportBaseName}.xlsx`);
+      return;
+    }
+
+    const worksheet = workbook.addWorksheet('送货单');
+    worksheet.columns = [
+      { width: 24 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+    ];
+
+    worksheet.addRow(['商品名称', '送货数量', '单价', '查收']);
+    targetOrder.items.forEach((item) => {
+      worksheet.addRow([
+        resolveItemName(item.product_id, item.product_name),
+        Number(item.quantity || 0),
+        Number(item.discount_price || 0),
+        '',
+      ]);
+    });
+
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.alignment = centered;
+      });
+    });
+
+    await downloadWorkbook(`delivery-${targetOrder.id.slice(0, 8)}-${Date.now()}.xlsx`);
   };
 
   const requestDeleteOrder = (orderId: string): void => {
@@ -754,6 +898,58 @@ export const OrdersScreen: React.FC = () => {
     setPageNotice({ type: 'success', text: '订单已创建' });
   };
 
+  const setSettlementQuantity = (productId: string, quantity: number): void => {
+    setSettlementCart((prev) => {
+      const next = new Map(prev);
+      if (!settlementStoreId) return next;
+
+      const available = Number(
+        storeInventory.find((item) => item.store_id === settlementStoreId && item.product_id === productId)?.quantity || 0,
+      );
+      if (quantity <= 0) {
+        next.delete(productId);
+        return next;
+      }
+      if (quantity > available) {
+        return prev;
+      }
+
+      next.set(productId, quantity);
+      return next;
+    });
+  };
+
+  const handleCreateSettlementOrder = async (): Promise<void> => {
+    if (!settlementStoreId) {
+      setPageNotice({ type: 'error', text: '请先选择店铺' });
+      return;
+    }
+    if (settlementCart.size === 0) {
+      setPageNotice({ type: 'error', text: '请先选择商品' });
+      return;
+    }
+
+    const items = Array.from(settlementCart.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity,
+    }));
+
+    setSubmittingSettlementOrder(true);
+    const { error } = await createSettlementOrder(settlementStoreId, items);
+    setSubmittingSettlementOrder(false);
+
+    if (error) {
+      setPageNotice({ type: 'error', text: `结算建单失败：${error.message}` });
+      return;
+    }
+
+    setSettlementCart(new Map());
+    setSettlementStoreId(null);
+    setSearchKeyword('');
+    setShowSettlementModal(false);
+    setPageNotice({ type: 'success', text: '结算订单已创建' });
+  };
+
   const handleModifyOrder = async (): Promise<void> => {
     if (!modifyOrder) return;
     const itemsPayload = Array.from(modifyCart.entries()).map(([orderItemId, quantity]) => ({
@@ -829,9 +1025,43 @@ export const OrdersScreen: React.FC = () => {
               </button>
             ))}
           </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'all', label: '全部类型' },
+              { key: 'distribution', label: '供货单' },
+              { key: 'settlement', label: '结算单' },
+              { key: 'retail', label: '零售单' },
+            ].map((item) => (
+              <button
+                type="button"
+                key={item.key}
+                onClick={() => setSelectedOrderKind(item.key as OrderKind | 'all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
+                  selectedOrderKind === item.key ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              onClick={() => {
+                setSettlementStoreId(null);
+                setSettlementCart(new Map());
+                setSearchKeyword('');
+                setShowSettlementModal(true);
+              }}
+              className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
+            >
+              <Plus size={18} />
+              <span>结算建单</span>
+            </button>
+          )}
           {canCreateOrder && (
             <button
               type="button"
@@ -1260,6 +1490,164 @@ export const OrdersScreen: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showSettlementModal && user?.role === 'admin' && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">结算建单</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSettlementModal(false);
+                  setSettlementStoreId(null);
+                  setSettlementCart(new Map());
+                  setSearchKeyword('');
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select
+                value={settlementStoreId || ''}
+                onChange={(event) => {
+                  setSettlementStoreId(event.target.value || null);
+                  setSettlementCart(new Map());
+                }}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
+              >
+                <option value="" className="bg-[#121217]">-- 请选择店铺 --</option>
+                {stores
+                  .filter((store) => store.status === 'active')
+                  .map((store) => (
+                    <option key={store.id} value={store.id} className="bg-[#121217]">
+                      {store.name} ({store.city_name})
+                    </option>
+                  ))}
+              </select>
+              <input
+                value={searchKeyword}
+                onChange={(event) => setSearchKeyword(event.target.value)}
+                placeholder="搜索商品名称/条码"
+                className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            {settlementStoreId ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
+                  {filteredSettlementProducts.map((product) => {
+                    const stock = Number(
+                      storeInventory.find((item) => item.store_id === settlementStoreId && item.product_id === product.id)?.quantity || 0,
+                    );
+                    const qty = settlementCart.get(product.id) || 0;
+                    const disabled = stock <= 0;
+
+                    return (
+                      <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+                            {product.image_url ? (
+                              <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-[10px] text-white/40">图</span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold">{product.name}</p>
+                            <p className="text-xs text-white/40">库存: {stock} · 零售价: ¥{Number(product.price || 0).toFixed(2)}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSettlementQuantity(product.id, Math.max(0, qty - 1))}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                            disabled={disabled || qty <= 0}
+                          >
+                            -1
+                          </button>
+                          <input
+                            value={qty > 0 ? String(qty) : ''}
+                            onChange={(event) => {
+                              const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                              if (Number.isNaN(value)) {
+                                setSettlementQuantity(product.id, 0);
+                                return;
+                              }
+                              setSettlementQuantity(product.id, value);
+                            }}
+                            placeholder="数量(步长1)"
+                            className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setSettlementQuantity(product.id, qty + 1)}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                            disabled={disabled || qty >= stock}
+                          >
+                            +1
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {filteredSettlementProducts.length === 0 && (
+                    <p className="px-4 py-6 text-sm text-white/40">当前店铺下暂无可选商品</p>
+                  )}
+                </div>
+
+                <div className="border border-white/10 rounded-2xl p-4 flex flex-col">
+                  <h4 className="font-semibold mb-3">结算购物车</h4>
+                  <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
+                    {Array.from(settlementCart.entries()).map(([productId, quantity]) => {
+                      const product = products.find((item) => item.id === productId);
+                      if (!product) return null;
+                      return (
+                        <div key={productId} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">{product.name}</p>
+                            <p className="text-xs text-white/40">数量 {quantity}</p>
+                          </div>
+                          <button type="button" onClick={() => setSettlementQuantity(productId, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                        </div>
+                      );
+                    })}
+                    {settlementCart.size === 0 && <p className="text-sm text-white/40">暂无商品</p>}
+                  </div>
+
+                  <div className="mt-auto pt-4 border-t border-white/10 space-y-1 text-sm">
+                    <div className="flex justify-between"><span className="text-white/60">商品总数</span><span>{Array.from(settlementCart.values()).reduce((sum, qty) => sum + qty, 0)}</span></div>
+                    <div className="flex justify-between"><span className="text-white/60">结算总额</span><span className="text-accent font-bold">¥{Array.from(settlementCart.entries()).reduce((sum, [productId, qty]) => {
+                      const product = products.find((item) => item.id === productId);
+                      return sum + Number(product?.price || 0) * qty;
+                    }, 0).toFixed(2)}</span></div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCreateSettlementOrder();
+                    }}
+                    disabled={submittingSettlementOrder || !settlementStoreId || settlementCart.size === 0}
+                    className="mt-4 w-full py-2.5 rounded-xl bg-tech-gradient font-bold disabled:opacity-50"
+                  >
+                    {submittingSettlementOrder ? '提交中...' : '确认创建结算订单'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-white/40 border border-white/10 rounded-2xl">
+                请先选择店铺
+              </div>
+            )}
           </div>
         </div>
       )}

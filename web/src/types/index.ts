@@ -178,7 +178,7 @@ export interface InventoryReport {
 
 export type OrderStatus = 'pending' | 'accepted';
 
-export type OrderKind = 'distribution' | 'retail';
+export type OrderKind = 'distribution' | 'retail' | 'settlement';
 
 export type NotificationType =
   | 'new_order'

@@ -300,6 +300,7 @@ interface AppState {
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
+  createSettlementOrder: (storeId: string, items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
   createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
@@ -1606,6 +1607,37 @@ export const useAppStore = create<AppState>()(
           }
           await Promise.all(refreshTasks);
           return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      createSettlementOrder: async (storeId, items) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (user.role !== 'admin') return { error: new Error('当前角色无结算建单权限') };
+        if (!storeId) return { error: new Error('请选择店铺') };
+        if (!Array.isArray(items) || items.length === 0) return { error: new Error('购物车为空') };
+
+        const payload = items.map((item) => ({
+          product_id: item.productId,
+          quantity: Number(item.quantity),
+        }));
+
+        const invalidItem = payload.find((item) => !item.product_id || !Number.isFinite(item.quantity) || item.quantity <= 0);
+        if (invalidItem) return { error: new Error('订单商品参数无效') };
+
+        const requestId = createRequestId(user.id);
+        try {
+          const { data: orderId, error } = await supabase.rpc('create_settlement_order_atomic', {
+            p_items: payload,
+            p_store_id: storeId,
+            p_request_id: requestId,
+          });
+          if (error) throw error;
+
+          await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
+          return { orderId: orderId ? String(orderId) : undefined, error: null };
         } catch (error) {
           return { error: error as Error };
         }
