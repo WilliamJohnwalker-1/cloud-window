@@ -1342,6 +1342,7 @@ export const useAppStore = create<AppState>()(
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
+        const shouldAutoAccept = user.role === 'admin';
 
         try {
           const selectedStore = storeId
@@ -1417,13 +1418,21 @@ export const useAppStore = create<AppState>()(
           });
 
           const requestId = createRequestId(user.id);
-          const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
+          const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
             p_request_id: requestId,
             p_store_id: storeId,
           });
 
           if (!rpcError) {
+            if (shouldAutoAccept && rpcOrderId) {
+              const { error: acceptError } = await supabase
+                .from('orders')
+                .update({ status: 'accepted' })
+                .eq('id', String(rpcOrderId));
+              if (acceptError) throw acceptError;
+            }
+
             const refreshTasks: Array<Promise<void>> = [
               get().fetchOrders(),
               get().fetchProducts(),
@@ -1448,6 +1457,7 @@ export const useAppStore = create<AppState>()(
             total_discount_amount: totalDiscount,
             quantity: totalQuantity,
             order_kind: 'distribution' as const,
+            ...(shouldAutoAccept ? { status: 'accepted' as const } : {}),
           };
 
           let orderInsert = await supabase
