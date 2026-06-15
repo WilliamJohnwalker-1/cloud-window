@@ -1077,7 +1077,7 @@ export const OrdersScreen: React.FC = () => {
               className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
             >
               <Plus size={18} />
-              <span>结算建单</span>
+              <span>结算</span>
             </button>
           )}
           {canCreateOrder && (
@@ -1087,7 +1087,7 @@ export const OrdersScreen: React.FC = () => {
               className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
             >
               <Plus size={18} />
-              <span>新建订单</span>
+              <span>上货</span>
             </button>
           )}
           <button

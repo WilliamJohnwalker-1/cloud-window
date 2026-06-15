@@ -210,7 +210,8 @@ const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
   if (legacyNotNullHit) return true;
 
   return message.includes('could not find the function public.create_batch_order_atomic')
-    || message.includes('could not find the function public.create_retail_order_atomic');
+    || message.includes('could not find the function public.create_retail_order_atomic')
+    || message.includes('could not find the function public.create_settlement_order_atomic');
 };
 
 const parseSemver = (input: string): [number, number, number] | null => {
@@ -1623,7 +1624,7 @@ export const useAppStore = create<AppState>()(
       },
 
       createSettlementOrder: async (storeId, items) => {
-        const { user } = get();
+        const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (user.role !== 'admin') return { error: new Error('当前角色无结算建单权限') };
         if (!storeId) return { error: new Error('请选择店铺') };
@@ -1639,15 +1640,197 @@ export const useAppStore = create<AppState>()(
 
         const requestId = createRequestId(user.id);
         try {
-          const { data: orderId, error } = await supabase.rpc('create_settlement_order_atomic', {
+          const { data: orderId, error: rpcError } = await supabase.rpc('create_settlement_order_atomic', {
             p_items: payload,
             p_store_id: storeId,
             p_request_id: requestId,
           });
-          if (error) throw error;
+          if (!rpcError) {
+            await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
+            return { orderId: orderId ? String(orderId) : undefined, error: null };
+          }
+
+          if (!shouldFallbackToLegacyFlow(rpcError as RpcErrorLike)) {
+            throw rpcError;
+          }
+
+          const selectedStore = stores.find((store) => store.id === storeId) || null;
+          if (!selectedStore) throw new Error('店铺不存在或未加载');
+          if (selectedStore.status === 'inactive') throw new Error('店铺已停用');
+
+          let totalRetail = 0;
+          let totalDiscount = 0;
+          let totalQuantity = 0;
+
+          const orderItemsPayload = items.map((item) => {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) throw new Error('商品不存在');
+
+            const quantity = Number(item.quantity);
+            if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`${product.name} 数量必须大于0`);
+
+            if (product.city_id !== selectedStore.city_id) {
+              throw new Error('店铺只能结算所属城市商品');
+            }
+
+            const storeOverride = storeProductPrices.find((entry) => entry.store_id === storeId && entry.product_id === product.id);
+            const retailPrice = Number(product.price || 0);
+            const discountPrice = resolvePrice({
+              price: retailPrice,
+              discount_price: product.discount_price,
+              discount_rate: selectedStore.discount_rate,
+              override_price: storeOverride?.override_price,
+            }).price;
+            const unitCost = Number(product.cost || 0);
+            const oneTimeCost = Number(product.one_time_cost || 0);
+
+            totalRetail += retailPrice * quantity;
+            totalDiscount += discountPrice * quantity;
+            totalQuantity += quantity;
+
+            return {
+              product_id: product.id,
+              quantity,
+              retail_price: retailPrice,
+              discount_price: discountPrice,
+              unit_cost: unitCost,
+              one_time_cost: oneTimeCost,
+            };
+          });
+
+          const baseOrderPayload = {
+            distributor_id: user.id,
+            city_id: selectedStore.city_id,
+            store_id: storeId,
+            request_id: requestId,
+            total_retail_amount: totalRetail,
+            total_discount_amount: totalDiscount,
+            quantity: totalQuantity,
+            order_kind: 'settlement' as const,
+            status: 'accepted' as const,
+            payment_status: 'paid' as const,
+          };
+
+          let orderInsert = await supabase
+            .from('orders')
+            .insert(baseOrderPayload)
+            .select('id')
+            .single();
+
+          if (orderInsert.error && orderItemsPayload.length > 0) {
+            const message = String(orderInsert.error.message || '').toLowerCase();
+            const details = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+            const combined = `${message} ${details}`;
+            const legacyColumnHit =
+              combined.includes('column "quantity"')
+              || combined.includes('column "unit_price"')
+              || combined.includes('column "product_id"')
+              || combined.includes('column "total_amount"')
+              || combined.includes('column "total-amount"')
+              || combined.includes('column quantity')
+              || combined.includes('column unit_price')
+              || combined.includes('column product_id')
+              || combined.includes('column total_amount')
+              || combined.includes('column total-amount');
+            const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+            const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+            if (legacyConstraintHit) {
+              const primaryItem = orderItemsPayload[0];
+              const legacyOrderPayload = {
+                ...baseOrderPayload,
+                product_id: primaryItem.product_id,
+                quantity: primaryItem.quantity,
+                unit_price: primaryItem.discount_price,
+                total_amount: totalDiscount,
+              };
+
+              orderInsert = await supabase
+                .from('orders')
+                .insert(legacyOrderPayload)
+                .select('id')
+                .single();
+
+              if (orderInsert.error) {
+                const retryMessage = String(orderInsert.error.message || '').toLowerCase();
+                const retryDetails = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+                const retryCombined = `${retryMessage} ${retryDetails}`;
+                const legacyDashTotalAmountHit =
+                  orderInsert.error.code === '23502'
+                  && (retryCombined.includes('column "total-amount"') || retryCombined.includes('column total-amount'))
+                  && (retryCombined.includes('relation "orders"') || retryCombined.includes('table "orders"'));
+
+                if (legacyDashTotalAmountHit) {
+                  const legacyDashPayloadBase = {
+                    distributor_id: legacyOrderPayload.distributor_id,
+                    city_id: legacyOrderPayload.city_id,
+                    total_retail_amount: legacyOrderPayload.total_retail_amount,
+                    total_discount_amount: legacyOrderPayload.total_discount_amount,
+                    product_id: legacyOrderPayload.product_id,
+                    quantity: legacyOrderPayload.quantity,
+                    unit_price: legacyOrderPayload.unit_price,
+                  };
+                  orderInsert = await supabase
+                    .from('orders')
+                    .insert({
+                      ...legacyDashPayloadBase,
+                      'total-amount': totalDiscount,
+                    })
+                    .select('id')
+                    .single();
+                }
+              }
+            }
+          }
+
+          const { data: orderData, error: orderError } = orderInsert;
+          if (orderError) throw orderError;
+
+          const { error: itemError } = await supabase
+            .from('order_items')
+            .insert(orderItemsPayload.map((item) => ({ ...item, order_id: orderData.id })));
+          if (itemError) throw itemError;
+
+          const settlementByProduct = orderItemsPayload.reduce<Map<string, number>>((acc, item) => {
+            const nextQty = (acc.get(item.product_id) || 0) + item.quantity;
+            acc.set(item.product_id, nextQty);
+            return acc;
+          }, new Map());
+
+          const { data: existingStoreInventory, error: existingStoreInventoryError } = await supabase
+            .from('store_inventory')
+            .select('product_id, quantity')
+            .eq('store_id', storeId)
+            .in('product_id', Array.from(settlementByProduct.keys()));
+          if (existingStoreInventoryError) throw existingStoreInventoryError;
+
+          const existingQuantityMap = new Map(
+            (existingStoreInventory || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]),
+          );
+
+          const insufficientProductId = Array.from(settlementByProduct.entries()).find(([productId, qty]) => {
+            const current = existingQuantityMap.get(productId) || 0;
+            return current < qty;
+          })?.[0];
+          if (insufficientProductId) {
+            const productName = products.find((product) => product.id === insufficientProductId)?.name || '商品';
+            throw new Error(`${productName} 店铺库存不足`);
+          }
+
+          const nowIso = new Date().toISOString();
+          const storeInventoryPayload = Array.from(settlementByProduct.entries()).map(([productId, qty]) => ({
+            store_id: storeId,
+            product_id: productId,
+            quantity: Math.max(0, (existingQuantityMap.get(productId) || 0) - qty),
+            updated_at: nowIso,
+          }));
+          const { error: storeInventoryError } = await supabase
+            .from('store_inventory')
+            .upsert(storeInventoryPayload, { onConflict: 'store_id,product_id' });
+          if (storeInventoryError) throw storeInventoryError;
 
           await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
-          return { orderId: orderId ? String(orderId) : undefined, error: null };
+          return { orderId: orderData ? String(orderData.id) : undefined, error: null };
         } catch (error) {
           return { error: error as Error };
         }
