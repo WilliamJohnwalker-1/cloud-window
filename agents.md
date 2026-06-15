@@ -245,12 +245,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.20`
-- Current web baseline: `v1.2.28`
+- Current mobile baseline: `v2.1.21`
+- Current web baseline: `v1.2.30`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 库存/订单/报表三页筛选统一升级为“城市→店铺”二级筛选，口径对齐移动端
-- Latest mobile stabilization: 订单页筛选入口下沉为“搜索 + 筛选弹层”，商品数量统计卡优化为“左本月/右累计”双列可滚动并提升可读性；报表页筛选区与报表类型选择间距微调
+- Latest web stabilization: 订单体系升级完成（供货/结算/零售），订单页结算建单入口+类型筛选、报表“营收口径(结算+零售)+供货统计”已落地；供货单单笔导出模板按上货单格式并完成居中样式收口
+- Latest mobile stabilization: 注册去店铺字段+忘记密码、多店铺默认店选择、订单标签/筛选升级、报表营收口径与供货统计拆分、供货单导出模板升级已完成
 - Latest store-management wave: Web 店铺定价管理与订单修改 UI、双端报表店铺维度均已完成并通过 admin 手工验收
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.

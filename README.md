@@ -70,7 +70,7 @@
 - Web 前端：Vite + React + TypeScript + Tailwind + Zustand
 - 状态管理：Zustand + AsyncStorage
 - 后端：Supabase（PostgreSQL / Auth / Storage）
-- 导出：`xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`
+- 导出：移动端 `xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`；Web 单笔导出 `exceljs`
 - OTA 更新：`expo-updates` + EAS Update
 - UI组件：Lucide React Native（矢量图标）、react-native-gifted-charts（图表）、react-native-toast-message（提示）
 - 设计系统：粉蓝年轻化主题（src/theme.ts）
@@ -172,7 +172,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.28）
+### 5. 启动 Web 端（v1.2.30）
 
 ```bash
 npm run web:v2
@@ -369,6 +369,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.21 (2026-06-15) - 双端订单体系升级（移动端能力补齐）
+
+- 注册流程改版：去除店铺字段并补齐“忘记密码”；分销商多店铺登录后支持默认店选择
+- 订单体系升级：新增结算建单（admin）、订单类型标签/筛选（供货单/结算单/零售单）
+- 报表口径升级：营收仅统计 `settlement + retail`（排除退款状态），并新增独立“供货统计”视图
+- 供货单导出模板升级为“上货单”格式：文件名、7列表头、末行合计与业务口径对齐
+
+### Web v1.2.30 (2026-06-15) - 双端订单体系升级（Web 收口）
+
+- 订单页新增 admin「结算建单」入口与流程（不改 POS 收银台），并补齐订单类型标签/筛选
+- 报表页营收口径升级为 `settlement + retail`（排除退款），新增独立“供货统计”板块
+- 单笔供货单导出切换为“上货单”模板（文件名/列结构/合计行与移动端一致）
+- 导出链路改为 `exceljs`，单元格统一水平/垂直居中，已按管理端实操验收通过
 
 ### Web v1.2.29 (2026-06-14) - 退款链路稳定性与测试端口兼容
 
