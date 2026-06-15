@@ -21,7 +21,7 @@ import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 
-type ReportType = 'sales' | 'inventory' | 'profit';
+type ReportType = 'sales' | 'supply' | 'inventory' | 'profit';
 
 const CHART_COLORS = ['#FF6B9D', '#5B8DEF', '#C77DFF', '#4ECDC4', '#FFB347'];
 
@@ -144,13 +144,24 @@ export default function ReportsScreen() {
     return list;
   }, [orders, selectedCityId, selectedStoreId]);
 
+  const revenueScopedOrders = useMemo(
+    () =>
+      filteredOrders.filter((order) => {
+        const isRevenueKind = order.order_kind === 'settlement' || order.order_kind === 'retail';
+        if (!isRevenueKind) return false;
+        const paymentStatus = String(order.payment_status || '').toLowerCase();
+        return paymentStatus !== 'refunded' && paymentStatus !== 'refund_pending';
+      }),
+    [filteredOrders],
+  );
+
   const salesData = useMemo(() => {
-    const totalRetailSales = filteredOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
-    const totalOrders = filteredOrders.length;
+    const totalRetailSales = revenueScopedOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
+    const totalOrders = revenueScopedOrders.length;
 
     const productSalesQty: { [key: string]: { name: string; quantity: number } } = {};
     const productSalesAmt: { [key: string]: { name: string; amount: number } } = {};
-    filteredOrders.forEach((order) => {
+    revenueScopedOrders.forEach((order) => {
       order.items.forEach((it) => {
         if (it.is_sample) return;
         const name = it.product_name || '未知';
@@ -223,7 +234,7 @@ export default function ReportsScreen() {
     const citySales: { [key: string]: number } = {};
     const storeSales: { [key: string]: number } = {};
     
-    filteredOrders.forEach((order) => {
+    revenueScopedOrders.forEach((order) => {
       const city = order.city_name || '未知';
       citySales[city] = (citySales[city] || 0) + Number(order.total_discount_amount || 0);
       
@@ -240,7 +251,50 @@ export default function ReportsScreen() {
       .sort((a, b) => b.total - a.total);
 
     return { totalRetailSales, totalOrders, topProductsQty, topProductsAmt, topProductsVelocity, salesByCity, salesByStore };
-  }, [filteredOrders, products, storeInventory, selectedStoreId]);
+  }, [products, revenueScopedOrders, selectedStoreId, storeInventory]);
+
+  const supplyData = useMemo(() => {
+    const supplyOrders = filteredOrders.filter((order) => order.order_kind === 'distribution');
+    const totalSupplyOrders = supplyOrders.length;
+
+    const productSupplyQty: { [key: string]: { name: string; quantity: number } } = {};
+    const storeSupplyQty: { [key: string]: number } = {};
+    let totalSupplyQuantity = 0;
+
+    supplyOrders.forEach((order) => {
+      const storeKey = order.store_name || '未知店铺/历史订单';
+      const orderQty = order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      storeSupplyQty[storeKey] = (storeSupplyQty[storeKey] || 0) + orderQty;
+
+      order.items.forEach((item) => {
+        if (item.is_sample) return;
+        const productKey = item.product_id;
+        const productName = item.product_name || '未知';
+        const quantity = Number(item.quantity || 0);
+        if (!productSupplyQty[productKey]) {
+          productSupplyQty[productKey] = { name: productName, quantity: 0 };
+        }
+        productSupplyQty[productKey].quantity += quantity;
+        totalSupplyQuantity += quantity;
+      });
+    });
+
+    const topProducts = Object.values(productSupplyQty)
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 8);
+
+    const byStore = Object.entries(storeSupplyQty)
+      .map(([store, quantity]) => ({ store, quantity }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 8);
+
+    return {
+      totalSupplyOrders,
+      totalSupplyQuantity,
+      topProducts,
+      byStore,
+    };
+  }, [filteredOrders]);
 
   const inventoryData = useMemo(() => {
     if (selectedStoreId) {
@@ -288,7 +342,7 @@ export default function ReportsScreen() {
       };
     } = {};
 
-    filteredOrders.forEach((order) => {
+    revenueScopedOrders.forEach((order) => {
       order.items.forEach((it) => {
         const key = it.product_id;
         if (!productProfit[key]) {
@@ -345,7 +399,7 @@ export default function ReportsScreen() {
       totalProfit: totalDiscountRevenue - totalCost,
       profitByProduct,
     };
-  }, [filteredOrders]);
+  }, [revenueScopedOrders]);
 
   const exportProfitExcel = async () => {
     try {
@@ -464,6 +518,7 @@ export default function ReportsScreen() {
     <ScrollView>
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>销售概览</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>口径：结算单 + 零售单（已排除退款单）</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: theme.textPrimary }]}>{salesData.totalRetailSales.toFixed(2)}元</Text>
@@ -471,7 +526,7 @@ export default function ReportsScreen() {
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: theme.textPrimary }]}>{salesData.totalOrders}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>订单数量</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>营收订单数</Text>
           </View>
         </View>
       </View>
@@ -714,6 +769,68 @@ export default function ReportsScreen() {
     </ScrollView>
   );
 
+  const renderSupplyReport = () => (
+    <ScrollView>
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>供货统计概览</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>仅统计供货单（distribution）</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{supplyData.totalSupplyOrders}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>供货单数</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{supplyData.totalSupplyQuantity}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>供货总件数</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品供货排行</Text>
+        {supplyData.topProducts.length > 0 ? (
+          supplyData.topProducts.map((item, index) => (
+            <TouchableOpacity
+              key={`${item.name}-${index}`}
+              style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
+              onPress={() => showFullProductName(item.name)}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                {index + 1}. {item.name}
+              </Text>
+              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.quantity}</Text>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无供货数据</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>店铺供货分布</Text>
+        {supplyData.byStore.length > 0 ? (
+          supplyData.byStore.map((item) => (
+            <View key={item.store} style={[styles.rankListRow, { borderBottomColor: theme.divider }]}>
+              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                {item.store}
+              </Text>
+              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.quantity}</Text>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无店铺供货数据</Text>
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  );
+
   const renderProfitReport = () => (
     <ScrollView>
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
@@ -864,14 +981,16 @@ export default function ReportsScreen() {
         </View>
       )}
 
-      <View style={[styles.tabBar, { backgroundColor: theme.surface }]}>
+      <View style={[styles.tabBar, { backgroundColor: theme.surface }]}> 
         {renderTabButton('sales', '销售报表')}
+        {!isDistributor && renderTabButton('supply', '供货统计')}
         {!isDistributor && renderTabButton('inventory', '库存报表')}
         {!isDistributor && renderTabButton('profit', '利润报表')}
       </View>
 
-      <View style={[styles.content, { backgroundColor: theme.background }]}>
+      <View style={[styles.content, { backgroundColor: theme.background }]}> 
         {reportType === 'sales' && renderSalesReport()}
+        {!isDistributor && reportType === 'supply' && renderSupplyReport()}
         {!isDistributor && reportType === 'inventory' && renderInventoryReport()}
         {!isDistributor && reportType === 'profit' && renderProfitReport()}
       </View>

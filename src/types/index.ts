@@ -8,6 +8,7 @@ export interface Profile {
   role: UserRole;
   city_id?: string | null;
   city_name?: string;
+  default_store_id?: string | null;
   /** @deprecated Use Store.name instead. Kept for backward compatibility with profiles table. */
   store_name?: string | null;
   created_at: string;
@@ -138,7 +139,7 @@ export interface InventoryReport {
 
 export type OrderStatus = 'pending' | 'accepted';
 
-export type OrderKind = 'distribution' | 'retail';
+export type OrderKind = 'distribution' | 'retail' | 'settlement';
 
 export type NotificationType = 'new_order' | 'order_accepted';
 

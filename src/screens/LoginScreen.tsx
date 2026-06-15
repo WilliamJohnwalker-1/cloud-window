@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -22,9 +23,9 @@ export default function LoginScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetSending, setResetSending] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [selectedCityId, setSelectedCityId] = useState('');
-  const [storeName, setStoreName] = useState('');
   const { signIn, signUp, fetchCities, cities, isLoading } = useAppStore(
     useShallow((state) => ({
       signIn: state.signIn,
@@ -62,18 +63,34 @@ export default function LoginScreen() {
         alert('请选择归属城市');
         return;
       }
-      if (!storeName.trim()) {
-        alert('请输入店面名称');
-        return;
-      }
 
-      const { error } = await signUp(email, password, 'distributor', selectedCityId, storeName.trim());
+      const { error } = await signUp(email, password, 'distributor', selectedCityId);
       if (error) {
         alert(error.message);
       } else {
         alert('注册成功！请检查邮箱验证或直接登录。');
         setIsLogin(true);
       }
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      alert('请输入邮箱地址');
+      return;
+    }
+    setResetSending(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      if (error) {
+        alert('发送失败：' + error.message);
+      } else {
+        alert('重置链接已发送到您的邮箱，请查收。');
+      }
+    } catch {
+      alert('发送失败，请稍后重试。');
+    } finally {
+      setResetSending(false);
     }
   };
 
@@ -116,6 +133,19 @@ export default function LoginScreen() {
               secureTextEntry
               placeholderTextColor={theme.textTertiary}
             />
+
+            {isLogin && (
+              <TouchableOpacity
+                onPress={handleResetPassword}
+                disabled={resetSending}
+                activeOpacity={0.7}
+                style={styles.forgotPasswordLink}
+              >
+                <Text style={[styles.forgotPasswordText, { color: theme.pink }]}>
+                  {resetSending ? '发送中...' : '忘记密码?'}
+                </Text>
+              </TouchableOpacity>
+            )}
             
             {!isLogin && (
               <>
@@ -125,13 +155,6 @@ export default function LoginScreen() {
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry
-                  placeholderTextColor={theme.textTertiary}
-                />
-                <TextInput
-                  style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                  placeholder="店面名称"
-                  value={storeName}
-                  onChangeText={setStoreName}
                   placeholderTextColor={theme.textTertiary}
                 />
 
@@ -315,6 +338,17 @@ const styles = StyleSheet.create({
   switchText: {
     color: Colors.pink,
     fontSize: 14,
+    fontWeight: '500',
+  },
+
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginTop: -6,
+    marginBottom: 10,
+    paddingVertical: 4,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
     fontWeight: '500',
   },
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, ActivityIndicator, StyleSheet, AppState } from 'react-native';
+import { Text, View, ActivityIndicator, StyleSheet, AppState, Modal, ScrollView, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import type { ToastConfig } from 'react-native-toast-message';
@@ -19,6 +19,7 @@ import { useAppStore } from './src/store/useAppStore';
 import AppConfirmModal from './src/components/AppConfirmModal';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
+import type { Store } from './src/types';
 
 const Tab = createBottomTabNavigator();
 
@@ -101,6 +102,48 @@ function MainTabs() {
   );
 }
 
+function DefaultStoreSelector({
+  visible,
+  stores,
+  isDarkMode,
+  isSubmitting,
+  onSelect,
+}: {
+  visible: boolean;
+  stores: Store[];
+  isDarkMode: boolean;
+  isSubmitting: boolean;
+  onSelect: (storeId: string) => void;
+}) {
+  const theme = isDarkMode ? DarkColors : LightColors;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => undefined}>
+      <View style={styles.selectorOverlay}>
+        <View style={[styles.selectorCard, { backgroundColor: theme.surface }]}> 
+          <Text style={[styles.selectorTitle, { color: theme.textPrimary }]}>请选择默认店铺</Text>
+          <Text style={[styles.selectorSubtitle, { color: theme.textSecondary }]}>检测到您绑定了多个店铺，登录前请先选择当前默认店铺。</Text>
+          <ScrollView style={styles.selectorList}>
+            {stores.map((store) => (
+              <TouchableOpacity
+                key={store.id}
+                style={[styles.selectorItem, { backgroundColor: theme.surfaceSecondary }]}
+                disabled={isSubmitting}
+                onPress={() => onSelect(store.id)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.selectorItemName, { color: theme.textPrimary }]}>{store.name}</Text>
+                <Text style={[styles.selectorItemMeta, { color: theme.textSecondary }]}>{store.city_name || '未设置城市'}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {isSubmitting ? <ActivityIndicator color={theme.pink} style={styles.selectorLoading} /> : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const toastConfig: ToastConfig = {
   success: ({ ...props }) => (
     <BaseToast
@@ -134,6 +177,10 @@ const toastAnimationConfig = {
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [launchUpdateVisible, setLaunchUpdateVisible] = useState(false);
+  const [storeSelectionVisible, setStoreSelectionVisible] = useState(false);
+  const [storeSelectionChecking, setStoreSelectionChecking] = useState(false);
+  const [storeSelectionSubmitting, setStoreSelectionSubmitting] = useState(false);
+  const [ownedStores, setOwnedStores] = useState<Store[]>([]);
   const { user, setUser, isDarkMode } = useAppStore(
     useShallow((state) => ({
       user: state.user,
@@ -143,6 +190,8 @@ export default function App() {
   );
   const theme = isDarkMode ? DarkColors : LightColors;
   const ensureActiveSession = useAppStore((state) => state.ensureActiveSession);
+  const fetchOwnedStores = useAppStore((state) => state.fetchOwnedStores);
+  const setDefaultStore = useAppStore((state) => state.setDefaultStore);
 
   useEffect(() => {
     const initApp = async () => {
@@ -183,6 +232,48 @@ export default function App() {
 
     initApp();
   }, [setUser, ensureActiveSession]);
+
+  useEffect(() => {
+    const checkDistributorDefaultStore = async () => {
+      if (!user || user.role !== 'distributor') {
+        setStoreSelectionVisible(false);
+        setOwnedStores([]);
+        setStoreSelectionChecking(false);
+        return;
+      }
+
+      setStoreSelectionChecking(true);
+      const stores = await fetchOwnedStores();
+      const hasExistingDefault = Boolean(user.default_store_id) && stores.some((store) => store.id === user.default_store_id);
+
+      if (hasExistingDefault || stores.length === 0) {
+        setStoreSelectionVisible(false);
+        setOwnedStores(stores);
+        setStoreSelectionChecking(false);
+        return;
+      }
+
+      if (stores.length === 1) {
+        const { error } = await setDefaultStore(stores[0].id);
+        if (error) {
+          Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: error.message });
+          setStoreSelectionVisible(true);
+          setOwnedStores(stores);
+        } else {
+          setStoreSelectionVisible(false);
+          setOwnedStores(stores);
+        }
+        setStoreSelectionChecking(false);
+        return;
+      }
+
+      setOwnedStores(stores);
+      setStoreSelectionVisible(true);
+      setStoreSelectionChecking(false);
+    };
+
+    void checkDistributorDefaultStore();
+  }, [fetchOwnedStores, setDefaultStore, user]);
 
   useEffect(() => {
     const checkUpdatesOnLaunch = async (): Promise<void> => {
@@ -266,12 +357,43 @@ export default function App() {
     );
   }
 
+  const handleSelectDefaultStore = async (storeId: string) => {
+    setStoreSelectionSubmitting(true);
+    const { error } = await setDefaultStore(storeId);
+    if (error) {
+      Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: error.message });
+      setStoreSelectionSubmitting(false);
+      return;
+    }
+
+    setStoreSelectionVisible(false);
+    setStoreSelectionSubmitting(false);
+  };
+
+  const shouldBlockForStoreSelection = Boolean(
+    user
+    && user.role === 'distributor'
+    && (storeSelectionChecking || storeSelectionVisible),
+  );
+
 
   return (
     <>
       <NavigationContainer>
-        {user ? <MainTabs /> : <LoginScreen />}
+        {user ? (shouldBlockForStoreSelection ? (
+          <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+            <ActivityIndicator size="large" color={theme.pink} />
+            <Text style={[styles.loadingText, { color: theme.textSecondary }]}>正在准备店铺信息...</Text>
+          </View>
+        ) : <MainTabs />) : <LoginScreen />}
       </NavigationContainer>
+      <DefaultStoreSelector
+        visible={storeSelectionVisible}
+        stores={ownedStores}
+        isDarkMode={isDarkMode}
+        isSubmitting={storeSelectionSubmitting}
+        onSelect={handleSelectDefaultStore}
+      />
       <AppConfirmModal
         visible={launchUpdateVisible}
         isDarkMode={isDarkMode}
@@ -348,5 +470,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
     fontSize: 18,
+  },
+  selectorOverlay: {
+    flex: 1,
+    backgroundColor: Colors.shadowNeutral,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  selectorCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 20,
+    padding: 18,
+    ...Shadow.card,
+  },
+  selectorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  selectorSubtitle: {
+    fontSize: 13,
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  selectorList: {
+    maxHeight: 280,
+    marginTop: 14,
+  },
+  selectorItem: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  selectorItemName: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  selectorItemMeta: {
+    marginTop: 2,
+    fontSize: 12,
+  },
+  selectorLoading: {
+    marginTop: 8,
   },
 });
