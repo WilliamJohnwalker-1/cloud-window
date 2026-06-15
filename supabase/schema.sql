@@ -16,6 +16,7 @@ CREATE TABLE public.profiles (
   role TEXT NOT NULL CHECK (role IN ('admin', 'distributor', 'inventory_manager')),
   city_id UUID REFERENCES public.cities(id),
   store_name TEXT,
+  default_store_id UUID,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -210,18 +211,17 @@ CREATE POLICY "Users can delete own/admin order items" ON public.order_items
 
 -- Trigger to create profile on user signup
 -- Uses auth metadata:
--- role (optional), city_id (for distributor), store_name (for distributor)
+-- role (optional), city_id (for distributor)
+-- store_name is no longer required; store binding is managed via profiles.default_store_id
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   signup_role TEXT;
   default_hangzhou UUID;
   selected_city UUID;
-  selected_store TEXT;
 BEGIN
   signup_role := COALESCE(NEW.raw_user_meta_data->>'role', 'distributor');
   selected_city := NULLIF(NEW.raw_user_meta_data->>'city_id', '')::uuid;
-  selected_store := NULLIF(NEW.raw_user_meta_data->>'store_name', '');
 
   SELECT id INTO default_hangzhou FROM public.cities WHERE name = '杭州' LIMIT 1;
 
@@ -233,22 +233,10 @@ BEGIN
     RAISE EXCEPTION 'Distributor city is required';
   END IF;
 
-  IF signup_role = 'distributor' AND selected_store IS NULL THEN
-    RAISE EXCEPTION 'Distributor store_name is required';
-  END IF;
-
-  INSERT INTO public.profiles (id, email, role, city_id, store_name)
-  VALUES (NEW.id, NEW.email, signup_role, selected_city, selected_store);
-
-  -- Auto-create a stores row for distributors with both city and store_name
-  IF signup_role = 'distributor' AND selected_city IS NOT NULL AND selected_store IS NOT NULL THEN
-    INSERT INTO public.stores (name, city_id, distributor_id)
-    SELECT selected_store, selected_city, NEW.id
-    WHERE NOT EXISTS (
-      SELECT 1 FROM public.stores
-      WHERE distributor_id = NEW.id AND name = selected_store AND city_id = selected_city
-    );
-  END IF;
+  -- Insert profile without store_name; store binding is now managed
+  -- separately via profiles.default_store_id by an admin.
+  INSERT INTO public.profiles (id, email, role, city_id)
+  VALUES (NEW.id, NEW.email, signup_role, selected_city);
 
   RETURN NEW;
 END;
@@ -259,21 +247,14 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- Trigger function: auto-create a stores row when a distributor profile is inserted.
--- Covers both the signup path (handle_new_user) and the self-heal path (v3.10 policy).
--- The signup path also inserts into stores explicitly; both use NOT EXISTS guards
--- so repeated calls never duplicate stores.
+-- Trigger function: no-op since v5.0.
+-- Store creation is now an explicit admin action;
+-- default_store_id binding is set separately.
+-- Retained as a no-op trigger for forward compatibility.
 CREATE OR REPLACE FUNCTION public.create_store_for_new_distributor()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.role = 'distributor' AND NEW.city_id IS NOT NULL AND NEW.store_name IS NOT NULL THEN
-    INSERT INTO public.stores (name, city_id, distributor_id)
-    SELECT NEW.store_name, NEW.city_id, NEW.id
-    WHERE NOT EXISTS (
-      SELECT 1 FROM public.stores
-      WHERE distributor_id = NEW.id AND name = NEW.store_name AND city_id = NEW.city_id
-    );
-  END IF;
+  -- No-op: store creation is now an explicit admin action.
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -282,6 +263,48 @@ DROP TRIGGER IF EXISTS on_distributor_profile_created ON public.profiles;
 CREATE TRIGGER on_distributor_profile_created
   AFTER INSERT ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.create_store_for_new_distributor();
+
+-- Allow distributor users to set their own default store selection.
+CREATE OR REPLACE FUNCTION public.set_my_default_store(p_store_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  current_user_id UUID := auth.uid();
+  matched_store_id UUID;
+BEGIN
+  IF current_user_id IS NULL THEN
+    RAISE EXCEPTION 'UNAUTHORIZED';
+  END IF;
+
+  SELECT s.id
+  INTO matched_store_id
+  FROM public.stores s
+  WHERE s.id = p_store_id
+    AND s.distributor_id = current_user_id
+    AND s.status = 'active'
+  LIMIT 1;
+
+  IF matched_store_id IS NULL THEN
+    RAISE EXCEPTION 'STORE_NOT_ALLOWED';
+  END IF;
+
+  UPDATE public.profiles
+  SET default_store_id = matched_store_id,
+      updated_at = NOW()
+  WHERE id = current_user_id
+    AND role = 'distributor';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PROFILE_NOT_FOUND_OR_NOT_DISTRIBUTOR';
+  END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_my_default_store(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_my_default_store(UUID) TO authenticated;
 
 -- Storage bucket for product images
 INSERT INTO storage.buckets (id, name, public)

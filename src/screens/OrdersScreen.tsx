@@ -20,7 +20,7 @@ import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
-import type { Order, ProductWithDetails } from '../types';
+import type { Order, OrderKind, ProductWithDetails } from '../types';
 import { resolvePrice } from '../utils/priceResolver';
 
 interface CartItem {
@@ -48,7 +48,7 @@ export default function OrdersScreen() {
     fetchStores,
     fetchStoreInventory,
     fetchStoreProductPrices,
-    createStoreRetailOrder,
+    createSettlementOrder,
     createBatchOrders,
     deleteOrder,
     acceptOrder,
@@ -64,6 +64,7 @@ export default function OrdersScreen() {
   const [selectedOrderCityId, setSelectedOrderCityId] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [selectedOrderStoreId, setSelectedOrderStoreId] = useState<string | null>(null);
+  const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
   const [rangeStartDate, setRangeStartDate] = useState('');
   const [rangeEndDate, setRangeEndDate] = useState('');
@@ -97,10 +98,19 @@ export default function OrdersScreen() {
   const animatedOpacity = useRef(new Animated.Value(0)).current;
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isOnlyAdmin = user?.role === 'admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
 
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
-    return kind === 'retail' ? '零售订单' : '分销订单';
+    if (kind === 'retail') return '零售单';
+    if (kind === 'settlement') return '结算单';
+    return '供货单';
+  };
+
+  const getOrderTotalLabel = (kind: Order['order_kind']): string => {
+    if (kind === 'retail') return '收款总价';
+    if (kind === 'settlement') return '结算总价';
+    return '折扣总价';
   };
 
   const getPaymentMethodLabel = (method?: Order['payment_method']): string => {
@@ -234,8 +244,11 @@ export default function OrdersScreen() {
         list = list.filter((o) => o.store_id === selectedOrderStoreId);
       }
     }
+    if (selectedOrderKind) {
+      list = list.filter((o) => o.order_kind === selectedOrderKind);
+    }
     return list;
-  }, [orders, isAdmin, selectedOrderCityId, selectedOrderStoreId]);
+  }, [orders, isAdmin, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind]);
 
   const matchesStatsRange = useCallback((order: Order): boolean => {
     const date = new Date(order.created_at);
@@ -356,9 +369,10 @@ export default function OrdersScreen() {
     let count = 0;
     if (isAdmin && selectedOrderCityId) count += 1;
     if (isAdmin && selectedOrderStoreId) count += 1;
+    if (selectedOrderKind) count += 1;
     if (statsRange !== 'all') count += 1;
     return count;
-  }, [isAdmin, selectedOrderCityId, selectedOrderStoreId, statsRange]);
+  }, [isAdmin, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind, statsRange]);
 
   const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
   const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
@@ -600,7 +614,110 @@ export default function OrdersScreen() {
 
   const exportOrderToExcel = async (order: Order) => {
     try {
-      const deliveryDate = new Date(order.created_at).toLocaleDateString('zh-CN');
+      const XLSX = await import('xlsx');
+
+      if (order.order_kind === 'distribution') {
+        const boundStore = order.store_id ? stores.find((store) => store.id === order.store_id) : null;
+        const storeNameRaw = order.store_name || boundStore?.name || '未指定店铺';
+        const safeStoreName = storeNameRaw.replace(/[\\/:*?"<>|]/g, '-').trim() || '未指定店铺';
+
+        const exportDate = new Date(order.created_at);
+        const year = String(exportDate.getFullYear());
+        const month = String(exportDate.getMonth() + 1).padStart(2, '0');
+        const day = String(exportDate.getDate()).padStart(2, '0');
+        const exportBaseName = `云窗&${safeStoreName}*${year}*${month}*${day}上货单`;
+
+        const headers = ['序号', '商品名称', '送货数量', '零售价', '结算价', '零售总价', '结算总价'];
+        const dataRows = order.items.map((item, index) => {
+          const quantity = Number(item.quantity || 0);
+          const retailPrice = Number(item.retail_price || 0);
+
+          let settlementPrice = Number(item.discount_price || 0);
+          if (!item.is_sample && settlementPrice <= 0) {
+            const product = products.find((p) => p.id === item.product_id);
+            const storeOverride = order.store_id
+              ? storeProductPrices.find((entry) => entry.store_id === order.store_id && entry.product_id === item.product_id)
+              : undefined;
+            settlementPrice = product
+              ? resolvePrice({
+                price: Number(product.price || 0),
+                discount_price: product.discount_price,
+                discount_rate: boundStore?.discount_rate,
+                override_price: storeOverride?.override_price,
+              }).price
+              : 0;
+          }
+
+          const retailTotal = retailPrice * quantity;
+          const settlementTotal = settlementPrice * quantity;
+
+          return [
+            index + 1,
+            item.product_name || '未知商品',
+            quantity,
+            Number(retailPrice.toFixed(2)),
+            Number(settlementPrice.toFixed(2)),
+            Number(retailTotal.toFixed(2)),
+            Number(settlementTotal.toFixed(2)),
+          ];
+        });
+
+        const sumRetailTotal = dataRows.reduce((sum, row) => sum + Number(row[5] || 0), 0);
+        const sumSettlementTotal = dataRows.reduce((sum, row) => sum + Number(row[6] || 0), 0);
+        const sumRow = ['合计', '', '', '', '', Number(sumRetailTotal.toFixed(2)), Number(sumSettlementTotal.toFixed(2))];
+        const sheetData = [headers, ...dataRows, sumRow];
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        ws['!cols'] = [
+          { wch: 8 },
+          { wch: 24 },
+          { wch: 12 },
+          { wch: 12 },
+          { wch: 12 },
+          { wch: 14 },
+          { wch: 14 },
+        ];
+
+        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+        for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+          for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex += 1) {
+            const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+            if (!ws[address]) continue;
+            if (!ws[address].s) ws[address].s = {};
+            ws[address].s = { alignment: { horizontal: 'center', vertical: 'center' } };
+          }
+        }
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '上货单');
+
+        if (Platform.OS === 'web') {
+          const arrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+          const blob = new Blob([arrayBuffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${exportBaseName}.xlsx`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        const FileSystem = await import('expo-file-system/legacy');
+        const Sharing = await import('expo-sharing');
+        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const uri = `${FileSystem.cacheDirectory}${exportBaseName}.xlsx`;
+        await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        return;
+      }
+
       const headers = ['商品名称', '送货数量', '单价', '查收'];
       const dataRows = order.items.map((item) => [
         item.product_name,
@@ -609,7 +726,6 @@ export default function OrdersScreen() {
         '',
       ]);
       const sheetData = [headers, ...dataRows];
-      const XLSX = await import('xlsx');
       const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
       const colWidths = headers.map((h, colIdx) => {
@@ -707,7 +823,7 @@ export default function OrdersScreen() {
 
       <View style={styles.orderTotals}>
         <Text style={[styles.detailText, { color: theme.textSecondary }]}>零售总价: {Number(item.total_retail_amount).toFixed(2)}元</Text>
-        <Text style={styles.totalText}>{item.order_kind === 'retail' ? '收款总价' : '折扣总价'}: {Number(item.total_discount_amount).toFixed(2)}元</Text>
+        <Text style={styles.totalText}>{getOrderTotalLabel(item.order_kind)}: {Number(item.total_discount_amount).toFixed(2)}元</Text>
       </View>
 
       <View style={styles.orderActions}>
@@ -889,7 +1005,7 @@ export default function OrdersScreen() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>销售订单</Text>
         <View style={styles.headerActions}>
-          {isAdmin && (
+          {isOnlyAdmin && (
             <TouchableOpacity
               onPress={() => {
                 setRetailStoreId(null);
@@ -900,7 +1016,7 @@ export default function OrdersScreen() {
               style={styles.outboundButtonWrap}
             >
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
-                <Text style={styles.addButtonText}>零售建单</Text>
+                <Text style={styles.addButtonText}>结算建单</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -1027,7 +1143,7 @@ export default function OrdersScreen() {
         </TouchableOpacity>
       </View>
 
-      {((isAdmin && (selectedOrderCityId || selectedOrderStoreId)) || statsRange !== 'all') && (
+      {((isAdmin && (selectedOrderCityId || selectedOrderStoreId)) || selectedOrderKind || statsRange !== 'all') && (
         <View style={styles.activeFiltersWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
             {isAdmin && selectedOrderCityId && (
@@ -1044,6 +1160,14 @@ export default function OrdersScreen() {
                 onPress={() => setSelectedOrderStoreId(null)}
               >
                 <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>店铺: {activeStoresForOrderFilter.find((s) => s.id === selectedOrderStoreId)?.name || '已选'} ×</Text>
+              </TouchableOpacity>
+            )}
+            {selectedOrderKind && (
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                onPress={() => setSelectedOrderKind(null)}
+              >
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>类型: {getOrderKindLabel(selectedOrderKind)} ×</Text>
               </TouchableOpacity>
             )}
             {statsRange !== 'all' && (
@@ -1065,6 +1189,7 @@ export default function OrdersScreen() {
                   setSelectedOrderCityId(null);
                   setSelectedOrderStoreId(null);
                 }
+                setSelectedOrderKind(null);
                 setStatsRange('all');
                 setRangeStartDate('');
                 setRangeEndDate('');
@@ -1149,6 +1274,37 @@ export default function OrdersScreen() {
               </View>
             )}
 
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>订单类型</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                <TouchableOpacity
+                  style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderKind === null && styles.chipActive]}
+                  onPress={() => setSelectedOrderKind(null)}
+                >
+                  <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderKind === null && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                    全部类型
+                  </Text>
+                </TouchableOpacity>
+                {(
+                  [
+                    { key: 'distribution', label: '供货单' },
+                    { key: 'settlement', label: '结算单' },
+                    { key: 'retail', label: '零售单' },
+                  ] as Array<{ key: OrderKind; label: string }>
+                ).map((item) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderKind === item.key && styles.chipActive]}
+                    onPress={() => setSelectedOrderKind(item.key)}
+                  >
+                    <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderKind === item.key && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
             <View style={[styles.monthSwitchRow, { backgroundColor: theme.surface }]}> 
               {[
                 { key: 'day', label: '当日' },
@@ -1217,6 +1373,7 @@ export default function OrdersScreen() {
                     setSelectedOrderCityId(null);
                     setSelectedOrderStoreId(null);
                   }
+                  setSelectedOrderKind(null);
                   setStatsRange('all');
                   setRangeStartDate('');
                   setRangeEndDate('');
@@ -1486,7 +1643,7 @@ export default function OrdersScreen() {
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{Number(detailOrder.total_retail_amount || 0).toFixed(2)}元</Text>
                 </View>
                 <View style={styles.detailSection}>
-                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>{detailOrder.order_kind === 'retail' ? '收款总价' : '折扣总价'}</Text>
+                  <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>{getOrderTotalLabel(detailOrder.order_kind)}</Text>
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{Number(detailOrder.total_discount_amount || 0).toFixed(2)}元</Text>
                 </View>
               </ScrollView>
@@ -1577,7 +1734,7 @@ export default function OrdersScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>零售建单</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>结算建单</Text>
               <TouchableOpacity onPress={() => setRetailModalVisible(false)}>
                 <Text style={styles.modalClose}>取消</Text>
               </TouchableOpacity>
@@ -1752,12 +1909,12 @@ export default function OrdersScreen() {
                       price: p?.price || 0,
                     };
                   });
-                  const { error } = await createStoreRetailOrder(retailStoreId, items);
+                  const { error } = await createSettlementOrder(retailStoreId, items);
                   setSubmittingRetailOrder(false);
                   if (error) {
                     Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
                   } else {
-                    Toast.show({ type: 'success', text1: '成功', text2: '零售订单已创建' });
+                    Toast.show({ type: 'success', text1: '成功', text2: '结算订单已创建' });
                     setRetailModalVisible(false);
                     setRetailCart(new Map());
                     fetchOrders();

@@ -13,6 +13,7 @@ import type {
   Inventory,
   Order,
   OrderItem,
+  OrderKind,
   ProductWithDetails,
   Notification,
   Store,
@@ -40,6 +41,7 @@ interface ProfileRow {
   active_session_id?: string | null;
   role: Profile['role'];
   city_id?: string | null;
+  default_store_id?: string | null;
   cities?: { name: string } | null;
   store_name?: string | null;
   created_at: string;
@@ -218,10 +220,10 @@ const ensureProfileForAuthUser = async (authUser: AuthUserLike): Promise<Profile
 
   const metadata = authUser.user_metadata || {};
   const cityIdRaw = typeof metadata.city_id === 'string' ? metadata.city_id.trim() : '';
-  const storeNameRaw = typeof metadata.store_name === 'string' ? metadata.store_name.trim() : '';
+  const storeNameRaw = typeof metadata.store_name === 'string' ? metadata.store_name.trim() : null;
 
-  if (!isUuidLike(cityIdRaw) || !storeNameRaw) {
-    throw new Error('账号资料不完整，无法自动创建档案。请联系管理员处理该账号。');
+  if (!isUuidLike(cityIdRaw)) {
+    throw new Error('账号资料不完整（缺少城市），无法自动创建档案。请联系管理员处理该账号。');
   }
 
   const { data: insertedProfile, error: insertError } = await supabase
@@ -231,7 +233,7 @@ const ensureProfileForAuthUser = async (authUser: AuthUserLike): Promise<Profile
       email: authUser.email || '',
       role: 'distributor',
       city_id: cityIdRaw,
-      store_name: storeNameRaw,
+    store_name: storeNameRaw || null,
     })
     .select('*, cities(name)')
     .single();
@@ -257,8 +259,10 @@ const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string =
   return `${prefix}-${userId}-${Date.now()}-${randomPart}`;
 };
 
-const coalesceOrderKind = (kind: OrderRow['order_kind']): 'distribution' | 'retail' => (
-  kind === 'retail' ? 'retail' : 'distribution'
+const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
+  kind === 'retail' ? 'retail' :
+  kind === 'settlement' ? 'settlement' :
+  'distribution'
 );
 
 const shouldAutoDeleteStaleRetailOrder = (row: Pick<OrderRow, 'order_kind' | 'payment_status' | 'created_at'>): boolean => {
@@ -326,7 +330,6 @@ interface AppState {
     password: string,
     role?: string,
     cityId?: string,
-    storeName?: string,
   ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 
@@ -337,6 +340,8 @@ interface AppState {
   fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchDistributors: () => Promise<void>;
   fetchStores: () => Promise<void>;
+  fetchOwnedStores: () => Promise<Store[]>;
+  setDefaultStore: (storeId: string) => Promise<{ error: Error | null }>;
   fetchStoreInventory: (storeId: string) => Promise<void>;
   fetchStoreProductPrices: (storeId: string) => Promise<void>;
   fetchAllData: () => Promise<void>;
@@ -391,6 +396,10 @@ interface AppState {
     storeId: string,
     items: StoreRetailCreateItem[],
   ) => Promise<{ error: Error | null }>;
+  createSettlementOrder: (
+    storeId: string,
+    items: StoreRetailCreateItem[],
+  ) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
   modifyDistributionOrder: (orderId: string, items: { order_item_id: string; new_quantity: number }[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
@@ -410,6 +419,7 @@ const mapProfile = (raw: ProfileRow): Profile => ({
   role: raw.email === '2330605169@qq.com' ? 'super_admin' : raw.role,
   city_id: raw.city_id,
   city_name: raw.cities?.name,
+  default_store_id: raw.default_store_id ?? null,
   store_name: raw.store_name,
   created_at: raw.created_at,
   updated_at: raw.updated_at,
@@ -486,7 +496,7 @@ const mapOrder = (raw: OrderRow): Order => {
     city_id: raw.city_id ?? undefined,
     city_name: cityData?.name,
     status: raw.status || 'pending',
-    order_kind: raw.order_kind || 'distribution',
+    order_kind: coalesceOrderKind(raw.order_kind),
     payment_method: raw.payment_method ?? null,
     payment_status: raw.payment_status ?? null,
     payment_transaction_id: raw.payment_transaction_id ?? null,
@@ -585,19 +595,16 @@ export const useAppStore = create<AppState>()(
         password: string,
         role = 'distributor',
         cityId?: string,
-        storeName?: string,
       ) => {
         set({ isLoading: true });
         try {
           const normalizedCityId = cityId?.trim();
-          const normalizedStoreName = storeName?.trim();
 
           if (role === 'distributor') {
             if (!normalizedCityId) throw new Error('请选择归属城市');
             if (!isUuidLike(normalizedCityId)) {
               throw new Error('城市数据格式异常，请联系管理员检查城市配置');
             }
-            if (!normalizedStoreName) throw new Error('请输入店面名称');
           }
 
           const { data, error } = await supabase.auth.signUp({
@@ -607,7 +614,6 @@ export const useAppStore = create<AppState>()(
               data: {
                 role,
                 city_id: normalizedCityId,
-                store_name: normalizedStoreName,
               },
             },
           });
@@ -827,6 +833,72 @@ export const useAppStore = create<AppState>()(
         }
 
         set({ stores: (data as StoreRow[]).map(mapStore) });
+      },
+
+      fetchOwnedStores: async () => {
+        const { user } = get();
+        if (!user || user.role !== 'distributor') {
+          return [];
+        }
+
+        const { data, error } = await supabase
+          .from('stores')
+          .select('*, cities(name), profiles:distributor_id(email)')
+          .eq('distributor_id', user.id)
+          .eq('status', 'active')
+          .order('name', { ascending: true });
+
+        if (error || !data) {
+          set({ stores: [] });
+          return [];
+        }
+
+        const mappedStores = (data as StoreRow[]).map(mapStore);
+        set({ stores: mappedStores });
+        return mappedStores;
+      },
+
+      setDefaultStore: async (storeId: string) => {
+        try {
+          const { user } = get();
+          if (!user) throw new Error('未登录');
+          if (user.role !== 'distributor') throw new Error('仅分销商需要选择默认店铺');
+          if (!storeId) throw new Error('请选择店铺');
+
+          const { data: targetStore, error: storeError } = await supabase
+            .from('stores')
+            .select('id')
+            .eq('id', storeId)
+            .eq('distributor_id', user.id)
+            .eq('status', 'active')
+            .maybeSingle();
+          if (storeError) throw formatSupabaseError(storeError);
+          if (!targetStore) throw new Error('该店铺不可用，请重新选择');
+
+          const { error: rpcError } = await supabase.rpc('set_my_default_store', {
+            p_store_id: storeId,
+          });
+          if (rpcError) {
+            if (isMissingRpcFunction(rpcError)) {
+              throw new Error('数据库未部署默认店铺选择函数，请先执行最新迁移');
+            }
+            throw formatSupabaseError(rpcError);
+          }
+
+          const { data: refreshedProfile, error: refreshedError } = await supabase
+            .from('profiles')
+            .select('*, cities(name)')
+            .eq('id', user.id)
+            .single();
+          if (refreshedError || !refreshedProfile) {
+            throw formatSupabaseError(refreshedError || new Error('刷新用户信息失败'));
+          }
+
+          set({ user: mapProfile(refreshedProfile as ProfileRow) });
+          return { error: null };
+        } catch (error) {
+          return { error: normalizeError(error) };
+        }
       },
 
       fetchStoreInventory: async (storeId) => {
@@ -1500,6 +1572,45 @@ export const useAppStore = create<AppState>()(
           if (error) throw error;
 
           await get().fetchOrders();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      createSettlementOrder: async (storeId, items) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (user.role !== 'admin') {
+            throw new Error('当前角色无结算建单权限');
+          }
+
+          if (!storeId) {
+            throw new Error('店铺ID不能为空');
+          }
+
+          if (!Array.isArray(items) || items.length === 0) {
+            throw new Error('购物车为空');
+          }
+
+          const invalidItem = items.find((item) => !item.product_id || item.quantity <= 0);
+          if (invalidItem) {
+            throw new Error('订单商品参数无效');
+          }
+
+          const payload = buildStoreRetailOrderRpcItems(items);
+          const requestId = createRequestId('batch', user.id);
+
+          const { error } = await supabase.rpc('create_settlement_order_atomic', {
+            p_items: payload,
+            p_store_id: storeId,
+            p_request_id: requestId,
+          });
+          if (error) throw error;
+
+          await Promise.all([get().fetchOrders(), get().fetchStoreInventory(storeId)]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };

@@ -85,10 +85,12 @@ export const ReportsScreen: React.FC = () => {
     'from-orange-500/30 to-orange-700/20 border-orange-300/30 text-orange-200',
   ];
 
-  const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, productVelocityRanking, profitData } = useMemo(() => {
+  const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, productVelocityRanking, profitData, supplyData } = useMemo(() => {
     const cityScopedOrders = selectedCityId ? orders.filter((order) => order.city_id === selectedCityId) : orders;
     const scopedOrders = selectedStoreId ? cityScopedOrders.filter((order) => order.store_id === selectedStoreId) : cityScopedOrders;
     const revenueOrders = scopedOrders.filter((order) => {
+      const isRevenueKind = order.order_kind === 'settlement' || order.order_kind === 'retail';
+      if (!isRevenueKind) return false;
       const paymentStatus = String(order.payment_status || '').toLowerCase();
       return paymentStatus !== 'refunded'
         && paymentStatus !== 'refund_pending';
@@ -96,6 +98,7 @@ export const ReportsScreen: React.FC = () => {
     const totalRetail = revenueOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = revenueOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
     const pendingCount = scopedOrders.filter((order) => order.status === 'pending').length;
+    const supplyOrders = scopedOrders.filter((order) => order.order_kind === 'distribution');
 
     const cityMap = new Map<string, number>();
     const productAmountMap = new Map<string, number>();
@@ -231,10 +234,40 @@ export const ReportsScreen: React.FC = () => {
     const totalDiscountRevenue = profitByProduct.reduce((sum, row) => sum + row.discountRevenue, 0);
     const totalCost = profitByProduct.reduce((sum, row) => sum + row.cost, 0);
 
+    const supplyStoreMap = new Map<string, number>();
+    const supplyProductMap = new Map<string, number>();
+    let totalSupplyQuantity = 0;
+
+    supplyOrders.forEach((order) => {
+      const storeName = order.store_name || '未知店铺/历史订单';
+      const orderSupplyQty = order.items
+        .filter((item) => !item.is_sample)
+        .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      supplyStoreMap.set(storeName, (supplyStoreMap.get(storeName) || 0) + orderSupplyQty);
+
+      order.items.forEach((item) => {
+        if (item.is_sample) return;
+        const productName = item.product_name || item.product_id;
+        const quantity = Number(item.quantity || 0);
+        supplyProductMap.set(productName, (supplyProductMap.get(productName) || 0) + quantity);
+        totalSupplyQuantity += quantity;
+      });
+    });
+
+    const supplyTopProducts = Array.from(supplyProductMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, value]) => ({ name, value }));
+
+    const supplyByStore = Array.from(supplyStoreMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, value]) => ({ name, value }));
+
     return {
       stats: [
-        { label: '总零售额（已排除退款单）', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `有效营收订单 ${revenueOrders.length} 笔`, isUp: true },
-        { label: '折扣成交额（已排除退款单）', value: `¥${totalDiscount.toFixed(2)}`, icon: Package, trend: `待处理 ${pendingCount} 笔`, isUp: true },
+        { label: '总零售额（结算+零售，已排除退款单）', value: `¥${totalRetail.toFixed(2)}`, icon: DollarSign, trend: `有效营收订单 ${revenueOrders.length} 笔`, isUp: true },
+        { label: '折扣成交额（结算+零售，已排除退款单）', value: `¥${totalDiscount.toFixed(2)}`, icon: Package, trend: `待处理 ${pendingCount} 笔`, isUp: true },
         { label: '折扣差额', value: `¥${(totalRetail - totalDiscount).toFixed(2)}`, icon: TrendingUp, trend: '零售额 - 折扣额', isUp: totalRetail - totalDiscount >= 0 },
         { label: '待处理订单', value: String(pendingCount), icon: TrendingDown, trend: 'pending', isUp: pendingCount === 0 },
       ],
@@ -249,6 +282,12 @@ export const ReportsScreen: React.FC = () => {
         totalCost,
         totalProfit: totalDiscountRevenue - totalCost,
         profitByProduct,
+      },
+      supplyData: {
+        totalOrders: supplyOrders.length,
+        totalQuantity: totalSupplyQuantity,
+        topProducts: supplyTopProducts,
+        byStore: supplyByStore,
       },
     };
   }, [orders, products, selectedCityId, selectedStore, selectedStoreId, storeInventory]);
@@ -439,6 +478,52 @@ export const ReportsScreen: React.FC = () => {
             </motion.div>
           );
         })}
+      </div>
+
+      <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-bold">供货统计</h3>
+          <p className="text-sm text-white/50">仅统计供货单（distribution）</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">供货单数</p>
+            <p className="text-lg font-black">{supplyData.totalOrders}</p>
+          </div>
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">供货总件数</p>
+            <p className="text-lg font-black">{supplyData.totalQuantity}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white/[0.03] rounded-2xl p-4">
+            <h4 className="font-semibold mb-3">商品供货排行</h4>
+            <div className="space-y-2">
+              {supplyData.topProducts.map((row, idx) => (
+                <div key={`${row.name}-${idx}`} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
+                  <p className="text-sm text-white/90 truncate pr-3">{idx + 1}. {row.name}</p>
+                  <p className="text-sm font-bold text-accent">{row.value}</p>
+                </div>
+              ))}
+              {supplyData.topProducts.length === 0 && <p className="text-sm text-white/40">暂无供货商品数据</p>}
+            </div>
+          </div>
+
+          <div className="bg-white/[0.03] rounded-2xl p-4">
+            <h4 className="font-semibold mb-3">店铺供货分布</h4>
+            <div className="space-y-2">
+              {supplyData.byStore.map((row) => (
+                <div key={row.name} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
+                  <p className="text-sm text-white/90 truncate pr-3">{row.name}</p>
+                  <p className="text-sm font-bold">{row.value}</p>
+                </div>
+              ))}
+              {supplyData.byStore.length === 0 && <p className="text-sm text-white/40">暂无供货店铺数据</p>}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

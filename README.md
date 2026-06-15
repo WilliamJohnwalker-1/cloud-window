@@ -70,7 +70,7 @@
 - Web 前端：Vite + React + TypeScript + Tailwind + Zustand
 - 状态管理：Zustand + AsyncStorage
 - 后端：Supabase（PostgreSQL / Auth / Storage）
-- 导出：`xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`
+- 导出：移动端 `xlsx` + `expo-print` + `expo-sharing` + `expo-file-system`；Web 单笔导出 `exceljs`
 - OTA 更新：`expo-updates` + EAS Update
 - UI组件：Lucide React Native（矢量图标）、react-native-gifted-charts（图表）、react-native-toast-message（提示）
 - 设计系统：粉蓝年轻化主题（src/theme.ts）
@@ -172,7 +172,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.28）
+### 5. 启动 Web 端（v1.2.30）
 
 ```bash
 npm run web:v2
@@ -370,25 +370,34 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
+### Mobile v2.1.21 (2026-06-15) - 双端订单体系升级（移动端能力补齐）
+
+- 注册流程改版：去除店铺字段并补齐“忘记密码”；分销商多店铺登录后支持默认店选择
+- 订单体系升级：新增结算建单（admin）、订单类型标签/筛选（供货单/结算单/零售单）
+- 报表口径升级：营收仅统计 `settlement + retail`（排除退款状态），并新增独立“供货统计”视图
+- 供货单导出模板升级为“上货单”格式：文件名、7列表头、末行合计与业务口径对齐
+
+### Web v1.2.30 (2026-06-15) - 双端订单体系升级（Web 收口）
+
+- 订单页新增 admin「结算建单」入口与流程（不改 POS 收银台），并补齐订单类型标签/筛选
+- 报表页营收口径升级为 `settlement + retail`（排除退款），新增独立“供货统计”板块
+- 单笔供货单导出切换为“上货单”模板（文件名/列结构/合计行与移动端一致）
+- 导出链路改为 `exceljs`，单元格统一水平/垂直居中，已按管理端实操验收通过
+
 ### Web v1.2.29 (2026-06-14) - 退款链路稳定性与测试端口兼容
 
-- 本地测试端口退款请求改为优先直连 `VITE_PAYMENT_API_URL`，并补强错误解析与状态复核，修复 `404/405` 空响应下的前端误报。
-- 退款链路改为“渠道受理即本地同步”：即使首轮返回 `pending`，也会立刻同步退款商品、库存、订单金额与 `payment_status`（`partial_refunded/refunded`）。
-- 退款订单保留用于审计（不删单），部分退款在订单详情展示“已退款商品明细”（商品、数量、退款单价、退款时间）。
-- 退款幂等补齐：重复退款遇到“已无可退款金额/已完成”统一按成功处理，避免状态长期停留 `paid` 或 `partial_refund_pending`。
+- 修复测试端口 `404/405` 空响应导致的退款误报，退款结果以网关+订单状态双重校验确认。
+- 退款后保留订单与明细用于审计：退款商品行归零并展示“已退款明细”，库存同步回退。
+- 统一退款口径：全额退款= `refunded` 且金额归零；部分退款= `partial_refunded` 且金额按剩余商品重算（前后端展示一致）。
 
 ### Web v1.2.28 (2026-06-14) - 退款语义纠偏（商户侧申请）
 
-- 退款流程从“平台内审批”调整为“直接向微信/支付宝商户账号发起退款申请”
-- 移除订单页“待处理退款审批”平台审批区，退款入口恢复为直接提交商户侧申请
-- 退款申请被商户侧受理后，向平台发起人发送“申请通过/已受理”通知
+- 退款路径从“平台内审批”切换为“商户侧直接发起并受理”，订单页同步移除平台审批区。
 
 ### Web v1.2.27 (2026-06-14) - 退款审批上线与抹零保存修复
 
-- Web 订单页退款由“直接退款”升级为“提交申请 -> 收款账号审批 -> 执行退款”流程
-- 新增待审批退款列表与审批操作（同意并退款 / 拒绝）
-- 修复按商品抹零保存失败：移除 RPC 对 `orders.updated_at` 的写入（该列不存在）
-- 新增迁移：`migrate-v4.9-refund-approval.sql`、`migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
+- 曾上线“退款审批流（申请->审批->执行）”，后续在 v1.2.28 回退为商户侧直连退款。
+- 修复按商品抹零保存失败（移除对不存在列 `orders.updated_at` 的写入）；对应迁移：`migrate-v4.9-refund-approval.sql`、`migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`。
 
 ### Web v1.2.26 (2026-06-13) - 订单弹窗统一站内交互
 

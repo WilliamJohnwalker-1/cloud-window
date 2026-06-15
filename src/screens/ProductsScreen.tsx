@@ -88,7 +88,6 @@ export default function ProductsScreen() {
   const [price, setPrice] = useState('');
   const [cost, setCost] = useState('');
   const [oneTimeCost, setOneTimeCost] = useState('');
-  const [discountPrice, setDiscountPrice] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
@@ -137,18 +136,22 @@ export default function ProductsScreen() {
 
   useEffect(() => {
     if (selectedStoreId && editingProduct) {
+      const selectedStore = stores.find((store) => store.id === selectedStoreId);
       const storePrice = storeProductPrices.find(
         (p) => p.store_id === selectedStoreId && p.product_id === editingProduct.id
       );
       if (storePrice && storePrice.override_price !== undefined && storePrice.override_price !== null) {
         setCustomStorePrice(String(storePrice.override_price));
+      } else if (selectedStore) {
+        const fallbackStorePrice = Math.floor(Number(selectedStore.discount_rate || 1) * Number(editingProduct.price || 0) * 100) / 100;
+        setCustomStorePrice(String(fallbackStorePrice));
       } else {
         setCustomStorePrice('');
       }
     } else {
       setCustomStorePrice('');
     }
-  }, [selectedStoreId, editingProduct, storeProductPrices]);
+  }, [selectedStoreId, editingProduct, storeProductPrices, stores]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -161,7 +164,6 @@ export default function ProductsScreen() {
     setPrice('');
     setCost('');
     setOneTimeCost('');
-    setDiscountPrice('');
     setSelectedCity('');
     setImageUrl('');
     setEditingProduct(null);
@@ -184,7 +186,6 @@ export default function ProductsScreen() {
     setPrice(product.price.toString());
     setCost(product.cost?.toString() || '');
     setOneTimeCost(product.one_time_cost?.toString() || '');
-    setDiscountPrice(product.discount_price?.toString() || product.price?.toString() || '');
     setSelectedCity(product.city_id);
     setImageUrl(product.image_url || '');
     setModalVisible(true);
@@ -206,7 +207,7 @@ export default function ProductsScreen() {
       price: parseFloat(price),
       cost: parseFloat(cost) || 0,
       one_time_cost: parseFloat(oneTimeCost) || 0,
-      discount_price: parseFloat(discountPrice) || parseFloat(price) || 0,
+      discount_price: parseFloat(price) || 0,
       city_id: selectedCity,
       image_url: imageUrl,
     };
@@ -364,11 +365,8 @@ export default function ProductsScreen() {
           <Text style={[styles.productCity, { color: theme.textSecondary }]}>{item.city_name}</Text>
         </View>
         <View style={styles.priceRow}>
-          <Text style={styles.price}>{isDistributor ? `折扣价: ${item.discount_price}元` : `售价: ${item.price}元`}</Text>
+          <Text style={styles.price}>{`售价: ${item.price}元`}</Text>
         </View>
-        <Text style={[styles.discountText, { color: theme.textTertiary }]}>
-          {isDistributor ? `零售价: ${item.price}元` : `折扣价: ${item.discount_price}元`}
-        </Text>
         {!isDistributor && (
           <View style={styles.stockRow}>
             <View style={[styles.stockBadge, { backgroundColor: theme.surfaceSecondary }]}>
@@ -555,16 +553,6 @@ export default function ProductsScreen() {
                       style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                       value={oneTimeCost}
                       onChangeText={setOneTimeCost}
-                      keyboardType="numeric"
-                      placeholderTextColor={theme.textTertiary}
-                    />
-                  </View>
-                  <View style={styles.fieldRow}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>折扣价(元)</Text>
-                    <TextInput
-                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                      value={discountPrice}
-                      onChangeText={setDiscountPrice}
                       keyboardType="numeric"
                       placeholderTextColor={theme.textTertiary}
                     />
@@ -846,11 +834,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontVariant: ['tabular-nums'],
     letterSpacing: 0.5,
-  },
-  discountText: {
-    fontSize: 12,
-    color: Colors.textTertiary,
-    marginBottom: 4,
   },
   stockRow: {
     flexDirection: 'row',
