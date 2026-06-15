@@ -172,7 +172,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.31）
+### 5. 启动 Web 端（v1.2.32）
 
 ```bash
 npm run web:v2
@@ -369,6 +369,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.32 (2026-06-15) - 结算建单兼容修复与入口文案调整
+
+- 修复结算建单在旧库约束下报错 `null value in column \"unit_price\" of relation \"orders\"`：新增 legacy fallback，兼容 `orders` 旧字段约束后继续完成建单
+- 结算 fallback 口径与现网一致：结算价按店铺规则计算（店铺覆盖价 > 店铺折扣率 > 商品折扣价），并同步扣减店铺库存
+- 订单页操作文案调整：`结算建单` 改为 `结算`，`新建订单` 改为 `上货`
 
 ### Web v1.2.31 (2026-06-15) - 供货单自动接单与结算价口径修复
 
