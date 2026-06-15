@@ -67,7 +67,7 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, fetchOrderDetail, fetchOrders, deleteOrder, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, fetchOrderDetail, fetchOrders, deleteOrder, cities, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -118,13 +118,8 @@ export const OrdersScreen: React.FC = () => {
   }, [filter, orders]);
 
   const orderFilterCities = useMemo(
-    () =>
-      orders.reduce<Array<{ id: string; name: string }>>((acc, order) => {
-        if (!order.city_id || acc.some((city) => city.id === order.city_id)) return acc;
-        acc.push({ id: order.city_id, name: order.city_name || '未知城市' });
-        return acc;
-      }, []),
-    [orders],
+    () => cities.map((city) => ({ id: city.id, name: city.name })),
+    [cities],
   );
 
   const filteredStoresForOrderFilter = useMemo(
