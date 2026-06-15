@@ -172,7 +172,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.30）
+### 5. 启动 Web 端（v1.2.31）
 
 ```bash
 npm run web:v2
@@ -369,6 +369,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Web v1.2.31 (2026-06-15) - 供货单自动接单与结算价口径修复
+
+- 管理员在 Web 订单页创建供货单后改为自动置为 `accepted`，无需再手动点击接单
+- 新建结算单弹窗的“结算总额”改为按店铺价规则实时计算（店铺覆盖价 > 店铺折扣率 > 商品折扣价）
+- 结算建单时会同步拉取所选店铺专属价，确保总额与店铺折扣配置一致
 
 ### Mobile v2.1.21 (2026-06-15) - 双端订单体系升级（移动端能力补齐）
 
