@@ -306,6 +306,23 @@ export const OrdersScreen: React.FC = () => {
       });
   }, [products, searchKeyword, settlementStoreId, stores]);
 
+  const settlementTotalAmount = useMemo(() => {
+    if (!settlementStoreId || settlementCart.size === 0) return 0;
+    const selectedStore = stores.find((store) => store.id === settlementStoreId);
+    return Array.from(settlementCart.entries()).reduce((sum, [productId, qty]) => {
+      const product = products.find((item) => item.id === productId);
+      if (!product) return sum;
+      const storeOverride = storeProductPrices.find((entry) => entry.store_id === settlementStoreId && entry.product_id === productId);
+      const resolvedPrice = resolvePrice({
+        price: Number(product.price || 0),
+        discount_price: product.discount_price,
+        discount_rate: selectedStore?.discount_rate,
+        override_price: storeOverride?.override_price,
+      }).price;
+      return sum + resolvedPrice * qty;
+    }, 0);
+  }, [products, settlementCart, settlementStoreId, stores, storeProductPrices]);
+
   const cartItems = useMemo(() => {
     const parseCartKey = (cartKey: string): { productId: string; lineType: CartLineType } => {
       const splitIndex = cartKey.lastIndexOf(':');
@@ -389,8 +406,9 @@ export const OrdersScreen: React.FC = () => {
   useEffect(() => {
     if (settlementStoreId) {
       void fetchStoreInventory(settlementStoreId);
+      void fetchStoreProductPrices(settlementStoreId);
     }
-  }, [settlementStoreId, fetchStoreInventory]);
+  }, [settlementStoreId, fetchStoreInventory, fetchStoreProductPrices]);
 
 
   const openOrderDetail = async (orderId: string): Promise<void> => {
@@ -1625,10 +1643,7 @@ export const OrdersScreen: React.FC = () => {
 
                   <div className="mt-auto pt-4 border-t border-white/10 space-y-1 text-sm">
                     <div className="flex justify-between"><span className="text-white/60">商品总数</span><span>{Array.from(settlementCart.values()).reduce((sum, qty) => sum + qty, 0)}</span></div>
-                    <div className="flex justify-between"><span className="text-white/60">结算总额</span><span className="text-accent font-bold">¥{Array.from(settlementCart.entries()).reduce((sum, [productId, qty]) => {
-                      const product = products.find((item) => item.id === productId);
-                      return sum + Number(product?.price || 0) * qty;
-                    }, 0).toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-white/60">结算总额</span><span className="text-accent font-bold">¥{settlementTotalAmount.toFixed(2)}</span></div>
                   </div>
 
                   <button
