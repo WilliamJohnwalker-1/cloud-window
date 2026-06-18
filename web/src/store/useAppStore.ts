@@ -294,6 +294,10 @@ interface AppState {
     nextQty: number,
     options?: { action?: InventoryLog['action']; note?: string },
   ) => Promise<{ error: Error | null }>;
+  updateInventoryMinQuantityByProduct: (
+    productId: string,
+    minQuantity: number,
+  ) => Promise<{ error: Error | null }>;
   updateStoreInventoryByProduct: (
     storeId: string,
     productId: string,
@@ -1265,6 +1269,39 @@ export const useAppStore = create<AppState>()(
           }
 
           await Promise.all([get().fetchProducts(), get().fetchInventoryLogs()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      updateInventoryMinQuantityByProduct: async (productId, minQuantity) => {
+        try {
+          if (!Number.isFinite(minQuantity) || minQuantity < 0) throw new Error('告警阈值不能为负数');
+          const { products } = get();
+          const currentProduct = products.find((item) => item.id === productId);
+          const currentQty = Number(currentProduct?.quantity || 0);
+
+          const { data: existing } = await supabase
+            .from('inventory')
+            .select('id')
+            .eq('product_id', productId)
+            .maybeSingle();
+
+          if (existing?.id) {
+            const { error } = await supabase
+              .from('inventory')
+              .update({ min_quantity: minQuantity, updated_at: new Date().toISOString() })
+              .eq('product_id', productId);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase
+              .from('inventory')
+              .insert({ product_id: productId, quantity: currentQty, min_quantity: minQuantity });
+            if (error) throw error;
+          }
+
+          await get().fetchProducts();
           return { error: null };
         } catch (error) {
           return { error: error as Error };
