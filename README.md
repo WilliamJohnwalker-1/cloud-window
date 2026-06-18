@@ -172,7 +172,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.32）
+### 5. 启动 Web 端（v1.2.33）
 
 ```bash
 npm run web:v2
@@ -369,6 +369,17 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.22 (2026-06-18) - 订单页操作优化与结算兼容修复
+
+- 订单页右上操作按钮调整为：`结算`、`上货`、`出库`（并完成上货/出库位置互换）
+- 上货建单弹窗搜索增强：支持按商品名/条码/城市联合过滤，修复“搜索框不可用”体感问题
+- 结算建单补齐 legacy fallback：兼容旧库 `orders.unit_price` 非空约束（含 `total_amount` / `total-amount` 兼容重试），并保持店铺库存扣减
+
+### Web v1.2.33 (2026-06-18) - 库存告警交互补齐
+
+- 库存页“告警阈值”改为可直接点击编辑并保存（按商品写入 `inventory.min_quantity`）
+- 库存页左上“库存告警”卡片支持点击筛选，仅显示告警商品，再次点击可取消筛选
 
 ### Web v1.2.32 (2026-06-15) - 结算建单兼容修复与入口文案调整
 
