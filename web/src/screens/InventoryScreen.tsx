@@ -4,11 +4,12 @@ import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 
 export const InventoryScreen: React.FC = () => {
-  const { user, cities, products, updateInventoryByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
   const [cityFilter, setCityFilter] = React.useState<string>('all');
+  const [showWarningOnly, setShowWarningOnly] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
   const [selectedStoreCityId, setSelectedStoreCityId] = React.useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null);
@@ -19,6 +20,8 @@ export const InventoryScreen: React.FC = () => {
     productName: string;
     quantityText: string;
   } | null>(null);
+  const [editingThresholdProductId, setEditingThresholdProductId] = React.useState<string | null>(null);
+  const [editingThresholdText, setEditingThresholdText] = React.useState('');
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const isSuperAdmin = user?.role === 'super_admin';
@@ -66,12 +69,17 @@ export const InventoryScreen: React.FC = () => {
       };
     });
   }, [viewMode, selectedStoreId, storeInventory, products]);
-  const filteredProducts = React.useMemo(() => {
+  const cityFilteredProducts = React.useMemo(() => {
     if (cityFilter === 'all') return products;
     return products.filter((item) => item.city_id === cityFilter);
   }, [cityFilter, products]);
 
-  const lowStockCount = filteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10)).length;
+  const lowStockCount = cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10)).length;
+
+  const filteredProducts = React.useMemo(() => {
+    if (!showWarningOnly) return cityFilteredProducts;
+    return cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10));
+  }, [cityFilteredProducts, showWarningOnly]);
 
   return (
     <div className="space-y-6">
@@ -91,10 +99,14 @@ export const InventoryScreen: React.FC = () => {
       )}
 
       <div className="flex items-center justify-between">
-        <div className="bg-orange-500/10 border border-orange-500/20 px-4 py-2 rounded-xl flex items-center space-x-2">
+        <button
+          type="button"
+          onClick={() => setShowWarningOnly((prev) => !prev)}
+          className={`px-4 py-2 rounded-xl flex items-center space-x-2 border transition-colors ${showWarningOnly ? 'bg-orange-500/20 border-orange-400/40' : 'bg-orange-500/10 border-orange-500/20'}`}
+        >
           <AlertTriangle size={18} className="text-orange-500" />
-          <span className="text-sm font-medium text-orange-500">{lowStockCount} 项库存告警</span>
-        </div>
+          <span className="text-sm font-medium text-orange-500">{lowStockCount} 项库存告警{showWarningOnly ? ' · 已筛选' : ''}</span>
+        </button>
 
         <div className="flex items-center space-x-4">
           {isAdminOrManager && (
@@ -253,7 +265,57 @@ export const InventoryScreen: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-8 py-5 text-center">
-                      <span className="text-sm font-medium text-white/60">{product.min_quantity ?? 10}</span>
+                      {editingThresholdProductId === product.id ? (
+                        <div className="flex items-center justify-center gap-2 bg-white/5 rounded-lg px-2 py-1 border border-white/10">
+                          <input
+                            value={editingThresholdText}
+                            onChange={(event) => setEditingThresholdText(event.target.value.replace(/[^0-9]/g, ''))}
+                            className="w-16 bg-transparent outline-none text-sm text-center"
+                            placeholder="阈值"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const nextMinQuantity = Number(editingThresholdText);
+                              if (!Number.isFinite(nextMinQuantity) || nextMinQuantity < 0) {
+                                window.alert('请输入不小于0的有效阈值');
+                                return;
+                              }
+                              const { error } = await updateInventoryMinQuantityByProduct(product.id, nextMinQuantity);
+                              if (error) {
+                                window.alert(`设置告警阈值失败：${error.message}`);
+                                return;
+                              }
+                              setEditingThresholdProductId(null);
+                              setEditingThresholdText('');
+                            }}
+                            className="p-1 rounded bg-green-500/20 text-green-300"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingThresholdProductId(null);
+                              setEditingThresholdText('');
+                            }}
+                            className="p-1 rounded bg-red-500/20 text-red-300"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingThresholdProductId(product.id);
+                            setEditingThresholdText(String(product.min_quantity ?? 10));
+                          }}
+                          className="text-sm font-medium text-white/60 hover:text-white"
+                        >
+                          {product.min_quantity ?? 10}
+                        </button>
+                      )}
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex items-center justify-end space-x-2 opacity-100">

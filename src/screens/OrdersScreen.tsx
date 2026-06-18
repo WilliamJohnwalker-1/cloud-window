@@ -199,9 +199,12 @@ export default function OrdersScreen() {
   }, [products, orderCityId]);
 
   const filteredAvailableProducts = useMemo(() => {
-    if (!modalSearchText.trim()) return availableProducts;
-    const lowerSearch = modalSearchText.toLowerCase().trim();
-    return availableProducts.filter(p => p.name.toLowerCase().includes(lowerSearch));
+    const keyword = modalSearchText.trim().toLowerCase();
+    if (!keyword) return availableProducts;
+    return availableProducts.filter((p) => {
+      const haystack = [p.name, p.barcode || '', p.city_name || ''].join(' ').toLowerCase();
+      return haystack.includes(keyword);
+    });
   }, [availableProducts, modalSearchText]);
 
   useEffect(() => {
@@ -1016,7 +1019,21 @@ export default function OrdersScreen() {
               style={styles.outboundButtonWrap}
             >
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
-                <Text style={styles.addButtonText}>结算建单</Text>
+                <Text style={styles.addButtonText}>结算</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          {canCreateOrder && (
+            <TouchableOpacity
+              onPress={() => {
+                setModalSearchText('');
+                setModalVisible(true);
+              }}
+              activeOpacity={0.85}
+              style={styles.outboundButtonWrap}
+            >
+              <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
+                <Text style={styles.addButtonText}>上货</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -1027,17 +1044,9 @@ export default function OrdersScreen() {
                 setOutboundModalVisible(true);
               }}
               activeOpacity={0.85}
-              style={styles.outboundButtonWrap}
             >
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
                 <Text style={styles.addButtonText}>出库</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          {canCreateOrder && (
-            <TouchableOpacity onPress={() => { setModalSearchText(''); setModalVisible(true); }} activeOpacity={0.85}>
-              <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
-                <Text style={styles.addButtonText}>+ 新建订单</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
