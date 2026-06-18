@@ -12,6 +12,7 @@ import {
   TextInput,
   Image,
   Animated,
+  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -1402,6 +1403,10 @@ export default function OrdersScreen() {
 
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardWrap}
+          >
           <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>新建分销订单（合并为单条）</Text>
@@ -1413,7 +1418,7 @@ export default function OrdersScreen() {
               {isAdmin && (
                 <View style={styles.selectorGroup}>
                   <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>分销商</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll} keyboardShouldPersistTaps="handled">
                     <TouchableOpacity
                       style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalDistributorId === null && styles.chipActive]}
                       onPress={() => { setOrderModalDistributorId(null); setOrderModalStoreId(null); }}
@@ -1435,7 +1440,7 @@ export default function OrdersScreen() {
 
               <View style={styles.selectorGroup}>
                   <Text style={[styles.selectorLabel, { color: theme.textSecondary }]}>店铺</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll} keyboardShouldPersistTaps="handled">
                     <TouchableOpacity
                       style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, orderModalStoreId === null && styles.chipActive]}
                       onPress={() => setOrderModalStoreId(null)}
@@ -1461,14 +1466,17 @@ export default function OrdersScreen() {
                 </View>
             </View>
 
-            <View style={[styles.searchContainer, styles.searchContainerCompact, { backgroundColor: theme.surfaceSecondary, marginHorizontal: 15, marginBottom: 10 }] }>
+            <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }] }>
               <Search size={18} color={theme.textTertiary} style={styles.searchIcon} />
               <TextInput
-                style={[styles.searchInput, { color: theme.textPrimary }]}
+                style={[styles.searchInput, styles.modalSearchInput, { color: theme.textPrimary }]}
                 placeholder="搜索商品名称..."
                 placeholderTextColor={theme.textTertiary}
                 value={modalSearchText}
                 onChangeText={setModalSearchText}
+                showSoftInputOnFocus
+                returnKeyType="search"
+                blurOnSubmit={false}
                 textAlignVertical="center"
               />
             </View>
@@ -1478,6 +1486,8 @@ export default function OrdersScreen() {
               keyExtractor={(item) => item.id}
               renderItem={renderProductRow}
               style={styles.productList}
+              keyboardShouldPersistTaps="handled"
+              removeClippedSubviews={false}
               ListEmptyComponent={
                 <View style={styles.emptyContainerModal}>
                   <ShoppingBag size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -1511,6 +1521,7 @@ export default function OrdersScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -2118,6 +2129,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
+  modalSearchInput: { minWidth: 120 },
   activeFiltersWrap: {
     marginHorizontal: 10,
     marginBottom: 10,
@@ -2218,6 +2230,7 @@ const styles = StyleSheet.create({
   emptyContainerModal: { alignItems: 'center', paddingTop: 40 },
   emptyText: { textAlign: 'center', color: Colors.textTertiary, marginTop: 12, fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(45,45,63,0.4)', justifyContent: 'flex-end' },
+  modalKeyboardWrap: { width: '100%', flex: 1, justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 28,
