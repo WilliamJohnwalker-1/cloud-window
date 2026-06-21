@@ -24,6 +24,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { encodeEAN13Bars } from '../utils/barcode';
+import ProvinceCityFilter from '../components/ProvinceCityFilter';
+import { getProvinceForCity } from '../utils/provinceMapping';
 import type { ProductWithDetails } from '../types';
 
 function BarcodeSvg({ value, height = 50, barWidth = 1.5 }: { value: string; height?: number; barWidth?: number }) {
@@ -90,6 +92,7 @@ export default function ProductsScreen() {
   const [oneTimeCost, setOneTimeCost] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [filterProvinceId, setFilterProvinceId] = useState<string | null>(null);
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [customStorePrice, setCustomStorePrice] = useState('');
@@ -109,9 +112,14 @@ export default function ProductsScreen() {
   }, [cities, isDistributor, user?.city_id]);
 
   const filteredProducts = products.filter((p) => {
+    const city = cities.find((cityItem) => cityItem.id === p.city_id);
+    const province = city?.province || (city ? getProvinceForCity(city.name) : null);
+    const matchesProvince = filterProvinceId
+      ? (filterProvinceId === '未知省份' ? !province : province === filterProvinceId)
+      : true;
     const matchesCity = filterCityId ? p.city_id === filterCityId : true;
     const matchesSearch = p.name.toLowerCase().includes(searchText.toLowerCase());
-    return matchesCity && matchesSearch;
+    return matchesProvince && matchesCity && matchesSearch;
   });
 
   useEffect(() => {
@@ -422,57 +430,24 @@ export default function ProductsScreen() {
         )}
       </View>
 
-      <View style={styles.cityFilterSpacer} />
+      <View
+        style={[
+          styles.cityFilterSpacer,
+          { height: isAdminOrManager ? 124 : 76 },
+        ]}
+      />
 
       <View style={styles.cityFilterOverlay}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.cityFilterRow}
-          contentContainerStyle={styles.cityFilterContent}
-        >
-          <TouchableOpacity
-            style={[styles.cityFilterItem, filterCityId === null && styles.cityFilterItemActive]}
-            onPress={() => setFilterCityId(null)}
-          >
-            <LinearGradient
-               colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.cityGradientChip}
-            >
-              <Text
-                style={[styles.cityFilterText, filterCityId === null && styles.cityFilterTextActive]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                全部
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          {orderedCities.map((city) => (
-            <TouchableOpacity
-              key={city.id}
-              style={[styles.cityFilterItem, filterCityId === city.id && styles.cityFilterItemActive]}
-              onPress={() => setFilterCityId(city.id)}
-            >
-              <LinearGradient
-               colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.cityGradientChip}
-              >
-                <Text
-                  style={[styles.cityFilterText, filterCityId === city.id && styles.cityFilterTextActive]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {city.name}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <View style={[styles.cityFilterPanel, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+          <ProvinceCityFilter
+            cities={orderedCities}
+            selectedProvinceId={filterProvinceId}
+            selectedCityId={filterCityId}
+            onProvinceChange={setFilterProvinceId}
+            onCityChange={setFilterCityId}
+            showProvince={isAdminOrManager}
+          />
+        </View>
       </View>
 
        <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
@@ -723,6 +698,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     elevation: 2,
+  },
+  cityFilterPanel: {
+    borderTopWidth: 1,
+    paddingTop: 8,
   },
   cityFilterRow: {
     backgroundColor: Colors.surface,

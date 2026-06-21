@@ -18,6 +18,8 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
+import ProvinceCityFilter from '../components/ProvinceCityFilter';
+import { getProvinceForCity } from '../utils/provinceMapping';
 import type { ProductWithDetails, StoreInventory } from '../types';
 
 export default function InventoryScreen() {
@@ -56,6 +58,7 @@ export default function InventoryScreen() {
   );
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'low' | 'normal'>('all');
+  const [filterProvinceId, setFilterProvinceId] = useState<string | null>(null);
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithDetails | null>(null);
@@ -69,6 +72,7 @@ export default function InventoryScreen() {
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'main' | 'store'>('main');
+  const [selectedStoreProvinceId, setSelectedStoreProvinceId] = useState<string | null>(null);
   const [selectedStoreCityId, setSelectedStoreCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [storeEditModalVisible, setStoreEditModalVisible] = useState(false);
@@ -96,9 +100,21 @@ export default function InventoryScreen() {
   }, [viewMode, selectedStoreId, fetchStoreInventory]);
 
   const storeFilterCities = cities.filter((city) => stores.some((store) => store.city_id === city.id));
-  const activeStoresForStoreFilter = selectedStoreCityId
-    ? stores.filter((store) => store.city_id === selectedStoreCityId)
-    : stores;
+  const storeCityProvinceMap = new Map(
+    storeFilterCities.map((city) => [city.id, city.province || getProvinceForCity(city.name) || null]),
+  );
+  const activeStoresForStoreFilter = stores.filter((store) => {
+    if (selectedStoreProvinceId) {
+      const province = storeCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+      if (selectedStoreProvinceId === '未知省份' ? !!province : province !== selectedStoreProvinceId) {
+        return false;
+      }
+    }
+    if (selectedStoreCityId) {
+      return store.city_id === selectedStoreCityId;
+    }
+    return true;
+  });
 
   useEffect(() => {
     if (viewMode !== 'store') return;
@@ -121,9 +137,15 @@ export default function InventoryScreen() {
     setRefreshing(false);
   };
 
-  const cityFilteredProducts = filterCityId
-    ? products.filter((p) => p.city_id === filterCityId)
-    : products;
+  const cityFilteredProducts = products.filter((product) => {
+    const city = cities.find((cityItem) => cityItem.id === product.city_id);
+    const province = city?.province || (city ? getProvinceForCity(city.name) : null);
+    const matchesProvince = filterProvinceId
+      ? (filterProvinceId === '未知省份' ? !province : province === filterProvinceId)
+      : true;
+    const matchesCity = filterCityId ? product.city_id === filterCityId : true;
+    return matchesProvince && matchesCity;
+  });
 
   const lowStockProducts = cityFilteredProducts.filter(
     (p) => p.quantity !== undefined && p.quantity < (p.min_quantity ?? 10)
@@ -469,7 +491,7 @@ export default function InventoryScreen() {
       <View
         style={[
           styles.cityFilterSpacer,
-          isAdminOrManager && { height: viewMode === 'store' ? 58 + 58 + 48 : 58 + 48 },
+          isAdminOrManager && { height: viewMode === 'store' ? 58 + 58 + 48 : 124 + 48 },
         ]}
       />
 
@@ -490,102 +512,32 @@ export default function InventoryScreen() {
             </TouchableOpacity>
           </View>
         )}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={[styles.cityFilterRow, { backgroundColor: theme.surface, borderTopColor: theme.border }]}
-          contentContainerStyle={styles.cityFilterContent}
-        >
-          {viewMode === 'main' ? (
-            <>
-              <TouchableOpacity
-                style={[styles.cityFilterItem, filterCityId === null && styles.cityFilterItemActive]}
-                onPress={() => setFilterCityId(null)}
-              >
-                <LinearGradient
-                   colors={filterCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.cityGradientChip}
-                >
-                  <Text
-                    style={[styles.cityFilterText, filterCityId === null && styles.cityFilterTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部城市
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              {cities.map((city) => (
-                <TouchableOpacity
-                  key={city.id}
-                  style={[styles.cityFilterItem, filterCityId === city.id && styles.cityFilterItemActive]}
-                  onPress={() => setFilterCityId(city.id)}
-                >
-                  <LinearGradient
-                     colors={filterCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.cityGradientChip}
-                  >
-                    <Text
-                      style={[styles.cityFilterText, filterCityId === city.id && styles.cityFilterTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {city.name}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              ))}
-            </>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={[styles.cityFilterItem, selectedStoreCityId === null && styles.cityFilterItemActive]}
-                onPress={() => setSelectedStoreCityId(null)}
-              >
-                <LinearGradient
-                  colors={selectedStoreCityId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.cityGradientChip}
-                >
-                  <Text
-                    style={[styles.cityFilterText, selectedStoreCityId === null && styles.cityFilterTextActive]}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    全部城市
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              {storeFilterCities.map((city) => (
-                <TouchableOpacity
-                  key={city.id}
-                  style={[styles.cityFilterItem, selectedStoreCityId === city.id && styles.cityFilterItemActive]}
-                  onPress={() => setSelectedStoreCityId(city.id)}
-                >
-                  <LinearGradient
-                    colors={selectedStoreCityId === city.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.cityGradientChip}
-                  >
-                    <Text
-                      style={[styles.cityFilterText, selectedStoreCityId === city.id && styles.cityFilterTextActive]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {city.name}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              ))}
-            </>
-          )}
-        </ScrollView>
+        {viewMode === 'main' ? (
+          <View style={[styles.cityFilterPanel, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+            <ProvinceCityFilter
+              cities={cities}
+              selectedProvinceId={filterProvinceId}
+              selectedCityId={filterCityId}
+              onProvinceChange={setFilterProvinceId}
+              onCityChange={setFilterCityId}
+              showProvince={isAdminOrManager}
+            />
+          </View>
+        ) : (
+          <View style={[styles.cityFilterPanel, { backgroundColor: theme.surface, borderTopColor: theme.border }]}> 
+            <ProvinceCityFilter
+              cities={storeFilterCities}
+              selectedProvinceId={selectedStoreProvinceId}
+              selectedCityId={selectedStoreCityId}
+              onProvinceChange={(provinceId) => {
+                setSelectedStoreProvinceId(provinceId);
+                setSelectedStoreCityId(null);
+              }}
+              onCityChange={setSelectedStoreCityId}
+              showProvince
+            />
+          </View>
+        )}
         {viewMode === 'store' ? (
           <ScrollView
             horizontal
@@ -929,6 +881,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     elevation: 2,
+  },
+  cityFilterPanel: {
+    borderTopWidth: 1,
+    paddingTop: 8,
   },
   cityFilterRow: {
     backgroundColor: Colors.surface,
