@@ -221,7 +221,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. migrate-v4.3-store-super-admin-and-retail-store.sql -> 24. migrate-v4.4-retail-default-yunchuang-store.sql -> 25. migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql -> 26. migrate-v4.6-store-retail-order.sql -> 27. migrate-v4.7-batch-order-fix-and-cost-sync.sql -> 28. migrate-v4.8-retail-item-level-rounding-and-refund.sql -> 29. migrate-v4.9-refund-approval.sql -> 30. migrate-v4.10-retail-rounding-orders-updated-at-fix.sql -> 31. storage-policies.sql
+1. schema.sql -> 2. migrate-v2.1-notifications.sql -> 3. migrate-v2.2-unit-cost-snapshot.sql -> 4. migrate-v2.3-barcode.sql -> 5. migrate-v2.4-atomic-order-workflows.sql -> 6. migrate-v2.5-inventory-logs.sql -> 7. migrate-v2.8-payment-events.sql -> 8. migrate-v2.9-order-kinds-retail.sql -> 9. migrate-v3.0-request-id-compat.sql -> 10. migrate-v3.1-schema-version-gate.sql -> 11. migrate-v3.2-orders-quantity-compat.sql -> 12. migrate-v3.3-city-sort-order.sql -> 13. migrate-v3.4-admin-city-sort-and-safe-order-delete.sql -> 14. migrate-v3.5-order-delete-permissions.sql -> 15. migrate-v3.6-sample-order-items.sql -> 16. migrate-v3.7-order-payment-note.sql -> 17. migrate-v3.8-city-sort-index-guard.sql -> 18. migrate-v3.9-rls-optimization.sql -> 19. migrate-v3.10-profiles-self-heal.sql -> 20. migrate-v4.0-store-management.sql -> 21. migrate-v4.1-store-optional-distributor.sql -> 22. migrate-v4.2-store-inventory-distributor-write.sql -> 23. migrate-v4.3-store-super-admin-and-retail-store.sql -> 24. migrate-v4.4-retail-default-yunchuang-store.sql -> 25. migrate-v4.5-retail-delete-rollback-and-unpaid-cleanup.sql -> 26. migrate-v4.6-store-retail-order.sql -> 27. migrate-v4.7-batch-order-fix-and-cost-sync.sql -> 28. migrate-v4.8-retail-item-level-rounding-and-refund.sql -> 29. migrate-v4.9-refund-approval.sql -> 30. migrate-v4.10-retail-rounding-orders-updated-at-fix.sql -> 31. migrate-v4.11-refund-delete-no-double-restore.sql -> 32. migrate-v5.0-settlement-order.sql -> 33. migrate-v5.1-default-store-selection.sql -> 34. migrate-v5.2-province.sql -> 35. storage-policies.sql
 
 **Upgrade v1->v2:**
 1. migrate-v2.sql -> 2-28 same as above
@@ -245,12 +245,12 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.1.22`
-- Current web baseline: `v1.2.33`
+- Current mobile baseline: `v2.1.23`
+- Current web baseline: `v1.2.34`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
-- Latest web stabilization: 订单体系升级完成（供货/结算/零售），订单页结算建单入口+类型筛选、报表“营收口径(结算+零售)+供货统计”已落地；供货单单笔导出模板按上货单格式并完成居中样式收口；管理员创建供货单自动接单、结算建单总额改为店铺折扣价口径；结算建单兼容旧库 orders.unit_price 非空约束并修正文案（结算/上货）；库存页补齐“告警阈值点击编辑 + 告警卡点击筛选”
-- Latest mobile stabilization: 注册去店铺字段+忘记密码、多店铺默认店选择、订单标签/筛选升级、报表营收口径与供货统计拆分、供货单导出模板升级已完成；订单页右上按钮文案/顺序优化（结算/上货/出库）、上货单商品搜索修复、结算建单补齐旧库兼容 fallback
+- Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
+- Latest mobile stabilization: 省份维度全链路升级完成（新增 ProvinceCityFilter、静态省市映射、省份管理排序）；商品/库存/订单/报表筛选统一省份→城市联动；店铺库存补齐省份筛选；移动端 3 个导出函数迁移 exceljs 并配套 Metro polyfills
 - Latest store-management wave: Web 店铺定价管理与订单修改 UI、双端报表店铺维度均已完成并通过 admin 手工验收
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
