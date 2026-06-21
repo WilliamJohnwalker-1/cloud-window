@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Filter, Package, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { BarcodePreview } from '../components/BarcodePreview';
+import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
+import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const ProductsScreen: React.FC = () => {
-  const { user, cities, products, stores, storeProductPrices, fetchStores, fetchStoreProductPrices, setStoreProductPrice, addProduct, updateProduct, fetchProducts, updateInventoryByProduct } = useAppStore();
+  const { user, cities, products, stores, storeProductPrices, fetchStores, fetchStoreProductPrices, setStoreProductPrice, addProduct, updateProduct, fetchProducts } = useAppStore();
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   const [cityFilter, setCityFilter] = useState<string>('all');
+  const [provinceFilter, setProvinceFilter] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showPricingPanel, setShowPricingPanel] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -53,9 +56,20 @@ export const ProductsScreen: React.FC = () => {
 
 
   const filteredProducts = useMemo(() => {
-    if (cityFilter === 'all') return products;
-    return products.filter((product) => product.city_id === cityFilter);
-  }, [cityFilter, products]);
+    const cityProvinceMap = new Map(
+      cities.map((city) => [city.id, city.province || getProvinceForCity(city.name) || null])
+    );
+
+    const provinceFiltered = provinceFilter
+      ? products.filter((product) => {
+          const province = cityProvinceMap.get(product.city_id) || getProvinceForCity(product.city_name || '');
+          return provinceFilter === '未知省份' ? !province : province === provinceFilter;
+        })
+      : products;
+
+    if (cityFilter === 'all') return provinceFiltered;
+    return provinceFiltered.filter((product) => product.city_id === cityFilter);
+  }, [cities, cityFilter, products, provinceFilter]);
 
   const handleCreateProduct = async (): Promise<void> => {
     if (!form.name.trim()) {
@@ -172,23 +186,14 @@ export const ProductsScreen: React.FC = () => {
           <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
             <Filter size={16} />
           </div>
-          <button
-            type="button"
-            onClick={() => setCityFilter('all')}
-            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-          >
-            全部城市
-          </button>
-          {cities.map((city) => (
-            <button
-              type="button"
-              key={city.id}
-              onClick={() => setCityFilter(city.id)}
-              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-            >
-              {city.name}
-            </button>
-          ))}
+          <ProvinceCityFilter
+            cities={cities}
+            selectedProvinceId={provinceFilter}
+            selectedCityId={cityFilter === 'all' ? null : cityFilter}
+            onProvinceChange={setProvinceFilter}
+            onCityChange={(nextCityId) => setCityFilter(nextCityId || 'all')}
+            showProvince={isAdminOrManager}
+          />
         </div>
 
         {isAdminOrManager && (
