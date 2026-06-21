@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
-import type { OrderKind } from '../types';
+import type { City, OrderKind } from '../types';
 import { getPaymentApiEndpoint } from '../lib/payment';
 import { resolvePrice } from '../utils/priceResolver';
+import { getProvinceForCity } from '../utils/provinceMapping';
 
 type OrderFilter = 'all' | 'pending' | 'accepted';
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
@@ -71,6 +73,7 @@ export const OrdersScreen: React.FC = () => {
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedFilterProvinceId, setSelectedFilterProvinceId] = useState<string | null>(null);
   const [selectedFilterCityId, setSelectedFilterCityId] = useState<string | null>(null);
   const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
@@ -105,6 +108,7 @@ export const OrdersScreen: React.FC = () => {
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   const getOrderKindLabel = (kind: OrderKind): string => {
     if (kind === 'settlement') return '结算单';
@@ -117,15 +121,39 @@ export const OrdersScreen: React.FC = () => {
     return orders.filter((order) => order.status === filter);
   }, [filter, orders]);
 
-  const orderFilterCities = useMemo(
-    () => cities.map((city) => ({ id: city.id, name: city.name })),
-    [cities],
-  );
+  const orderFilterCities = useMemo<City[]>(() => {
+    const map = new Map<string, City>();
+    stores.forEach((store) => {
+      if (!store.city_id || map.has(store.city_id)) return;
+      const cityName = store.city_name || cities.find((city) => city.id === store.city_id)?.name || '未知城市';
+      const city = cities.find((row) => row.id === store.city_id);
+      map.set(store.city_id, {
+        id: store.city_id,
+        name: cityName,
+        province: city?.province || getProvinceForCity(cityName) || undefined,
+        created_at: city?.created_at || '',
+      });
+    });
+    return Array.from(map.values());
+  }, [cities, stores]);
 
-  const filteredStoresForOrderFilter = useMemo(
-    () => (selectedFilterCityId ? stores.filter((store) => store.city_id === selectedFilterCityId) : stores),
-    [selectedFilterCityId, stores],
-  );
+  const orderCityProvinceMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    orderFilterCities.forEach((city) => {
+      map.set(city.id, city.province || null);
+    });
+    return map;
+  }, [orderFilterCities]);
+
+  const filteredStoresForOrderFilter = useMemo(() => {
+    const provinceFiltered = selectedFilterProvinceId
+      ? stores.filter((store) => {
+          const province = orderCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+          return selectedFilterProvinceId === '未知省份' ? !province : province === selectedFilterProvinceId;
+        })
+      : stores;
+    return selectedFilterCityId ? provinceFiltered.filter((store) => store.city_id === selectedFilterCityId) : provinceFiltered;
+  }, [orderCityProvinceMap, selectedFilterCityId, selectedFilterProvinceId, stores]);
 
   useEffect(() => {
     if (!selectedFilterStoreId) return;
@@ -177,6 +205,12 @@ export const OrdersScreen: React.FC = () => {
     if (selectedOrderKind !== 'all') {
       result = result.filter((order) => order.order_kind === selectedOrderKind);
     }
+    if (selectedFilterProvinceId) {
+      result = result.filter((order) => {
+        const province = orderCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
+        return selectedFilterProvinceId === '未知省份' ? !province : province === selectedFilterProvinceId;
+      });
+    }
     if (selectedFilterCityId) {
       result = result.filter((order) => order.city_id === selectedFilterCityId);
     }
@@ -193,7 +227,7 @@ export const OrdersScreen: React.FC = () => {
     }
     return result
       .filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange, refundViewFilter, selectedFilterCityId, selectedFilterStoreId, selectedOrderKind]);
+  }, [baseOrders, matchesStatsRange, orderCityProvinceMap, refundViewFilter, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
 
   const revenueOrders = useMemo(() => {
     return filteredOrders.filter((order) => {
@@ -511,10 +545,6 @@ export const OrdersScreen: React.FC = () => {
       const paymentEndpoint = getPaymentApiEndpoint();
       const remoteUrl = `${paymentEndpoint}/api/payment/refund-items`;
       const sameOriginUrl = '/api/payment/refund-items';
-      const isLocalLikeHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
-        || window.location.hostname.startsWith('192.168.')
-        || window.location.hostname.startsWith('10.')
-        || window.location.hostname.startsWith('172.');
       const remoteOrigin = (() => {
         try {
           return new URL(paymentEndpoint).origin;
@@ -1100,26 +1130,14 @@ export const OrdersScreen: React.FC = () => {
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
         <div className="space-y-2">
-          <p className="text-sm text-white/60">城市筛选</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setSelectedFilterCityId(null)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterCityId === null ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
-            >
-              全部城市
-            </button>
-            {orderFilterCities.map((city) => (
-              <button
-                key={city.id}
-                type="button"
-                onClick={() => setSelectedFilterCityId(city.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${selectedFilterCityId === city.id ? 'bg-white/15 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
-              >
-                {city.name}
-              </button>
-            ))}
-          </div>
+          <ProvinceCityFilter
+            cities={orderFilterCities}
+            selectedProvinceId={selectedFilterProvinceId}
+            selectedCityId={selectedFilterCityId}
+            onProvinceChange={setSelectedFilterProvinceId}
+            onCityChange={setSelectedFilterCityId}
+            showProvince={isAdminOrManager}
+          />
         </div>
 
         <div className="space-y-2">

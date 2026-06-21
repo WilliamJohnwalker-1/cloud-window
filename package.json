@@ -1,6 +1,6 @@
 {
   "name": "inventory-app",
-  "version": "2.1.18",
+  "version": "2.1.23",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -24,11 +24,14 @@
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
   },
   "dependencies": {
+    "@craftzdog/react-native-buffer": "^6.1.2",
     "@expo/ngrok": "^4.1.3",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-navigation/bottom-tabs": "^7.15.5",
     "@react-navigation/native": "^7.1.33",
     "@supabase/supabase-js": "^2.98.0",
+    "events": "^3.3.0",
+    "exceljs": "^4.4.0",
     "expo": "~55.0.5",
     "expo-constants": "^55.0.7",
     "expo-file-system": "~55.0.10",
@@ -40,17 +43,20 @@
     "expo-status-bar": "~55.0.4",
     "expo-updates": "~55.0.12",
     "lucide-react-native": "^0.577.0",
+    "pako": "^2.1.0",
+    "process": "^0.11.10",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
+    "react-native-buffer": "^6.0.4",
     "react-native-gesture-handler": "~2.30.0",
     "react-native-gifted-charts": "^1.4.75",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
+    "react-native-stream": "^0.1.9",
     "react-native-svg": "15.15.3",
     "react-native-toast-message": "^2.3.3",
     "react-native-web": "~0.21.0",
-    "xlsx": "^0.18.5",
     "zustand": "^4.5.7"
   },
   "devDependencies": {

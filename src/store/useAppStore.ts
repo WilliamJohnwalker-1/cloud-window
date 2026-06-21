@@ -6,6 +6,7 @@ import { generateEAN13 } from '../utils/barcode';
 import { applyOrdersDateFilters } from '../utils/fetchOrdersDateParams';
 import { resolvePrice } from '../utils/priceResolver';
 import { buildStoreRetailOrderRpcItems } from '../utils/storeRetailOrder';
+import { getProvinceForCity } from '../utils/provinceMapping';
 import type {
   Profile,
   City,
@@ -851,7 +852,13 @@ export const useAppStore = create<AppState>()(
           return;
         }
 
-        set({ stores: (data as StoreRow[]).map(mapStore) });
+        const mapped = (data as StoreRow[]).map(mapStore);
+        // Pin 云窗 store to the top
+        const yunchuangIdx = mapped.findIndex((s) => s.name === '云窗');
+        const sorted = yunchuangIdx > 0
+          ? [mapped[yunchuangIdx], ...mapped.filter((_, i) => i !== yunchuangIdx)]
+          : mapped;
+        set({ stores: sorted });
       },
 
       fetchOwnedStores: async () => {
@@ -1009,6 +1016,7 @@ export const useAppStore = create<AppState>()(
           const { error } = await supabase.from('cities').insert({
             name,
             sort_index: nextSortIndex,
+            province: getProvinceForCity(name),
           });
           if (error) throw error;
           await get().fetchCities();

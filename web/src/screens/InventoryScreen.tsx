@@ -1,7 +1,9 @@
 import React from 'react';
 import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, X } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
+import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const InventoryScreen: React.FC = () => {
   const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
@@ -9,8 +11,10 @@ export const InventoryScreen: React.FC = () => {
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
   const [cityFilter, setCityFilter] = React.useState<string>('all');
+  const [provinceFilter, setProvinceFilter] = React.useState<string | null>(null);
   const [showWarningOnly, setShowWarningOnly] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
+  const [selectedStoreProvinceId, setSelectedStoreProvinceId] = React.useState<string | null>(null);
   const [selectedStoreCityId, setSelectedStoreCityId] = React.useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = React.useState<string | null>(null);
   const [pageNotice, setPageNotice] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -43,9 +47,25 @@ export const InventoryScreen: React.FC = () => {
     [cities, stores],
   );
 
+  const storeCityProvinceMap = React.useMemo(
+    () => new Map(storeFilterCities.map((city) => [city.id, city.province || getProvinceForCity(city.name) || null])),
+    [storeFilterCities],
+  );
+
   const activeStoresForFilter = React.useMemo(
-    () => (selectedStoreCityId ? stores.filter((store) => store.city_id === selectedStoreCityId) : stores),
-    [selectedStoreCityId, stores],
+    () => stores.filter((store) => {
+      if (selectedStoreProvinceId) {
+        const province = storeCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+        if (selectedStoreProvinceId === '未知省份' ? !!province : province !== selectedStoreProvinceId) {
+          return false;
+        }
+      }
+      if (selectedStoreCityId) {
+        return store.city_id === selectedStoreCityId;
+      }
+      return true;
+    }),
+    [selectedStoreCityId, selectedStoreProvinceId, storeCityProvinceMap, stores],
   );
 
   React.useEffect(() => {
@@ -70,9 +90,20 @@ export const InventoryScreen: React.FC = () => {
     });
   }, [viewMode, selectedStoreId, storeInventory, products]);
   const cityFilteredProducts = React.useMemo(() => {
-    if (cityFilter === 'all') return products;
-    return products.filter((item) => item.city_id === cityFilter);
-  }, [cityFilter, products]);
+    const cityProvinceMap = new Map(
+      cities.map((city) => [city.id, city.province || getProvinceForCity(city.name) || null])
+    );
+
+    const provinceFiltered = provinceFilter
+      ? products.filter((item) => {
+          const province = cityProvinceMap.get(item.city_id) || getProvinceForCity(item.city_name || '');
+          return provinceFilter === '未知省份' ? !province : province === provinceFilter;
+        })
+      : products;
+
+    if (cityFilter === 'all') return provinceFiltered;
+    return provinceFiltered.filter((item) => item.city_id === cityFilter);
+  }, [cities, cityFilter, products, provinceFilter]);
 
   const lowStockCount = cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10)).length;
 
@@ -164,44 +195,29 @@ export const InventoryScreen: React.FC = () => {
 
       {viewMode === 'main' ? (
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setCityFilter('all')}
-            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-          >
-            全部城市
-          </button>
-          {cities.map((city) => (
-            <button
-              type="button"
-              key={city.id}
-              onClick={() => setCityFilter(city.id)}
-              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-            >
-              {city.name}
-            </button>
-          ))}
+          <ProvinceCityFilter
+            cities={cities}
+            selectedProvinceId={provinceFilter}
+            selectedCityId={cityFilter === 'all' ? null : cityFilter}
+            onProvinceChange={setProvinceFilter}
+            onCityChange={(nextCityId) => setCityFilter(nextCityId || 'all')}
+            showProvince={isAdminOrManager}
+          />
         </div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setSelectedStoreCityId(null)}
-              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreCityId === null ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-            >
-              全部城市
-            </button>
-            {storeFilterCities.map((city) => (
-              <button
-                type="button"
-                key={city.id}
-                onClick={() => setSelectedStoreCityId(city.id)}
-                className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${selectedStoreCityId === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-              >
-                {city.name}
-              </button>
-            ))}
+            <ProvinceCityFilter
+              cities={storeFilterCities}
+              selectedProvinceId={selectedStoreProvinceId}
+              selectedCityId={selectedStoreCityId}
+              onProvinceChange={(provinceId) => {
+                setSelectedStoreProvinceId(provinceId);
+                setSelectedStoreCityId(null);
+              }}
+              onCityChange={setSelectedStoreCityId}
+              showProvince
+            />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {activeStoresForFilter.map((store) => (

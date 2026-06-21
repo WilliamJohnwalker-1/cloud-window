@@ -16,12 +16,14 @@ import {
   Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Search, ShoppingBag, PackageCheck, Trash2, ClipboardList, Download, ChevronDown } from 'lucide-react-native';
+import { Search, ShoppingBag, PackageCheck, ClipboardList, Download, ChevronDown } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
+import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
-import type { Order, OrderKind, ProductWithDetails } from '../types';
+import type { City, Order, OrderKind, ProductWithDetails } from '../types';
+import { getProvinceForCity } from '../utils/provinceMapping';
 import { resolvePrice } from '../utils/priceResolver';
 
 interface CartItem {
@@ -63,6 +65,7 @@ export default function OrdersScreen() {
   const [cart, setCart] = useState<Map<string, CartItem>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
   const [selectedOrderCityId, setSelectedOrderCityId] = useState<string | null>(null);
+  const [selectedOrderProvinceId, setSelectedOrderProvinceId] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [selectedOrderStoreId, setSelectedOrderStoreId] = useState<string | null>(null);
   const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | null>(null);
@@ -99,6 +102,7 @@ export default function OrdersScreen() {
   const animatedOpacity = useRef(new Animated.Value(0)).current;
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdminOrManager = isAdmin || user?.role === 'inventory_manager';
   const isOnlyAdmin = user?.role === 'admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
 
@@ -212,23 +216,41 @@ export default function OrdersScreen() {
     clearCart();
   }, [orderModalStoreId, orderModalDistributorId]);
 
-  const orderFilterCities = useMemo(() => {
-    const cityMap = new Map<string, string>();
+  const orderFilterCities = useMemo<City[]>(() => {
+    const cityMap = new Map<string, { id: string; name: string; province: string | null }>();
     stores
       .filter((store) => store.status === 'active')
       .forEach((store) => {
         if (!cityMap.has(store.city_id)) {
-          cityMap.set(store.city_id, store.city_name || '未知城市');
+          const cityName = store.city_name || '未知城市';
+          cityMap.set(store.city_id, {
+            id: store.city_id,
+            name: cityName,
+            province: getProvinceForCity(cityName),
+          });
         }
       });
-    return Array.from(cityMap.entries()).map(([id, name]) => ({ id, name }));
+    return Array.from(cityMap.values()).map((city) => ({
+      id: city.id,
+      name: city.name,
+      province: city.province || undefined,
+      created_at: '',
+    }));
   }, [stores]);
 
   const activeStoresForOrderFilter = useMemo(() => {
     const activeStores = stores.filter((store) => store.status === 'active');
-    if (!selectedOrderCityId) return activeStores;
-    return activeStores.filter((store) => store.city_id === selectedOrderCityId);
-  }, [selectedOrderCityId, stores]);
+    const filteredByProvince = selectedOrderProvinceId
+      ? activeStores.filter((store) => {
+          const city = orderFilterCities.find((item) => item.id === store.city_id);
+          const province = city?.province || getProvinceForCity(city?.name || store.city_name || '');
+          return selectedOrderProvinceId === '未知省份' ? !province : province === selectedOrderProvinceId;
+        })
+      : activeStores;
+
+    if (!selectedOrderCityId) return filteredByProvince;
+    return filteredByProvince.filter((store) => store.city_id === selectedOrderCityId);
+  }, [orderFilterCities, selectedOrderCityId, selectedOrderProvinceId, stores]);
 
   useEffect(() => {
     if (!selectedOrderStoreId) return;
@@ -240,7 +262,14 @@ export default function OrdersScreen() {
 
   const baseOrders = useMemo(() => {
     let list = [...orders];
-    if (isAdmin) {
+    if (isAdminOrManager) {
+      if (selectedOrderProvinceId) {
+        list = list.filter((o) => {
+          const city = orderFilterCities.find((item) => item.id === o.city_id);
+          const province = city?.province || getProvinceForCity(city?.name || o.city_name || '');
+          return selectedOrderProvinceId === '未知省份' ? !province : province === selectedOrderProvinceId;
+        });
+      }
       if (selectedOrderCityId) {
         list = list.filter((o) => o.city_id === selectedOrderCityId);
       }
@@ -252,7 +281,7 @@ export default function OrdersScreen() {
       list = list.filter((o) => o.order_kind === selectedOrderKind);
     }
     return list;
-  }, [orders, isAdmin, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind]);
+  }, [orders, isAdminOrManager, orderFilterCities, selectedOrderCityId, selectedOrderProvinceId, selectedOrderStoreId, selectedOrderKind]);
 
   const matchesStatsRange = useCallback((order: Order): boolean => {
     const date = new Date(order.created_at);
@@ -315,10 +344,7 @@ export default function OrdersScreen() {
 
   const monthlyProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
-    const now = new Date();
-    baseOrders.forEach((order) => {
-      const date = new Date(order.created_at);
-      if (date.getFullYear() !== now.getFullYear() || date.getMonth() !== now.getMonth()) return;
+    rangedOrders.forEach((order) => {
       order.items.forEach((item) => {
         const key = item.product_id;
         const prev = map.get(key);
@@ -329,7 +355,7 @@ export default function OrdersScreen() {
       });
     });
     return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
-  }, [baseOrders]);
+  }, [rangedOrders]);
 
   const cumulativeProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
@@ -371,12 +397,13 @@ export default function OrdersScreen() {
   const cumulativeStatsRows = useMemo(() => cumulativeProductStats, [cumulativeProductStats]);
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (isAdmin && selectedOrderCityId) count += 1;
-    if (isAdmin && selectedOrderStoreId) count += 1;
+    if (isAdminOrManager && selectedOrderProvinceId) count += 1;
+    if (isAdminOrManager && selectedOrderCityId) count += 1;
+    if (isAdminOrManager && selectedOrderStoreId) count += 1;
     if (selectedOrderKind) count += 1;
     if (statsRange !== 'all') count += 1;
     return count;
-  }, [isAdmin, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind, statsRange]);
+  }, [isAdminOrManager, selectedOrderProvinceId, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind, statsRange]);
 
   const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
   const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
@@ -618,7 +645,40 @@ export default function OrdersScreen() {
 
   const exportOrderToExcel = async (order: Order) => {
     try {
-      const XLSX = await import('xlsx');
+      await import('../polyfills/globals');
+      const excelModule = await import('exceljs');
+      const ExcelJS = 'default' in excelModule ? excelModule.default : excelModule;
+      const { Buffer } = await import('buffer');
+      const workbook = new ExcelJS.Workbook();
+      const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
+
+      const saveWorkbook = async (filename: string): Promise<void> => {
+        const workbookBuffer = await workbook.xlsx.writeBuffer({ useStyles: true });
+
+        if (Platform.OS === 'web') {
+          const blob = new Blob([workbookBuffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        const FileSystem = await import('expo-file-system/legacy');
+        const Sharing = await import('expo-sharing');
+        const base64 = Buffer.from(workbookBuffer).toString('base64');
+        const uri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+      };
 
       if (order.order_kind === 'distribution') {
         const boundStore = order.store_id ? stores.find((store) => store.id === order.store_id) : null;
@@ -669,56 +729,29 @@ export default function OrdersScreen() {
         const sumRetailTotal = dataRows.reduce((sum, row) => sum + Number(row[5] || 0), 0);
         const sumSettlementTotal = dataRows.reduce((sum, row) => sum + Number(row[6] || 0), 0);
         const sumRow = ['合计', '', '', '', '', Number(sumRetailTotal.toFixed(2)), Number(sumSettlementTotal.toFixed(2))];
-        const sheetData = [headers, ...dataRows, sumRow];
 
-        const ws = XLSX.utils.aoa_to_sheet(sheetData);
-        ws['!cols'] = [
-          { wch: 8 },
-          { wch: 24 },
-          { wch: 12 },
-          { wch: 12 },
-          { wch: 12 },
-          { wch: 14 },
-          { wch: 14 },
+        const worksheet = workbook.addWorksheet('上货单');
+        worksheet.columns = [
+          { width: 8 },
+          { width: 24 },
+          { width: 12 },
+          { width: 12 },
+          { width: 12 },
+          { width: 14 },
+          { width: 14 },
         ];
-
-        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-        for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
-          for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex += 1) {
-            const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
-            if (!ws[address]) continue;
-            if (!ws[address].s) ws[address].s = {};
-            ws[address].s = { alignment: { horizontal: 'center', vertical: 'center' } };
-          }
-        }
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '上货单');
-
-        if (Platform.OS === 'web') {
-          const arrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
-          const blob = new Blob([arrayBuffer], {
-            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `${exportBaseName}.xlsx`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          return;
-        }
-
-        const FileSystem = await import('expo-file-system/legacy');
-        const Sharing = await import('expo-sharing');
-        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-        const uri = `${FileSystem.cacheDirectory}${exportBaseName}.xlsx`;
-        await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        worksheet.addRow(headers);
+        dataRows.forEach((row) => {
+          worksheet.addRow(row);
         });
+        worksheet.addRow(sumRow);
+        worksheet.eachRow((row) => {
+          row.eachCell((cell) => {
+            cell.alignment = centered;
+          });
+        });
+
+        await saveWorkbook(`${exportBaseName}.xlsx`);
         return;
       }
 
@@ -729,56 +762,29 @@ export default function OrdersScreen() {
         item.discount_price,
         '',
       ]);
-      const sheetData = [headers, ...dataRows];
-      const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-      const colWidths = headers.map((h, colIdx) => {
-        let maxLen = h.length * 2;
+      const columnWidths = headers.map((header, colIdx) => {
+        let maxLen = header.length * 2;
         dataRows.forEach((row) => {
           const len = String(row[colIdx]).length;
           if (len > maxLen) maxLen = len;
         });
-        return { wch: Math.max(maxLen + 2, 12) };
+        return Math.max(maxLen + 2, 12);
       });
-      ws['!cols'] = colWidths;
 
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-      for (let R = range.s.r; R <= range.e.r; R++) {
-        for (let C = range.s.c; C <= range.e.c; C++) {
-          const addr = XLSX.utils.encode_cell({ r: R, c: C });
-          if (!ws[addr]) continue;
-          if (!ws[addr].s) ws[addr].s = {};
-          ws[addr].s = { alignment: { horizontal: 'center', vertical: 'center' } };
-        }
-      }
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, '送货单');
-
-      if (Platform.OS === 'web') {
-        const arrayBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
-        const blob = new Blob([arrayBuffer], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      const worksheet = workbook.addWorksheet('送货单');
+      worksheet.columns = columnWidths.map((width) => ({ width }));
+      worksheet.addRow(headers);
+      dataRows.forEach((row) => {
+        worksheet.addRow(row);
+      });
+      worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          cell.alignment = centered;
         });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        return;
-      }
-
-      const FileSystem = await import('expo-file-system/legacy');
-      const Sharing = await import('expo-sharing');
-      const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = `${FileSystem.cacheDirectory}delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
+
+      await saveWorkbook(`delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Excel 导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
@@ -1083,7 +1089,7 @@ export default function OrdersScreen() {
             <Animated.View style={{ opacity: animatedOpacity, overflow: 'hidden' }}>
               <View style={styles.statsRow}>
               <View style={styles.statsColumn}>
-                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>本月</Text>
+                <Text style={[styles.statsSubTitle, { color: theme.textSecondary }]}>{rangeLabel}</Text>
                 <ScrollView
                   style={styles.statsColumnScroll}
                   contentContainerStyle={styles.statsList}
@@ -1153,10 +1159,18 @@ export default function OrdersScreen() {
         </TouchableOpacity>
       </View>
 
-      {((isAdmin && (selectedOrderCityId || selectedOrderStoreId)) || selectedOrderKind || statsRange !== 'all') && (
+      {((isAdminOrManager && (selectedOrderProvinceId || selectedOrderCityId || selectedOrderStoreId)) || selectedOrderKind || statsRange !== 'all') && (
         <View style={styles.activeFiltersWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
-            {isAdmin && selectedOrderCityId && (
+            {isAdminOrManager && selectedOrderProvinceId && (
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                onPress={() => setSelectedOrderProvinceId(null)}
+              >
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>省份: {selectedOrderProvinceId} ×</Text>
+              </TouchableOpacity>
+            )}
+            {isAdminOrManager && selectedOrderCityId && (
               <TouchableOpacity
                 style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
                 onPress={() => setSelectedOrderCityId(null)}
@@ -1164,7 +1178,7 @@ export default function OrdersScreen() {
                 <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>城市: {orderFilterCities.find((c) => c.id === selectedOrderCityId)?.name || '已选'} ×</Text>
               </TouchableOpacity>
             )}
-            {isAdmin && selectedOrderStoreId && (
+            {isAdminOrManager && selectedOrderStoreId && (
               <TouchableOpacity
                 style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
                 onPress={() => setSelectedOrderStoreId(null)}
@@ -1195,7 +1209,8 @@ export default function OrdersScreen() {
             <TouchableOpacity
               style={[styles.activeFilterChip, styles.activeFilterChipClear, { borderColor: theme.border }]}
               onPress={() => {
-                if (isAdmin) {
+                if (isAdminOrManager) {
+                  setSelectedOrderProvinceId(null);
                   setSelectedOrderCityId(null);
                   setSelectedOrderStoreId(null);
                 }
@@ -1235,30 +1250,16 @@ export default function OrdersScreen() {
               </TouchableOpacity>
             </View>
 
-            {isAdmin && (
+            {isAdminOrManager && (
               <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
-                <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                  <TouchableOpacity
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === null && styles.chipActive]}
-                    onPress={() => setSelectedOrderCityId(null)}
-                  >
-                    <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === null && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
-                      全部城市
-                    </Text>
-                  </TouchableOpacity>
-                  {orderFilterCities.map((city) => (
-                    <TouchableOpacity
-                      key={city.id}
-                      style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, selectedOrderCityId === city.id && styles.chipActive]}
-                      onPress={() => setSelectedOrderCityId(city.id)}
-                    >
-                      <Text style={[styles.chipText, { color: theme.textSecondary }, selectedOrderCityId === city.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
-                        {city.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+                <ProvinceCityFilter
+                  cities={orderFilterCities}
+                  selectedProvinceId={selectedOrderProvinceId}
+                  selectedCityId={selectedOrderCityId}
+                  onProvinceChange={setSelectedOrderProvinceId}
+                  onCityChange={setSelectedOrderCityId}
+                  showProvince={user?.role !== 'distributor'}
+                />
                 <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
                   <TouchableOpacity
@@ -1379,7 +1380,8 @@ export default function OrdersScreen() {
               <TouchableOpacity
                 style={[styles.clearButton, { borderColor: theme.border }]}
                 onPress={() => {
-                  if (isAdmin) {
+                  if (isAdminOrManager) {
+                    setSelectedOrderProvinceId(null);
                     setSelectedOrderCityId(null);
                     setSelectedOrderStoreId(null);
                   }

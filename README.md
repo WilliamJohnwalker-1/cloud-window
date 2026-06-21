@@ -129,7 +129,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
 30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
 31. 执行 `supabase/migrate-v4.11-refund-delete-no-double-restore.sql`
-32. 执行 `supabase/storage-policies.sql`
+32. 执行 `supabase/migrate-v5.0-settlement-order.sql`
+33. 执行 `supabase/migrate-v5.1-default-store-selection.sql`
+34. 执行 `supabase/migrate-v5.2-province.sql`
+35. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -164,7 +167,18 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 29. 执行 `supabase/migrate-v4.9-refund-approval.sql`
 30. 执行 `supabase/migrate-v4.10-retail-rounding-orders-updated-at-fix.sql`
 31. 执行 `supabase/migrate-v4.11-refund-delete-no-double-restore.sql`
-32. 执行 `supabase/storage-policies.sql`
+32. 执行 `supabase/migrate-v5.0-settlement-order.sql`
+33. 执行 `supabase/migrate-v5.1-default-store-selection.sql`
+34. 执行 `supabase/migrate-v5.2-province.sql`
+35. 执行 `supabase/storage-policies.sql`
+
+#### 省份字段历史数据补齐（推荐）
+
+升级完成后，建议额外执行一次：
+
+1. 执行 `supabase/backfill-province.sql`
+
+说明：该脚本只回填 `cities.province IS NULL` 的历史数据，幂等可重复执行。
 
 ### 4. 启动应用
 
@@ -172,7 +186,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.33）
+### 5. 启动 Web 端（v1.2.34）
 
 ```bash
 npm run web:v2
@@ -369,6 +383,22 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - [ ] 更多报表维度与导出模板
 
 ## 更新日志
+
+### Mobile v2.1.23 (2026-06-21) - 省份维度筛选与导出链路升级
+
+- 省份能力落地：新增 `ProvinceCityFilter` 与静态省市映射，商品/库存/订单/报表筛选支持省份→城市联动
+- 报表筛选修复：城市来源升级为“店铺城市 + 订单城市并集”，修复历史数据下城市列表不全
+- 店铺库存筛选升级：补齐省份层级，形成“省份→城市→店铺”三级筛选
+- 文案统一：筛选中的“未分类”统一改为“未知省份”
+- 移动端导出升级：3 个报表导出函数迁移到 `exceljs`，配套 Metro polyfills 与依赖补齐
+- 省份管理增强：移动端省份管理 UI 支持排序与交互优化
+
+### Web v1.2.34 (2026-06-21) - 省份筛选体系与报表城市覆盖修复
+
+- 新增 Web `ProvinceCityFilter` 与省份筛选链路，商品/库存/订单/报表筛选与移动端口径一致
+- 报表筛选修复：城市选项不再仅依赖店铺集合，补齐订单历史城市覆盖
+- 店铺库存筛选补齐省份层级，支持按省份快速收敛城市与店铺范围
+- 筛选文案统一为“未知省份”，并与省份映射兜底逻辑一致
 
 ### Mobile v2.1.22 (2026-06-18) - 订单页操作优化与结算兼容修复
 

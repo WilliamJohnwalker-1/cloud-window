@@ -772,7 +772,13 @@ export const useAppStore = create<AppState>()(
           return;
         }
 
-        set({ stores: (data as StoreRow[]).map(mapStore) });
+        const mapped = (data as StoreRow[]).map(mapStore);
+        // Pin 云窗 store to the top
+        const yunchuangIdx = mapped.findIndex((s) => s.name === '云窗');
+        const sorted = yunchuangIdx > 0
+          ? [mapped[yunchuangIdx], ...mapped.filter((_, i) => i !== yunchuangIdx)]
+          : mapped;
+        set({ stores: sorted });
       },
 
       fetchStoreInventory: async (storeId) => {
