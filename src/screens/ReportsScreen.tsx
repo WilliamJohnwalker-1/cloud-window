@@ -6,20 +6,25 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as XLSX from 'xlsx';
+import { Buffer } from 'buffer';
+import ExcelJS from 'exceljs';
 import { useShallow } from 'zustand/react/shallow';
 import { BarChart3, TrendingUp, Download, AlertTriangle } from 'lucide-react-native';
 import { BarChart, PieChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
+import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
+import { getProvinceForCity } from '../utils/provinceMapping';
+import type { City } from '../types';
 
 type ReportType = 'sales' | 'supply' | 'inventory' | 'profit';
 
@@ -44,27 +49,75 @@ export default function ReportsScreen() {
   const theme = isDarkMode ? DarkColors : LightColors;
 
   const isDistributor = user?.role === 'distributor';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const [floatingProductName, setFloatingProductName] = useState('');
 
+  const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
+    if (order.city_id) return order.city_id;
+    const fallbackName = String(order.city_name || '').trim();
+    return fallbackName ? `name:${fallbackName}` : '';
+  };
+
   const activeStores = useMemo(() => stores.filter((store) => store.status === 'active'), [stores]);
-  const reportCities = useMemo(() => {
-    const cityMap = new Map<string, string>();
+  const reportCities = useMemo<City[]>(() => {
+    const cityMap = new Map<string, { id: string; name: string; province: string | null }>();
     activeStores.forEach((store) => {
       if (!cityMap.has(store.city_id)) {
-        cityMap.set(store.city_id, store.city_name || '未知城市');
+        const cityName = store.city_name || '未知城市';
+        cityMap.set(store.city_id, {
+          id: store.city_id,
+          name: cityName,
+          province: getProvinceForCity(cityName),
+        });
       }
     });
-    return Array.from(cityMap.entries()).map(([id, name]) => ({ id, name }));
-  }, [activeStores]);
+
+    orders.forEach((order) => {
+      const cityKey = getOrderCityKey(order);
+      if (!cityKey || cityMap.has(cityKey)) return;
+      const cityName = String(order.city_name || '').trim() || '未知城市';
+      cityMap.set(cityKey, {
+        id: cityKey,
+        name: cityName,
+        province: getProvinceForCity(cityName),
+      });
+    });
+
+    return Array.from(cityMap.values()).map((city) => ({
+      id: city.id,
+      name: city.name,
+      province: city.province || undefined,
+      created_at: '',
+    }));
+  }, [activeStores, orders]);
+
+  const reportCityProvinceMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    reportCities.forEach((city) => {
+      map.set(city.id, city.province || null);
+    });
+    return map;
+  }, [reportCities]);
+
   const filteredStores = useMemo(() => {
-    if (!selectedCityId) return activeStores;
-    return activeStores.filter((store) => store.city_id === selectedCityId);
-  }, [activeStores, selectedCityId]);
+    const storesByProvince = selectedProvinceId
+      ? activeStores.filter((store) => {
+          const province = reportCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+          return selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId;
+        })
+      : activeStores;
+
+    if (!selectedCityId) return storesByProvince;
+    if (selectedCityId.startsWith('name:')) return [];
+    return storesByProvince.filter((store) => store.city_id === selectedCityId);
+  }, [activeStores, reportCityProvinceMap, selectedCityId, selectedProvinceId]);
   const monthOptions = useMemo(() => {
     const runtimeOptions = buildMonthOptions(orders);
     if (allModeMonthOptions.length === 0) {
@@ -135,14 +188,37 @@ export default function ReportsScreen() {
 
   const filteredOrders = useMemo(() => {
     let list = [...orders];
+    if (selectedProvinceId) {
+      list = list.filter((order) => {
+        const province = reportCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
+        return selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId;
+      });
+    }
     if (selectedCityId) {
-      list = list.filter((order) => order.city_id === selectedCityId);
+      list = list.filter((order) => getOrderCityKey(order) === selectedCityId);
     }
     if (selectedStoreId) {
       list = list.filter((order) => order.store_id === selectedStoreId);
     }
     return list;
-  }, [orders, selectedCityId, selectedStoreId]);
+  }, [orders, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStoreId]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedProvinceId) count += 1;
+    if (selectedCityId) count += 1;
+    if (selectedStoreId) count += 1;
+    if (selectedMonth !== 'all') count += 1;
+    if (reportType !== 'sales') count += 1;
+    return count;
+  }, [reportType, selectedCityId, selectedMonth, selectedProvinceId, selectedStoreId]);
+
+  const reportTypeLabel = useMemo(() => {
+    if (reportType === 'sales') return '销售报表';
+    if (reportType === 'supply') return '供货统计';
+    if (reportType === 'inventory') return '库存报表';
+    return '利润报表';
+  }, [reportType]);
 
   const revenueScopedOrders = useMemo(
     () =>
@@ -403,6 +479,11 @@ export default function ReportsScreen() {
 
   const exportProfitExcel = async () => {
     try {
+      await import('../polyfills/globals');
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('利润报表');
+      const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
+
       const headers = ['商品名称', '销量', '零售价', '零售总价', '折扣价', '折扣总收入', '总成本', '总利润'];
       const dataRows = profitData.profitByProduct.map((r) => [
         r.name,
@@ -414,35 +495,29 @@ export default function ReportsScreen() {
         Number(r.cost.toFixed(2)),
         Number(r.profit.toFixed(2)),
       ]);
-      const sheetData = [headers, ...dataRows];
-      const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-      // Auto-fit column widths based on content
-      const colWidths = headers.map((h, colIdx) => {
-        let maxLen = h.length * 2; // Chinese chars ~ 2 width
+      const columnWidths = headers.map((header, colIdx) => {
+        let maxLen = header.length * 2;
         dataRows.forEach((row) => {
-          const cell = row[colIdx];
-          const len = String(cell).length;
+          const len = String(row[colIdx]).length;
           if (len > maxLen) maxLen = len;
         });
-        return { wch: Math.max(maxLen + 2, 10) };
+        return Math.max(maxLen + 2, 10);
       });
-      ws['!cols'] = colWidths;
 
-      // Center all cells
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-      for (let R = range.s.r; R <= range.e.r; R++) {
-        for (let C = range.s.c; C <= range.e.c; C++) {
-          const addr = XLSX.utils.encode_cell({ r: R, c: C });
-          if (!ws[addr]) continue;
-          if (!ws[addr].s) ws[addr].s = {};
-          ws[addr].s = { alignment: { horizontal: 'center', vertical: 'center' } };
-        }
-      }
+      worksheet.columns = columnWidths.map((width) => ({ width }));
+      worksheet.addRow(headers);
+      dataRows.forEach((row) => {
+        worksheet.addRow(row);
+      });
+      worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          cell.alignment = centered;
+        });
+      });
 
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, '利润报表');
-      const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const workbookBuffer = await workbook.xlsx.writeBuffer({ useStyles: true });
+      const base64 = Buffer.from(workbookBuffer).toString('base64');
       const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
       const uri = `${FileSystem.cacheDirectory}profit-report${monthSuffix}-${Date.now()}.xlsx`;
       await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
@@ -902,81 +977,46 @@ export default function ReportsScreen() {
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>数据报表</Text>
       </View>
 
-      <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderBottomColor: theme.divider }]}> 
-        <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>月份</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-          {monthOptions.map((monthOption) => (
-            <TouchableOpacity
-              key={monthOption}
-              style={[
-                styles.filterChip,
-                { backgroundColor: theme.background, borderColor: theme.divider },
-                selectedMonth === monthOption && { backgroundColor: Colors.blue, borderColor: Colors.blue },
-              ]}
-              onPress={() => setSelectedMonth(monthOption)}
-            >
-              <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedMonth === monthOption && styles.filterChipTextActive]}>
-                {monthOption === 'all' ? '全部' : monthOption}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+      <View style={styles.filterEntryRow}>
+        <TouchableOpacity
+          style={[styles.filterEntryButton, { backgroundColor: theme.surface, borderColor: theme.border }]}
+          activeOpacity={0.85}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Text style={[styles.filterEntryText, { color: theme.textPrimary }]}>
+            {activeFilterCount > 0 ? `筛选(${activeFilterCount})` : '筛选'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {!isDistributor && activeStores.length > 0 && (
-        <View style={[styles.filterContainer, { backgroundColor: theme.surface, borderBottomColor: theme.divider }]}>
-          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>城市</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                { backgroundColor: theme.background, borderColor: theme.divider },
-                !selectedCityId && { backgroundColor: Colors.blue, borderColor: Colors.blue }
-              ]}
-              onPress={() => setSelectedCityId(null)}
-            >
-              <Text style={[styles.filterChipText, { color: theme.textSecondary }, !selectedCityId && styles.filterChipTextActive]}>全部城市</Text>
-            </TouchableOpacity>
-            {reportCities.map(city => (
-              <TouchableOpacity
-                key={city.id}
-                style={[
-                  styles.filterChip,
-                  { backgroundColor: theme.background, borderColor: theme.divider },
-                  selectedCityId === city.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }
-                ]}
-                onPress={() => setSelectedCityId(city.id)}
-              >
-                <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedCityId === city.id && styles.filterChipTextActive]}>{city.name}</Text>
+      {(selectedProvinceId || selectedCityId || selectedStoreId || selectedMonth !== 'all' || reportType !== 'sales') && (
+        <View style={styles.activeFiltersWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
+            {selectedProvinceId && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setSelectedProvinceId(null)}>
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>省份: {selectedProvinceId} ×</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                { backgroundColor: theme.background, borderColor: theme.divider },
-                !selectedStoreId && { backgroundColor: Colors.blue, borderColor: Colors.blue }
-              ]}
-              onPress={() => setSelectedStoreId(null)}
-            >
-              <Text style={[styles.filterChipText, { color: theme.textSecondary }, !selectedStoreId && styles.filterChipTextActive]}>全部店铺</Text>
-            </TouchableOpacity>
-            {filteredStores.map(store => (
-              <TouchableOpacity
-                key={store.id}
-                style={[
-                  styles.filterChip,
-                  { backgroundColor: theme.background, borderColor: theme.divider },
-                  selectedStoreId === store.id && { backgroundColor: Colors.blue, borderColor: Colors.blue }
-                ]}
-                onPress={() => setSelectedStoreId(store.id)}
-              >
-                <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedStoreId === store.id && styles.filterChipTextActive]}>{store.name}</Text>
+            )}
+            {selectedCityId && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setSelectedCityId(null)}>
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>城市: {reportCities.find((city) => city.id === selectedCityId)?.name || '已选'} ×</Text>
               </TouchableOpacity>
-            ))}
+            )}
+            {selectedStoreId && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setSelectedStoreId(null)}>
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>店铺: {filteredStores.find((store) => store.id === selectedStoreId)?.name || '已选'} ×</Text>
+              </TouchableOpacity>
+            )}
+            {selectedMonth !== 'all' && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setSelectedMonth('all')}>
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>时间: {selectedMonth} ×</Text>
+              </TouchableOpacity>
+            )}
+            {reportType !== 'sales' && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setReportType('sales')}>
+                <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>类型: {reportTypeLabel} ×</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </View>
       )}
@@ -1002,6 +1042,114 @@ export default function ReportsScreen() {
           </Text>
         </View>
       ) : null}
+
+      <Modal visible={filterModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>筛选条件</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Text style={styles.modalClose}>完成</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!isDistributor && (
+              <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
+                <ProvinceCityFilter
+                  cities={reportCities}
+                  selectedProvinceId={selectedProvinceId}
+                  selectedCityId={selectedCityId}
+                  onProvinceChange={setSelectedProvinceId}
+                  onCityChange={setSelectedCityId}
+                  showProvince={isAdminOrManager}
+                />
+
+                <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>店铺</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                  <TouchableOpacity
+                    style={[styles.filterChip, { backgroundColor: theme.surfaceSecondary }, selectedStoreId === null && styles.filterChipActive]}
+                    onPress={() => setSelectedStoreId(null)}
+                  >
+                    <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedStoreId === null && styles.filterChipTextActive]}>
+                      全部店铺
+                    </Text>
+                  </TouchableOpacity>
+                  {filteredStores.map((store) => (
+                    <TouchableOpacity
+                      key={store.id}
+                      style={[styles.filterChip, { backgroundColor: theme.surfaceSecondary }, selectedStoreId === store.id && styles.filterChipActive]}
+                      onPress={() => setSelectedStoreId(store.id)}
+                    >
+                      <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedStoreId === store.id && styles.filterChipTextActive]}>
+                        {store.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>月份</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                {monthOptions.map((monthOption) => (
+                  <TouchableOpacity
+                    key={monthOption}
+                    style={[styles.filterChip, { backgroundColor: theme.surfaceSecondary }, selectedMonth === monthOption && styles.filterChipActive]}
+                    onPress={() => setSelectedMonth(monthOption)}
+                  >
+                    <Text style={[styles.filterChipText, { color: theme.textSecondary }, selectedMonth === monthOption && styles.filterChipTextActive]}>
+                      {monthOption === 'all' ? '全部' : monthOption}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>报表类型</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                {[
+                  { key: 'sales', label: '销售报表' },
+                  { key: 'supply', label: '供货统计' },
+                  { key: 'inventory', label: '库存报表' },
+                  { key: 'profit', label: '利润报表' },
+                ].filter((item) => !isDistributor || item.key === 'sales').map((item) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.filterChip, { backgroundColor: theme.surfaceSecondary }, reportType === item.key && styles.filterChipActive]}
+                    onPress={() => setReportType(item.key as ReportType)}
+                  >
+                    <Text style={[styles.filterChipText, { color: theme.textSecondary }, reportType === item.key && styles.filterChipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={[styles.clearButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  setSelectedProvinceId(null);
+                  setSelectedCityId(null);
+                  setSelectedStoreId(null);
+                  setSelectedMonth('all');
+                  setReportType('sales');
+                }}
+              >
+                <Text style={[styles.clearButtonText, { color: theme.textSecondary }]}>重置筛选</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmButtonWrap} onPress={() => setFilterModalVisible(false)} activeOpacity={0.85}>
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>完成</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1112,12 +1260,121 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  filterEntryRow: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  filterEntryButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  filterEntryText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  activeFiltersWrap: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+  },
+  activeFiltersContent: {
+    paddingRight: 8,
+    alignItems: 'center',
+  },
+  activeFilterChip: {
+    borderRadius: Radius.xl,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginRight: 8,
+  },
+  activeFilterChipText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
   filterContainer: { paddingTop: 10, paddingBottom: 16, borderBottomWidth: 1 },
   filterLabel: { fontSize: 12, fontWeight: '600', paddingHorizontal: 15, marginBottom: 6 },
   filterScroll: { paddingHorizontal: 15, gap: 10 },
   filterChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: Radius.pill, borderWidth: 1 },
+  filterChipActive: { backgroundColor: Colors.blue },
   filterChipText: { fontSize: 13 },
   filterChipTextActive: { color: '#fff', fontWeight: '600' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(18,18,26,0.52)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    maxHeight: '82%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  modalClose: {
+    fontSize: 15,
+    color: Colors.pink,
+    fontWeight: '600',
+  },
+  filterPanelContainer: {
+    marginBottom: 10,
+  },
+  filterRow: {
+    flexGrow: 0,
+  },
+  filterRowContent: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  clearButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  clearButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmButtonWrap: {
+    flex: 1,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+  },
+  confirmButton: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   floatingNameBubble: {
     position: 'absolute',
     left: 16,
