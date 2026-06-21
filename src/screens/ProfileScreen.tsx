@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown, Store as StoreIcon } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
@@ -27,6 +28,7 @@ import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
 import type { Notification, Store } from '../types';
+import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
 
 export default function ProfileScreen() {
   const {
@@ -45,7 +47,6 @@ export default function ProfileScreen() {
     fetchCities,
     fetchDistributors,
     fetchNotifications,
-    fetchStores,
     addCity,
     deleteCity,
     moveCityOrder,
@@ -76,7 +77,6 @@ export default function ProfileScreen() {
       fetchCities: state.fetchCities,
       fetchDistributors: state.fetchDistributors,
       fetchNotifications: state.fetchNotifications,
-      fetchStores: state.fetchStores,
       addCity: state.addCity,
       deleteCity: state.deleteCity,
       moveCityOrder: state.moveCityOrder,
@@ -125,6 +125,9 @@ export default function ProfileScreen() {
   const [binaryUpdateVersion, setBinaryUpdateVersion] = useState('');
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
   const [sortingCityId, setSortingCityId] = useState<string | null>(null);
+  const [provinceModalVisible, setProvinceModalVisible] = useState(false);
+  const [provinceOrder, setProvinceOrder] = useState<string[]>([]);
+  const [sortingProvince, setSortingProvince] = useState<string | null>(null);
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
@@ -200,6 +203,71 @@ export default function ProfileScreen() {
     if (isAdmin) fetchDistributors();
     fetchNotifications();
   }, [isAdmin, fetchCities, fetchDistributors, fetchNotifications]);
+  useEffect(() => {
+    const loadProvinceOrder = async () => {
+      try {
+        const saved = await AsyncStorage.getItem('province_order');
+        if (saved) {
+          setProvinceOrder(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.error('Failed to load province order', e);
+      }
+    };
+    loadProvinceOrder();
+  }, []);
+
+  const derivedProvinces = React.useMemo(() => {
+    const baseProvinces = getProvincesFromCities(cities);
+    return [...baseProvinces].sort((a, b) => {
+      const indexA = provinceOrder.indexOf(a);
+      const indexB = provinceOrder.indexOf(b);
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.localeCompare(b, 'zh-CN');
+    });
+  }, [cities, provinceOrder]);
+
+  const provinceCityCount = React.useMemo(() => {
+    const counts = new Map<string, number>();
+
+    cities.forEach((city) => {
+      const province = city.province || getProvinceForCity(city.name) || '未知省份';
+      counts.set(province, (counts.get(province) || 0) + 1);
+    });
+
+    return counts;
+  }, [cities]);
+
+  const moveProvinceOrder = async (province: string, direction: 'up' | 'down') => {
+    setSortingProvince(province);
+    try {
+      const currentOrder = [...derivedProvinces];
+      const index = currentOrder.indexOf(province);
+      if (index === -1) return;
+
+      if (direction === 'up' && index > 0) {
+        const temp = currentOrder[index - 1];
+        currentOrder[index - 1] = currentOrder[index];
+        currentOrder[index] = temp;
+      } else if (direction === 'down' && index < currentOrder.length - 1) {
+        const temp = currentOrder[index + 1];
+        currentOrder[index + 1] = currentOrder[index];
+        currentOrder[index] = temp;
+      } else {
+        return;
+      }
+
+      setProvinceOrder(currentOrder);
+      await AsyncStorage.setItem('province_order', JSON.stringify(currentOrder));
+    } catch {
+      Toast.show({ type: 'error', text1: '错误', text2: '保存省份排序失败' });
+    } finally {
+      setSortingProvince(null);
+    }
+  };
+
 
   useEffect(() => {
     setOwnStoreName(user?.store_name || '');
@@ -490,6 +558,7 @@ export default function ProfileScreen() {
     { IconComponent: User, label: '个人信息', onPress: () => setProfileModalVisible(true) },
     ...(isAdmin
       ? [
+          { IconComponent: MapPin, label: '省份管理', onPress: () => setProvinceModalVisible(true) },
           { IconComponent: MapPin, label: '城市管理', onPress: () => setCityModalVisible(true) },
           { IconComponent: Users, label: '分销商管理', onPress: () => setDistributorModalVisible(true) },
           { IconComponent: StoreIcon, label: '店铺管理', onPress: () => setStoreModalVisible(true) },
@@ -826,6 +895,53 @@ export default function ProfileScreen() {
               renderItem={renderNotification}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无通知</Text>}
               style={styles.cityList}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Province Management Modal */}
+      <Modal visible={provinceModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>省份管理</Text>
+              <TouchableOpacity onPress={() => setProvinceModalVisible(false)}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={derivedProvinces}
+              keyExtractor={(item) => item}
+              renderItem={({ item }) => (
+                <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item}</Text>
+                    <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>
+                      {provinceCityCount.get(item) || 0} 个城市
+                    </Text>
+                  </View>
+                  <View style={styles.cityActionsRow}>
+                    <TouchableOpacity
+                      onPress={() => moveProvinceOrder(item, 'up')}
+                      disabled={sortingProvince === item}
+                      style={[styles.citySortBtn, sortingProvince === item && styles.citySortBtnDisabled]}
+                    >
+                      <ArrowUp size={14} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => moveProvinceOrder(item, 'down')}
+                      disabled={sortingProvince === item}
+                      style={[styles.citySortBtn, sortingProvince === item && styles.citySortBtnDisabled]}
+                    >
+                      <ArrowDown size={14} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+              ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无省份</Text>}
+              style={styles.cityList}
+              contentContainerStyle={derivedProvinces.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
             />
           </View>
         </View>
