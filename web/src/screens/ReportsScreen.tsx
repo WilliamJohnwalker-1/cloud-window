@@ -2,18 +2,27 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, DollarSign, Download, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
+import { getProvinceForCity } from '../utils/provinceMapping';
+import type { City } from '../types';
 
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 
 export const ReportsScreen: React.FC = () => {
   const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, fetchOrders, user } = useAppStore();
+  const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
+  const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
+    if (order.city_id) return order.city_id;
+    const fallbackName = String(order.city_name || '').trim();
+    return fallbackName ? `name:${fallbackName}` : '';
+  };
   const monthOptions = useMemo(() => {
     const runtimeOptions = buildMonthOptions(orders);
     if (allModeMonthOptions.length === 0) {
@@ -28,20 +37,52 @@ export const ReportsScreen: React.FC = () => {
     return ['all', ...sortedMonths];
   }, [allModeMonthOptions, orders]);
 
-  const reportCities = useMemo(
-    () =>
-      stores.reduce<Array<{ id: string; name: string }>>((acc, store) => {
-        if (!store.city_id || acc.some((city) => city.id === store.city_id)) return acc;
-        acc.push({ id: store.city_id, name: store.city_name || '未知城市' });
-        return acc;
-      }, []),
-    [stores],
-  );
+  const reportCities = useMemo<City[]>(() => {
+    const map = new Map<string, City>();
+    stores.forEach((store) => {
+      if (!store.city_id || map.has(store.city_id)) return;
+      const cityName = store.city_name || '未知城市';
+      map.set(store.city_id, {
+        id: store.city_id,
+        name: cityName,
+        province: getProvinceForCity(cityName) || undefined,
+        created_at: '',
+      });
+    });
 
-  const filteredStores = useMemo(
-    () => (selectedCityId ? stores.filter((store) => store.city_id === selectedCityId) : stores),
-    [selectedCityId, stores],
-  );
+    orders.forEach((order) => {
+      const cityKey = getOrderCityKey(order);
+      if (!cityKey || map.has(cityKey)) return;
+      const cityName = String(order.city_name || '').trim() || '未知城市';
+      map.set(cityKey, {
+        id: cityKey,
+        name: cityName,
+        province: getProvinceForCity(cityName) || undefined,
+        created_at: '',
+      });
+    });
+
+    return Array.from(map.values());
+  }, [orders, stores]);
+
+  const reportCityProvinceMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    reportCities.forEach((city) => {
+      map.set(city.id, city.province || null);
+    });
+    return map;
+  }, [reportCities]);
+
+  const filteredStores = useMemo(() => {
+    const provinceFiltered = selectedProvinceId
+      ? stores.filter((store) => {
+          const province = reportCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+          return selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId;
+        })
+      : stores;
+    if (selectedCityId && selectedCityId.startsWith('name:')) return [];
+    return selectedCityId ? provinceFiltered.filter((store) => store.city_id === selectedCityId) : provinceFiltered;
+  }, [reportCityProvinceMap, selectedCityId, selectedProvinceId, stores]);
 
   useEffect(() => {
     void fetchStores();
@@ -86,7 +127,15 @@ export const ReportsScreen: React.FC = () => {
   ];
 
   const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, productVelocityRanking, profitData, supplyData } = useMemo(() => {
-    const cityScopedOrders = selectedCityId ? orders.filter((order) => order.city_id === selectedCityId) : orders;
+    const provinceScopedOrders = selectedProvinceId
+      ? orders.filter((order) => {
+          const province = reportCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
+          return selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId;
+        })
+      : orders;
+    const cityScopedOrders = selectedCityId
+      ? provinceScopedOrders.filter((order) => getOrderCityKey(order) === selectedCityId)
+      : provinceScopedOrders;
     const scopedOrders = selectedStoreId ? cityScopedOrders.filter((order) => order.store_id === selectedStoreId) : cityScopedOrders;
     const revenueOrders = scopedOrders.filter((order) => {
       const isRevenueKind = order.order_kind === 'settlement' || order.order_kind === 'retail';
@@ -290,7 +339,7 @@ export const ReportsScreen: React.FC = () => {
         byStore: supplyByStore,
       },
     };
-  }, [orders, products, selectedCityId, selectedStore, selectedStoreId, storeInventory]);
+  }, [orders, products, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
 
   const inventorySummary = useMemo(() => {
     if (!selectedStoreId) return null;
@@ -394,25 +443,15 @@ export const ReportsScreen: React.FC = () => {
 
       {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-          <p className="text-sm text-white/60 mb-2">城市筛选</p>
-          <div className="flex flex-wrap gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setSelectedCityId(null)}
-              className={`px-3 py-1.5 rounded-xl border text-sm ${!selectedCityId ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
-            >
-              全部城市
-            </button>
-            {reportCities.map((city) => (
-              <button
-                key={city.id}
-                type="button"
-                onClick={() => setSelectedCityId(city.id)}
-                className={`px-3 py-1.5 rounded-xl border text-sm ${selectedCityId === city.id ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
-              >
-                {city.name}
-              </button>
-            ))}
+          <div className="mb-3">
+            <ProvinceCityFilter
+              cities={reportCities}
+              selectedProvinceId={selectedProvinceId}
+              selectedCityId={selectedCityId}
+              onProvinceChange={setSelectedProvinceId}
+              onCityChange={setSelectedCityId}
+              showProvince
+            />
           </div>
           <p className="text-sm text-white/60 mb-2">店铺筛选</p>
           <div className="flex flex-wrap gap-2">
