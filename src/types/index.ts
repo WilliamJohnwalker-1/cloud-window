@@ -19,6 +19,7 @@ export interface City {
   id: string;
   name: string;
   sort_index?: number;
+  province?: string;
   created_at: string;
 }
 
