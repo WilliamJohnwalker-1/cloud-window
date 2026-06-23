@@ -1,12 +1,12 @@
 import React from 'react';
-import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, X } from 'lucide-react';
+import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, ShoppingCart, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const InventoryScreen: React.FC = () => {
-  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, createPurchaseOrder, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
@@ -26,9 +26,15 @@ export const InventoryScreen: React.FC = () => {
   } | null>(null);
   const [editingThresholdProductId, setEditingThresholdProductId] = React.useState<string | null>(null);
   const [editingThresholdText, setEditingThresholdText] = React.useState('');
+  const [showPurchaseModal, setShowPurchaseModal] = React.useState(false);
+  const [purchaseStoreId, setPurchaseStoreId] = React.useState<string | null>(null);
+  const [purchaseSearchKeyword, setPurchaseSearchKeyword] = React.useState('');
+  const [purchaseCart, setPurchaseCart] = React.useState<Map<string, number>>(new Map());
+  const [submittingPurchase, setSubmittingPurchase] = React.useState(false);
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const isSuperAdmin = user?.role === 'super_admin';
+  const canPurchase = user?.role === 'admin' || user?.role === 'super_admin';
 
   React.useEffect(() => {
     if (isAdminOrManager) {
@@ -112,6 +118,86 @@ export const InventoryScreen: React.FC = () => {
     return cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10));
   }, [cityFilteredProducts, showWarningOnly]);
 
+  const selectedPurchaseStore = React.useMemo(
+    () => stores.find((store) => store.id === purchaseStoreId) || null,
+    [purchaseStoreId, stores],
+  );
+
+  const filteredPurchaseProducts = React.useMemo(() => {
+    if (!selectedPurchaseStore) return [];
+    const keyword = purchaseSearchKeyword.trim().toLowerCase();
+    return products
+      .filter((product) => product.city_id === selectedPurchaseStore.city_id)
+      .filter((product) => {
+        if (!keyword) return true;
+        return [product.name, product.barcode || '', product.city_name || '']
+          .join(' ')
+          .toLowerCase()
+          .includes(keyword);
+      });
+  }, [products, purchaseSearchKeyword, selectedPurchaseStore]);
+
+  const purchaseCartItems = React.useMemo(() => {
+    return Array.from(purchaseCart.entries())
+      .map(([cartKey, quantity]) => {
+        const [storeId, productId] = cartKey.split(':');
+        const store = stores.find((item) => item.id === storeId);
+        const product = products.find((item) => item.id === productId);
+        if (!store || !product || quantity <= 0) return null;
+        return { cartKey, store, product, quantity };
+      })
+      .filter((item): item is { cartKey: string; store: (typeof stores)[number]; product: (typeof products)[number]; quantity: number } => item !== null);
+  }, [products, purchaseCart, stores]);
+
+  const purchaseTotalCost = React.useMemo(() => {
+    return purchaseCartItems.reduce((sum, item) => sum + Number(item.product.cost || 0) * item.quantity, 0);
+  }, [purchaseCartItems]);
+
+  const setPurchaseQuantity = (storeId: string, productId: string, quantity: number): void => {
+    setPurchaseCart((prev) => {
+      const next = new Map(prev);
+      const cartKey = `${storeId}:${productId}`;
+      if (quantity <= 0) {
+        next.delete(cartKey);
+      } else {
+        next.set(cartKey, quantity);
+      }
+      return next;
+    });
+  };
+
+  const handleCreatePurchaseOrder = async (): Promise<void> => {
+    if (purchaseCartItems.length === 0) {
+      setPageNotice({ type: 'error', text: '请先选择进货商品' });
+      return;
+    }
+
+    const grouped = purchaseCartItems.reduce<Map<string, { store_id: string; city_id: string; products: Array<{ productId: string; quantity: number }> }>>((acc, item) => {
+      const existing = acc.get(item.store.id) || {
+        store_id: item.store.id,
+        city_id: item.store.city_id,
+        products: [],
+      };
+      existing.products.push({ productId: item.product.id, quantity: item.quantity });
+      acc.set(item.store.id, existing);
+      return acc;
+    }, new Map());
+
+    setSubmittingPurchase(true);
+    const { error } = await createPurchaseOrder(Array.from(grouped.values()));
+    setSubmittingPurchase(false);
+    if (error) {
+      setPageNotice({ type: 'error', text: `进货建单失败：${error.message}` });
+      return;
+    }
+
+    setPurchaseCart(new Map());
+    setPurchaseSearchKeyword('');
+    setPurchaseStoreId(null);
+    setShowPurchaseModal(false);
+    setPageNotice({ type: 'success', text: '进货单已创建，等待确认到货' });
+  };
+
   return (
     <div className="space-y-6">
       {pageNotice && (
@@ -160,6 +246,20 @@ export const InventoryScreen: React.FC = () => {
           )}
           {viewMode === 'main' && (
             <>
+          {canPurchase && (
+          <button
+            type="button"
+            onClick={() => {
+              setPurchaseStoreId(null);
+              setPurchaseSearchKeyword('');
+              setShowPurchaseModal(true);
+            }}
+            className="bg-white/5 border border-white/10 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-white/10 transition-colors text-sm font-medium"
+          >
+            <ShoppingCart size={18} className="text-accent" />
+            <span>进货</span>
+          </button>
+          )}
           <button
             type="button"
             onClick={() => setShowLogs(true)}
@@ -607,6 +707,136 @@ export const InventoryScreen: React.FC = () => {
               >
                 保存
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPurchaseModal && canPurchase && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold">进货建单</h3>
+                <p className="text-sm text-white/50 mt-1">创建后不会变动库存；到订单页确认到货后由 RPC 入库。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPurchaseModal(false);
+                  setPurchaseStoreId(null);
+                  setPurchaseSearchKeyword('');
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select
+                value={purchaseStoreId || ''}
+                onChange={(event) => {
+                  setPurchaseStoreId(event.target.value || null);
+                  setPurchaseSearchKeyword('');
+                }}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
+              >
+                <option value="" className="bg-[#121217]">-- 请选择进货店铺 --</option>
+                {stores
+                  .filter((store) => store.status === 'active')
+                  .map((store) => (
+                    <option key={store.id} value={store.id} className="bg-[#121217]">
+                      {store.name} ({store.city_name})
+                    </option>
+                  ))}
+              </select>
+              <input
+                value={purchaseSearchKeyword}
+                onChange={(event) => setPurchaseSearchKeyword(event.target.value)}
+                placeholder="搜索商品名称/条码"
+                className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
+                {selectedPurchaseStore ? filteredPurchaseProducts.map((product) => {
+                  const cartKey = `${selectedPurchaseStore.id}:${product.id}`;
+                  const qty = purchaseCart.get(cartKey) || 0;
+                  return (
+                    <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold">{product.name}</p>
+                          <p className="text-xs text-white/40">{product.city_name} · 成本 ¥{Number(product.cost || 0).toFixed(2)} · 条码 {product.barcode || '无'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPurchaseQuantity(selectedPurchaseStore.id, product.id, Math.max(0, qty - 1))}
+                          className="px-3 py-1.5 rounded-lg bg-white/10"
+                        >
+                          -1
+                        </button>
+                        <input
+                          value={qty > 0 ? String(qty) : ''}
+                          onChange={(event) => {
+                            const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                            setPurchaseQuantity(selectedPurchaseStore.id, product.id, Number.isNaN(value) ? 0 : value);
+                          }}
+                          placeholder="进货数量"
+                          className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPurchaseQuantity(selectedPurchaseStore.id, product.id, qty + 1)}
+                          className="px-3 py-1.5 rounded-lg bg-white/10"
+                        >
+                          +1
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <p className="px-4 py-8 text-sm text-white/40">请先选择店铺</p>
+                )}
+                {selectedPurchaseStore && filteredPurchaseProducts.length === 0 && (
+                  <p className="px-4 py-8 text-sm text-white/40">当前店铺城市下暂无可选商品</p>
+                )}
+              </div>
+
+              <div className="border border-white/10 rounded-2xl p-4 flex flex-col">
+                <h4 className="font-semibold mb-3">进货清单</h4>
+                <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
+                  {purchaseCartItems.map((item) => (
+                    <div key={item.cartKey} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                      <div>
+                        <p className="text-sm font-medium">{item.product.name}</p>
+                        <p className="text-xs text-white/40">{item.store.name} · 数量 {item.quantity} · 成本小计 ¥{(Number(item.product.cost || 0) * item.quantity).toFixed(2)}</p>
+                      </div>
+                      <button type="button" onClick={() => setPurchaseQuantity(item.store.id, item.product.id, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                    </div>
+                  ))}
+                  {purchaseCartItems.length === 0 && <p className="text-sm text-white/40">暂无商品</p>}
+                </div>
+
+                <div className="mt-auto pt-4 border-t border-white/10 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-white/60">店铺数</span><span>{new Set(purchaseCartItems.map((item) => item.store.id)).size}</span></div>
+                  <div className="flex justify-between"><span className="text-white/60">商品总数</span><span>{purchaseCartItems.reduce((sum, item) => sum + item.quantity, 0)}</span></div>
+                  <div className="flex justify-between"><span className="text-white/60">成本总额</span><span className="text-accent font-bold">¥{purchaseTotalCost.toFixed(2)}</span></div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { void handleCreatePurchaseOrder(); }}
+                  disabled={submittingPurchase || purchaseCartItems.length === 0}
+                  className="mt-4 w-full py-2.5 rounded-xl bg-tech-gradient font-bold disabled:opacity-50"
+                >
+                  {submittingPurchase ? '提交中...' : '确认创建进货单'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

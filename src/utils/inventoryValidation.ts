@@ -65,15 +65,19 @@ export interface OrderItemValidationResult {
   error?: string;
 }
 
+export type OrderValidationRole = 'admin' | 'super_admin' | 'distributor' | 'inventory_manager';
+
 /**
  * Validate a single order item against business rules:
  *   - quantity must be > 0
- *   - non-sample items must have quantity that is a multiple of 5
+ *   - distributor non-sample quantity must be >= 30
+ *   - sample lines are exempt from distributor minimum
  *   - available stock must be sufficient
  */
 export function validateOrderItem(
   item: OrderItemInput,
   product: ProductAvailability | undefined,
+  role: OrderValidationRole,
 ): OrderItemValidationResult {
   if (!product) {
     return { valid: false, error: '商品不存在' };
@@ -84,8 +88,8 @@ export function validateOrderItem(
   }
 
   const isSample = Boolean(item.isSample);
-  if (!isSample && item.quantity % 5 !== 0) {
-    return { valid: false, error: `${product.name} 数量必须是5的倍数` };
+  if (role === 'distributor' && !isSample && item.quantity < 30) {
+    return { valid: false, error: `${product.name} 非样品数量必须大于等于30` };
   }
 
   const available = product.quantity ?? 0;

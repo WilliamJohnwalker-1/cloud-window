@@ -29,7 +29,7 @@ import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
 import type { Notification, Store } from '../types';
 import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
-
+import ProvinceCityFilter from '../components/ProvinceCityFilter';
 export default function ProfileScreen() {
   const {
     user,
@@ -106,6 +106,8 @@ export default function ProfileScreen() {
     contact: '',
     address: '',
     phone: '',
+    settlement_day: '',
+    cooperation_mode: 'consignment' as 'consignment' | 'buyout' | 'direct',
     status: 'active' as 'active' | 'inactive',
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -128,10 +130,13 @@ export default function ProfileScreen() {
   const [provinceModalVisible, setProvinceModalVisible] = useState(false);
   const [provinceOrder, setProvinceOrder] = useState<string[]>([]);
   const [sortingProvince, setSortingProvince] = useState<string | null>(null);
+  const [storeFilterProvinceId, setStoreFilterProvinceId] = useState<string | null>(null);
+  const [storeFilterCityId, setStoreFilterCityId] = useState<string | null>(null);
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isSuperAdmin = user?.role === 'super_admin';
   const isDistributor = user?.role === 'distributor';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -240,6 +245,18 @@ export default function ProfileScreen() {
     return counts;
   }, [cities]);
 
+  const filteredStores = React.useMemo(() => {
+    return stores.filter((store) => {
+      const city = cities.find((c) => c.id === store.city_id);
+      const province = city?.province || (city ? getProvinceForCity(city.name) : null);
+      const matchesProvince = storeFilterProvinceId
+        ? (storeFilterProvinceId === '未知省份' ? !province : province === storeFilterProvinceId)
+        : true;
+      const matchesCity = storeFilterCityId ? store.city_id === storeFilterCityId : true;
+      return matchesProvince && matchesCity;
+    });
+  }, [stores, cities, storeFilterProvinceId, storeFilterCityId]);
+
   const moveProvinceOrder = async (province: string, direction: 'up' | 'down') => {
     setSortingProvince(province);
     try {
@@ -316,12 +333,31 @@ export default function ProfileScreen() {
 
   // --- Admin store management ---
   const openAddStore = () => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     setIsAddingStore(true);
     setEditingStoreId(null);
-    setEditStoreData({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', status: 'active' });
+    setEditStoreData({
+      name: '',
+      city_id: '',
+      distributor_id: '',
+      discount_rate: '1',
+      contact: '',
+      address: '',
+      phone: '',
+      settlement_day: '',
+      cooperation_mode: 'consignment',
+      status: 'active',
+    });
   };
 
   const openEditStore = (store: Store) => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     setIsAddingStore(false);
     setEditingStoreId(store.id);
     setEditStoreData({
@@ -332,11 +368,17 @@ export default function ProfileScreen() {
       contact: store.contact || '',
       address: store.address || '',
       phone: store.phone || '',
+      settlement_day: store.settlement_day == null ? '' : String(store.settlement_day),
+      cooperation_mode: store.cooperation_mode || 'consignment',
       status: store.status,
     });
   };
 
   const handleSaveStore = async () => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     if (!editStoreData.name.trim()) {
       Toast.show({ type: 'error', text1: '错误', text2: '请输入店铺名称' });
       return;
@@ -351,6 +393,13 @@ export default function ProfileScreen() {
       return;
     }
 
+    const settlementDayText = editStoreData.settlement_day.trim();
+    const settlementDayValue = settlementDayText ? Number(settlementDayText) : null;
+    if (settlementDayText && (settlementDayValue === null || !Number.isInteger(settlementDayValue) || settlementDayValue < 1 || settlementDayValue > 31)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '每月结算日需在 1-31 之间' });
+      return;
+    }
+
     if (isAddingStore) {
       const { error } = await addStore({
         name: editStoreData.name,
@@ -360,6 +409,8 @@ export default function ProfileScreen() {
         contact: editStoreData.contact,
         address: editStoreData.address,
         phone: editStoreData.phone,
+        settlement_day: settlementDayValue,
+        cooperation_mode: editStoreData.cooperation_mode,
       });
       if (error) {
         Toast.show({ type: 'error', text1: '错误', text2: error.message });
@@ -375,6 +426,8 @@ export default function ProfileScreen() {
         contact: editStoreData.contact,
         address: editStoreData.address,
         phone: editStoreData.phone,
+        settlement_day: settlementDayValue,
+        cooperation_mode: editStoreData.cooperation_mode,
         status: editStoreData.status,
       });
       if (error) {
@@ -389,6 +442,10 @@ export default function ProfileScreen() {
   };
 
   const handleDeactivateStore = (id: string, name: string) => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     Alert.alert('确认停用', `确定要停用店铺「${name}」吗？`, [
       { text: '取消', style: 'cancel' },
       {
@@ -404,6 +461,10 @@ export default function ProfileScreen() {
   };
 
   const handleActivateStore = (id: string, name: string) => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     Alert.alert('确认启用', `确定要启用店铺「${name}」吗？`, [
       { text: '取消', style: 'cancel' },
       {
@@ -418,6 +479,10 @@ export default function ProfileScreen() {
   };
 
   const handleDeleteStore = (id: string, name: string) => {
+    if (!isSuperAdmin) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
     Alert.alert('确认删除', `确定要删除店铺「${name}」吗？删除后不可恢复。`, [
       { text: '取消', style: 'cancel' },
       {
@@ -591,14 +656,25 @@ export default function ProfileScreen() {
 
   const renderNotification = ({ item }: { item: Notification }) => {
     const isNewOrder = item.type === 'new_order';
+    const isInventoryAlert = item.type === 'inventory_alert';
+    const isOrderAccepted = item.type === 'order_accepted';
+    const isRefundNotification = item.type === 'refund_requested'
+      || item.type === 'refund_approved'
+      || item.type === 'refund_rejected'
+      || item.type === 'refund_completed'
+      || item.type === 'refund_failed';
     const orderObj = isNewOrder ? orders.find((o) => o.id === item.order_id) : null;
     const alreadyAccepted = orderObj?.status === 'accepted';
 
     return (
       <View style={[styles.notifRow, !item.is_read && { backgroundColor: isDarkMode ? theme.blueBg : theme.pinkBg }, { borderBottomColor: theme.divider }]}>
-        <View style={[styles.notifIcon, { backgroundColor: theme.surfaceSecondary }]}>
+        <View style={[styles.notifIcon, { backgroundColor: theme.surfaceSecondary }]}> 
           {isNewOrder ? (
             <PackagePlus size={18} color={theme.pink} />
+          ) : isInventoryAlert ? (
+            <Bell size={18} color={theme.warning} />
+          ) : isRefundNotification ? (
+            <Bell size={18} color={theme.warning} />
           ) : (
             <CheckCircle2 size={18} color={theme.success} />
           )}
@@ -616,13 +692,23 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
         {isNewOrder && alreadyAccepted && (
-          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}>
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}> 
             <Text style={[styles.acceptedBadgeText, { color: theme.success }]}>已接单</Text>
           </View>
         )}
-        {!isNewOrder && (
-          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}>
+        {isOrderAccepted && (
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.successBg }]}> 
             <Text style={[styles.acceptedBadgeText, { color: theme.success }]}>已接单</Text>
+          </View>
+        )}
+        {isInventoryAlert && (
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.warningBg }]}> 
+            <Text style={[styles.acceptedBadgeText, { color: theme.warning }]}>库存告警</Text>
+          </View>
+        )}
+        {isRefundNotification && (
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.warningBg }]}> 
+            <Text style={[styles.acceptedBadgeText, { color: theme.warning }]}>退款通知</Text>
           </View>
         )}
       </View>
@@ -1114,17 +1200,41 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
 
+            {!isSuperAdmin && (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }]}> 
+                <Text style={[styles.editorHint, { color: theme.textSecondary }]}>当前为只读模式：仅超级管理员可新增/编辑/停用/删除店铺。</Text>
+              </View>
+            )}
+
             {!isAddingStore && !editingStoreId && (
-              <TouchableOpacity style={styles.addCityRow} onPress={openAddStore} activeOpacity={0.85}>
-                <LinearGradient
-                  colors={[theme.pink, theme.blue]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.addCityButton, { width: '100%' }]}
-                >
-                  <Text style={styles.addCityButtonText}>添加新店铺</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              <>
+                {isSuperAdmin ? (
+                  <TouchableOpacity style={styles.addCityRow} onPress={openAddStore} activeOpacity={0.85}>
+                    <LinearGradient
+                      colors={[theme.pink, theme.blue]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={[styles.addCityButton, { width: '100%' }]}
+                    >
+                      <Text style={styles.addCityButtonText}>添加新店铺</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={[styles.addCityButton, { width: '100%', backgroundColor: theme.surfaceSecondary }]}> 
+                    <Text style={[styles.addCityButtonText, { color: theme.textSecondary }]}>仅超级管理员可编辑店铺</Text>
+                  </View>
+                )}
+                <View style={{ marginBottom: 10 }}>
+                  <ProvinceCityFilter
+                    cities={cities}
+                    selectedProvinceId={storeFilterProvinceId}
+                    selectedCityId={storeFilterCityId}
+                    onProvinceChange={setStoreFilterProvinceId}
+                    onCityChange={setStoreFilterCityId}
+                    showProvince={true}
+                  />
+                </View>
+              </>
             )}
 
             {(isAddingStore || editingStoreId) ? (
@@ -1143,6 +1253,7 @@ export default function ProfileScreen() {
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="店铺名称"
                   value={editStoreData.name}
+                  editable={isSuperAdmin}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, name: text })}
                   placeholderTextColor={theme.textTertiary}
                 />
@@ -1157,6 +1268,7 @@ export default function ProfileScreen() {
                         { backgroundColor: theme.surface },
                         editStoreData.city_id === city.id && { backgroundColor: theme.pink }
                       ]}
+                      disabled={!isSuperAdmin}
                       onPress={() => setEditStoreData({ ...editStoreData, city_id: city.id })}
                     >
                       <Text style={[
@@ -1176,6 +1288,7 @@ export default function ProfileScreen() {
                       { backgroundColor: theme.surface },
                       !editStoreData.distributor_id && { backgroundColor: theme.pink },
                     ]}
+                    disabled={!isSuperAdmin}
                     onPress={() => setEditStoreData({ ...editStoreData, distributor_id: '' })}
                   >
                     <Text
@@ -1196,6 +1309,7 @@ export default function ProfileScreen() {
                         { backgroundColor: theme.surface },
                         editStoreData.distributor_id === dist.id && { backgroundColor: theme.pink }
                       ]}
+                      disabled={!isSuperAdmin}
                       onPress={() => setEditStoreData({ ...editStoreData, distributor_id: dist.id })}
                     >
                       <Text style={[
@@ -1211,6 +1325,7 @@ export default function ProfileScreen() {
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="折扣率 (如 0.8 表示 8折)"
                   value={editStoreData.discount_rate}
+                  editable={isSuperAdmin}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, discount_rate: text })}
                   placeholderTextColor={theme.textTertiary}
                   keyboardType="numeric"
@@ -1220,6 +1335,7 @@ export default function ProfileScreen() {
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="联系人 (选填)"
                   value={editStoreData.contact}
+                  editable={isSuperAdmin}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, contact: text })}
                   placeholderTextColor={theme.textTertiary}
                 />
@@ -1228,6 +1344,7 @@ export default function ProfileScreen() {
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="地址 (选填)"
                   value={editStoreData.address}
+                  editable={isSuperAdmin}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, address: text })}
                   placeholderTextColor={theme.textTertiary}
                 />
@@ -1236,15 +1353,57 @@ export default function ProfileScreen() {
                   style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
                   placeholder="电话 (选填)"
                   value={editStoreData.phone}
+                  editable={isSuperAdmin}
                   onChangeText={(text) => setEditStoreData({ ...editStoreData, phone: text })}
                   placeholderTextColor={theme.textTertiary}
                 />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="每月结算日 (1-31，选填)"
+                  value={editStoreData.settlement_day}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, settlement_day: text })}
+                  placeholderTextColor={theme.textTertiary}
+                  keyboardType="number-pad"
+                />
+
+                <Text style={[styles.editorHint, { color: theme.textTertiary }]}>合作模式</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                  {([
+                    { value: 'consignment', label: '代销' },
+                    { value: 'buyout', label: '买断' },
+                    { value: 'direct', label: '直营' },
+                  ] as const).map((mode) => (
+                    <TouchableOpacity
+                      key={mode.value}
+                      style={[
+                        styles.cityChip,
+                        { backgroundColor: theme.surface },
+                        editStoreData.cooperation_mode === mode.value && { backgroundColor: theme.pink },
+                      ]}
+                      disabled={!isSuperAdmin}
+                      onPress={() => setEditStoreData({ ...editStoreData, cooperation_mode: mode.value })}
+                    >
+                      <Text
+                        style={[
+                          styles.cityChipText,
+                          { color: theme.textSecondary },
+                          editStoreData.cooperation_mode === mode.value && { color: '#fff', fontWeight: '600' },
+                        ]}
+                      >
+                        {mode.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
 
                 {editingStoreId && (
                   <View style={[styles.infoRow, { borderBottomWidth: 0, paddingVertical: 0, marginBottom: 10 }]}>
                     <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>状态</Text>
                     <Switch
                       value={editStoreData.status === 'active'}
+                      disabled={!isSuperAdmin}
                       onValueChange={(val) => setEditStoreData({ ...editStoreData, status: val ? 'active' : 'inactive' })}
                       trackColor={{ false: theme.border, true: theme.pinkLight }}
                       thumbColor={editStoreData.status === 'active' ? theme.pink : theme.textTertiary}
@@ -1256,9 +1415,11 @@ export default function ProfileScreen() {
                   <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={() => { setIsAddingStore(false); setEditingStoreId(null); }}>
                     <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveStore}>
-                    <Text style={styles.smallBtnPrimaryText}>保存</Text>
-                  </TouchableOpacity>
+                  {isSuperAdmin && (
+                    <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveStore}>
+                      <Text style={styles.smallBtnPrimaryText}>保存</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
               </ScrollView>
@@ -1266,7 +1427,7 @@ export default function ProfileScreen() {
 
             {!isAddingStore && !editingStoreId && (
               <FlatList
-                data={stores}
+                data={filteredStores}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                   <View style={[styles.cityRow, { borderBottomColor: theme.divider }]}>
@@ -1278,24 +1439,29 @@ export default function ProfileScreen() {
                         {item.city_name || '未知城市'} · {item.distributor_email || '未绑定分销商'}
                       </Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>联系人：{item.contact || '-'} · 电话：{item.phone || '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>结算日：{item.settlement_day ?? '-'} · 合作模式：{item.cooperation_mode || '-'}</Text>
                     </View>
                     <View style={styles.cityActionsRow}>
-                      <TouchableOpacity onPress={() => openEditStore(item)} style={{ marginRight: 15 }}>
-                        <Text style={styles.closeButton}>编辑</Text>
-                      </TouchableOpacity>
-                      {item.status === 'active' && (
-                        <TouchableOpacity onPress={() => handleDeactivateStore(item.id, item.name)}>
-                          <Text style={styles.deleteCityText}>停用</Text>
-                        </TouchableOpacity>
+                      {isSuperAdmin && (
+                        <>
+                          <TouchableOpacity onPress={() => openEditStore(item)} style={{ marginRight: 15 }}>
+                            <Text style={styles.closeButton}>编辑</Text>
+                          </TouchableOpacity>
+                          {item.status === 'active' && (
+                            <TouchableOpacity onPress={() => handleDeactivateStore(item.id, item.name)}>
+                              <Text style={styles.deleteCityText}>停用</Text>
+                            </TouchableOpacity>
+                          )}
+                          {item.status === 'inactive' && (
+                            <TouchableOpacity onPress={() => handleActivateStore(item.id, item.name)} style={{ marginRight: 12 }}>
+                              <Text style={[styles.closeButton, { color: theme.blue }]}>启用</Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity onPress={() => handleDeleteStore(item.id, item.name)}>
+                            <Text style={styles.deleteCityText}>删除</Text>
+                          </TouchableOpacity>
+                        </>
                       )}
-                      {item.status === 'inactive' && (
-                        <TouchableOpacity onPress={() => handleActivateStore(item.id, item.name)} style={{ marginRight: 12 }}>
-                          <Text style={[styles.closeButton, { color: theme.blue }]}>启用</Text>
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity onPress={() => handleDeleteStore(item.id, item.name)}>
-                        <Text style={styles.deleteCityText}>删除</Text>
-                      </TouchableOpacity>
                     </View>
                   </View>
                 )}

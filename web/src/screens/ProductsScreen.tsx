@@ -23,6 +23,8 @@ export const ProductsScreen: React.FC = () => {
     cost: '',
     one_time_cost: '0',
     city_id: '',
+    sku: '',
+    category: '',
   });
 
   useEffect(() => {
@@ -83,6 +85,8 @@ export const ProductsScreen: React.FC = () => {
       one_time_cost: Number(form.one_time_cost || 0),
       discount_price: Number(form.price),
       city_id: form.city_id,
+      sku: form.sku.trim() || null,
+      category: form.category.trim() || null,
     };
 
     if (!payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -97,12 +101,12 @@ export const ProductsScreen: React.FC = () => {
     }
     await fetchProducts();
     setShowCreate(false);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '' });
   };
 
   const openCreateModal = (): void => {
     setEditingProductId(null);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
     setShowPricingPanel(false);
@@ -120,6 +124,8 @@ export const ProductsScreen: React.FC = () => {
       cost: String(product.cost),
       one_time_cost: String(product.one_time_cost || 0),
       city_id: product.city_id,
+      sku: product.sku || '',
+      category: product.category || '',
     });
     setSelectedStoreId('');
     setCustomStorePrice('');
@@ -136,6 +142,8 @@ export const ProductsScreen: React.FC = () => {
         one_time_cost: Number(form.one_time_cost || 0),
         discount_price: Number(form.price),
         city_id: form.city_id,
+        sku: form.sku.trim() || null,
+        category: form.category.trim() || null,
       };
 
       if (!payload.name || !payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -241,6 +249,12 @@ export const ProductsScreen: React.FC = () => {
             <div className="p-6 flex-1 flex flex-col">
               <div className="mb-4">
                 <h3 className="text-lg font-bold group-hover:text-accent transition-colors truncate">{product.name}</h3>
+                {(product.sku || product.category) && (
+                  <p className="text-xs text-white/60 mt-1">
+                    {product.sku ? `SKU: ${product.sku}` : 'SKU: -'}
+                    {product.category ? ` · 品类: ${product.category}` : ''}
+                  </p>
+                )}
                 <div className="flex items-center space-x-2 mt-1.5">
                   <div className="bg-white/10 border border-white/10 rounded px-2 py-0.5 flex items-center space-x-1.5">
                     <span className="text-[9px] font-black text-white/30 uppercase tracking-tighter">Barcode</span>
@@ -264,7 +278,7 @@ export const ProductsScreen: React.FC = () => {
               </div>
 
               <div className="mt-auto flex items-center justify-end pt-4 border-t border-white/5">
-                {user?.role === 'admin' && (
+                {(user?.role === 'admin' || user?.role === 'super_admin') && (
                   <button
                     type="button"
                     onClick={(event) => {
@@ -294,7 +308,7 @@ export const ProductsScreen: React.FC = () => {
         </div>
       )}
 
-      {showPricingPanel && user?.role === 'admin' && (
+      {showPricingPanel && (user?.role === 'admin' || user?.role === 'super_admin') && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
             <div className="flex justify-between items-center">
@@ -314,23 +328,26 @@ export const ProductsScreen: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <div className="flex gap-2">
-                <input
-                  value={customStorePrice}
-                  onChange={(e) => setCustomStorePrice(e.target.value)}
-                  placeholder="输入专属定价(元)"
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2"
-                  type="number"
-                  step="0.01"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveStorePrice}
-                  className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold transition-colors"
-                >
-                  保存
-                </button>
-              </div>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">专属定价</span>
+                <div className="flex gap-2">
+                  <input
+                    value={customStorePrice}
+                    onChange={(e) => setCustomStorePrice(e.target.value)}
+                    placeholder="输入专属定价(元)"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                    type="number"
+                    step="0.01"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveStorePrice}
+                    className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 font-bold transition-colors"
+                  >
+                    保存
+                  </button>
+                </div>
+              </label>
             </div>
           </div>
         </div>
@@ -341,10 +358,30 @@ export const ProductsScreen: React.FC = () => {
           <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
             <h3 className="text-xl font-bold">{editingProductId ? '编辑商品' : '新增商品'}</h3>
             <div className="grid grid-cols-2 gap-3">
-              <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="商品名" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.price} onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))} placeholder="零售价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.cost} onChange={(event) => setForm((prev) => ({ ...prev, cost: event.target.value }))} placeholder="成本价" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">商品名</span>
+                <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="商品名" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">零售价</span>
+                <input value={form.price} onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))} placeholder="零售价" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">成本价</span>
+                <input value={form.cost} onChange={(event) => setForm((prev) => ({ ...prev, cost: event.target.value }))} placeholder="成本价" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">一次性成本</span>
+                <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">SKU</span>
+                <input value={form.sku} onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))} placeholder="可选，纯文本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">品类</span>
+                <input value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))} placeholder="可选，纯文本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
               <div className="col-span-2 space-y-2">
                 <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择城市</p>
                 <div className="flex flex-wrap gap-2">

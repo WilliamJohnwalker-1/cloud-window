@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { AlertTriangle, DollarSign, Download, Package, TrendingDown, TrendingUp } from 'lucide-react';
+import { AlertTriangle, DollarSign, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
@@ -11,7 +11,20 @@ import type { City } from '../types';
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 
 export const ReportsScreen: React.FC = () => {
-  const { orders, products, stores, storeInventory, fetchStores, fetchStoreInventory, fetchOrders, user } = useAppStore();
+  const {
+    orders,
+    products,
+    stores,
+    storeInventory,
+    fetchStores,
+    fetchStoreInventory,
+    fetchAllStoreInventory,
+    fetchOrders,
+    user,
+    generateCityChannelReport,
+    generateProductDetailReport,
+    generatePaymentReport,
+  } = useAppStore();
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
@@ -355,61 +368,106 @@ export const ReportsScreen: React.FC = () => {
     };
   }, [products, selectedStoreId, storeInventory]);
 
-  const exportVolumeCsv = (): void => {
-    const header = '商品,销量';
-    const lines = productVolumeRanking.map((row) => `${row.name},${row.value}`);
-    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-    link.download = `product-volume-ranking${monthSuffix}-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  const exportBusinessData = async (): Promise<void> => {
+    await fetchAllStoreInventory();
+    const excelModule = await import('exceljs');
+    const ExcelJS = 'default' in excelModule ? excelModule.default : excelModule;
+    const workbook = new ExcelJS.Workbook();
+    const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
 
-  const exportProductCsv = (): void => {
-    const header = '商品,销售额';
-    const lines = productAmountRanking.map((row) => `${row.name},${row.value}`);
-    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-    link.download = `product-ranking${monthSuffix}-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+    const addSheet = (name: string, headers: string[], rows: Array<Array<string | number | null>>): void => {
+      const worksheet = workbook.addWorksheet(name);
+      worksheet.columns = headers.map((header) => ({ width: Math.max(12, header.length * 2 + 4) }));
+      worksheet.addRow(headers);
+      rows.forEach((row) => {
+        worksheet.addRow(row);
+      });
+      worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+          cell.alignment = centered;
+        });
+      });
+    };
 
-  const exportProfitExcel = async (): Promise<void> => {
-    const XLSX = await import('xlsx');
-    const headers = ['商品名称', '销量', '零售价', '零售总价', '折扣价', '折扣总收入', '总成本', '总利润'];
-    const dataRows = profitData.profitByProduct.map((row) => [
-      row.name,
-      row.quantity,
-      Number(row.retailPrice.toFixed(2)),
-      Number(row.retailRevenue.toFixed(2)),
-      Number(row.discountPrice.toFixed(2)),
-      Number(row.discountRevenue.toFixed(2)),
-      Number(row.cost.toFixed(2)),
-      Number(row.profit.toFixed(2)),
+    const cityRows = generateCityChannelReport().map((row) => [
+      row.序号,
+      row.城市,
+      row.城市分级,
+      row.渠道门店名称,
+      row.合作模式,
+      row.月总销售件数,
+      row.上月同期销量,
+      row.环比增长率,
+      row.供货营收,
+      row.库存总货值,
+      row.sku动销率,
+      row.结算账期,
     ]);
 
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-    const colWidths = headers.map((header, colIdx) => {
-      let maxLen = header.length * 2;
-      dataRows.forEach((row) => {
-        const len = String(row[colIdx]).length;
-        if (len > maxLen) maxLen = len;
-      });
-      return { wch: Math.max(maxLen + 2, 10) };
-    });
-    worksheet['!cols'] = colWidths;
+    const detailRows = generateProductDetailReport().map((row) => [
+      row.序号,
+      row.城市,
+      row.渠道门店,
+      row.SKU编号,
+      row.产品名称,
+      row.品类,
+      row.单位成本,
+      row.供货价,
+      row.终端售价,
+      row.当前实物库存,
+      row.预留库存,
+      row.总可用库存,
+      row.安全库存阈值,
+      row.本月销量,
+      row.上月销量,
+      row.库存周转天数,
+      row.滞销标记,
+      row.单品毛利,
+    ]);
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '利润报表');
-    const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-    XLSX.writeFile(workbook, `profit-report${monthSuffix}-${Date.now()}.xlsx`);
+    const paymentRows = generatePaymentReport().map((row) => [
+      row.序号,
+      row.城市渠道,
+      row.对账周期,
+      row.应收货款,
+      row.已回款金额,
+      row.未结欠款,
+      row.逾期天数,
+      row.渠道扣点费用,
+      row.实际毛利额,
+      row.回款状态,
+    ]);
+
+    addSheet(
+      '文创工作室多城市渠道库存&销售汇总表',
+      ['序号', '城市', '城市分级', '渠道门店名称', '合作模式', '月总销售件数', '上月同期销量', '环比增长率', '供货营收', '库存总货值', 'sku动销率', '结算账期'],
+      cityRows,
+    );
+    addSheet(
+      '文创单品多城市库存&销售明细表',
+      ['序号', '城市', '渠道门店', 'SKU编号', '产品名称', '品类', '单位成本', '供货价', '终端售价', '当前实物库存', '预留库存', '总可用库存', '安全库存阈值', '本月销量', '上月销量', '库存周转天数', '滞销标记', '单品毛利'],
+      detailRows,
+    );
+    addSheet(
+      '文创渠道回款对账表',
+      ['序号', '城市渠道', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'],
+      paymentRows,
+    );
+
+    const buffer = await workbook.xlsx.writeBuffer({ useStyles: true });
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    link.href = url;
+    link.download = `云窗渠道库存销售管理表-${timestamp}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const volumeTop3 = productVolumeRanking.slice(0, 3);
@@ -475,6 +533,16 @@ export const ReportsScreen: React.FC = () => {
           </div>
         </div>
       )}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => { void exportBusinessData(); }}
+          className="px-4 py-2 rounded-xl border border-accent/40 bg-accent/20 text-accent font-semibold"
+        >
+          导出经营数据
+        </button>
+      </div>
 
       {inventorySummary && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -569,9 +637,7 @@ export const ReportsScreen: React.FC = () => {
         <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xl font-bold">商品销量排行</h3>
-            <button type="button" onClick={exportVolumeCsv} className="text-white/40 hover:text-white transition-colors">
-              <Download size={20} />
-            </button>
+            <div className="text-xs text-white/40">统一导出已迁移至“导出经营数据”</div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
             {volumeTop3.map((row, idx) => (
@@ -690,9 +756,7 @@ export const ReportsScreen: React.FC = () => {
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold">利润报表导出</h3>
-          <button type="button" onClick={() => { void exportProfitExcel(); }} className="text-white/40 hover:text-white transition-colors">
-            <Download size={20} />
-          </button>
+          <div className="text-xs text-white/40">统一导出已迁移至“导出经营数据”</div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-white/[0.03] rounded-xl px-4 py-3">
@@ -718,9 +782,7 @@ export const ReportsScreen: React.FC = () => {
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold">商品销售额排行</h3>
-          <button type="button" onClick={exportProductCsv} className="text-white/40 hover:text-white transition-colors">
-            <Download size={20} />
-          </button>
+          <div className="text-xs text-white/40">统一导出已迁移至“导出经营数据”</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           {amountTop3.map((row, idx) => (

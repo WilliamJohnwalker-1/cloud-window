@@ -90,6 +90,8 @@ export default function ProductsScreen() {
   const [price, setPrice] = useState('');
   const [cost, setCost] = useState('');
   const [oneTimeCost, setOneTimeCost] = useState('');
+  const [sku, setSku] = useState('');
+  const [category, setCategory] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [filterProvinceId, setFilterProvinceId] = useState<string | null>(null);
@@ -172,6 +174,8 @@ export default function ProductsScreen() {
     setPrice('');
     setCost('');
     setOneTimeCost('');
+    setSku('');
+    setCategory('');
     setSelectedCity('');
     setImageUrl('');
     setEditingProduct(null);
@@ -194,6 +198,8 @@ export default function ProductsScreen() {
     setPrice(product.price.toString());
     setCost(product.cost?.toString() || '');
     setOneTimeCost(product.one_time_cost?.toString() || '');
+    setSku(product.sku || '');
+    setCategory(product.category || '');
     setSelectedCity(product.city_id);
     setImageUrl(product.image_url || '');
     setModalVisible(true);
@@ -216,6 +222,8 @@ export default function ProductsScreen() {
       cost: parseFloat(cost) || 0,
       one_time_cost: parseFloat(oneTimeCost) || 0,
       discount_price: parseFloat(price) || 0,
+      sku: sku.trim() || null,
+      category: category.trim() || null,
       city_id: selectedCity,
       image_url: imageUrl,
     };
@@ -368,6 +376,12 @@ export default function ProductsScreen() {
       </View>
         <View style={styles.productInfo}>
         <Text style={[styles.productName, { color: theme.textPrimary }]}>{item.name}</Text>
+        {(item.sku || item.category) ? (
+          <Text style={[styles.productMeta, { color: theme.textSecondary }]}>
+            {item.sku ? `SKU: ${item.sku}` : 'SKU: -'}
+            {item.category ? `  品类: ${item.category}` : ''}
+          </Text>
+        ) : null}
         <View style={styles.cityRow}>
           <MapPin size={12} color={theme.textSecondary} />
           <Text style={[styles.productCity, { color: theme.textSecondary }]}>{item.city_name}</Text>
@@ -430,12 +444,6 @@ export default function ProductsScreen() {
         )}
       </View>
 
-      <View
-        style={[
-          styles.cityFilterSpacer,
-          { height: isAdminOrManager ? 124 : 76 },
-        ]}
-      />
 
       <View style={styles.cityFilterOverlay}>
         <View style={[styles.cityFilterPanel, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
@@ -506,6 +514,28 @@ export default function ProductsScreen() {
                   value={price}
                   onChangeText={setPrice}
                   keyboardType="numeric"
+                  placeholderTextColor={theme.textTertiary}
+                />
+              </View>
+
+              <View style={styles.fieldRow}>
+                <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>SKU</Text>
+                <TextInput
+                  style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                  value={sku}
+                  onChangeText={setSku}
+                  placeholder="可选，纯文本"
+                  placeholderTextColor={theme.textTertiary}
+                />
+              </View>
+
+              <View style={styles.fieldRow}>
+                <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>品类</Text>
+                <TextInput
+                  style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                  value={category}
+                  onChangeText={setCategory}
+                  placeholder="可选，纯文本"
                   placeholderTextColor={theme.textTertiary}
                 />
               </View>
@@ -688,14 +718,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  cityFilterSpacer: {
-    height: 68,
-  },
   cityFilterOverlay: {
-    position: 'absolute',
-    top: 62,
-    left: 0,
-    right: 0,
     zIndex: 10,
     elevation: 2,
   },
@@ -782,6 +805,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
     color: Colors.textPrimary,
+  },
+  productMeta: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 4,
   },
   cityRow: {
     flexDirection: 'row',

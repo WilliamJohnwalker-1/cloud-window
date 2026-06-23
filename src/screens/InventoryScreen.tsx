@@ -12,7 +12,7 @@ import {
   TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Minus, Plus, ChevronsDown, ChevronsUp, Search, Pencil, PackageOpen } from 'lucide-react-native';
+import { Minus, Plus, ChevronsDown, ChevronsUp, Search, Pencil, PackageOpen, ShoppingBag } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -37,6 +37,7 @@ export default function InventoryScreen() {
     updateInventorySettings,
     findProductByBarcode,
     inboundStock,
+    createPurchaseOrder,
     user,
   } = useAppStore(
     useShallow((state) => ({
@@ -53,6 +54,7 @@ export default function InventoryScreen() {
       updateInventorySettings: state.updateInventorySettings,
       findProductByBarcode: state.findProductByBarcode,
       inboundStock: state.inboundStock,
+      createPurchaseOrder: state.createPurchaseOrder,
       user: state.user,
     })),
   );
@@ -70,6 +72,10 @@ export default function InventoryScreen() {
   const [inboundQuantity, setInboundQuantity] = useState('');
   const [inboundProduct, setInboundProduct] = useState<ProductWithDetails | null>(null);
   const [submittingInbound, setSubmittingInbound] = useState(false);
+  const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
+  const [purchaseStoreId, setPurchaseStoreId] = useState<string | null>(null);
+  const [purchaseCart, setPurchaseCart] = useState<Map<string, number>>(new Map());
+  const [submittingPurchase, setSubmittingPurchase] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'main' | 'store'>('main');
   const [selectedStoreProvinceId, setSelectedStoreProvinceId] = useState<string | null>(null);
@@ -84,6 +90,7 @@ export default function InventoryScreen() {
 
   const isSuperAdmin = user?.role === 'super_admin';
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const canCreatePurchase = user?.role === 'admin' || user?.role === 'super_admin';
 
   useEffect(() => {
     fetchProducts();
@@ -98,6 +105,14 @@ export default function InventoryScreen() {
       fetchStoreInventory(selectedStoreId);
     }
   }, [viewMode, selectedStoreId, fetchStoreInventory]);
+
+  useEffect(() => {
+    if (!purchaseModalVisible) return;
+    const activeStores = stores.filter((store) => store.status === 'active');
+    if (!purchaseStoreId || !activeStores.some((store) => store.id === purchaseStoreId)) {
+      setPurchaseStoreId(activeStores[0]?.id ?? null);
+    }
+  }, [purchaseModalVisible, purchaseStoreId, stores]);
 
   const storeFilterCities = cities.filter((city) => stores.some((store) => store.city_id === city.id));
   const storeCityProvinceMap = new Map(
@@ -163,6 +178,30 @@ export default function InventoryScreen() {
     if (!searchText.trim()) return true;
     return item.product_name?.toLowerCase().includes(searchText.toLowerCase());
   });
+
+  const activePurchaseStores = stores.filter((store) => store.status === 'active');
+  const selectedPurchaseStore = activePurchaseStores.find((store) => store.id === purchaseStoreId) || null;
+  const purchaseProducts = selectedPurchaseStore
+    ? products.filter((product) => product.city_id === selectedPurchaseStore.city_id)
+    : [];
+  const purchaseCartEntries = Array.from(purchaseCart.entries()).filter(([, qty]) => qty > 0);
+  const purchaseTotalQuantity = purchaseCartEntries.reduce((sum, [, qty]) => sum + qty, 0);
+  const purchaseStoreCount = new Set(purchaseCartEntries.map(([key]) => key.split(':')[0])).size;
+
+  const getPurchaseCartKey = (storeId: string, productId: string): string => `${storeId}:${productId}`;
+
+  const updatePurchaseQuantity = (storeId: string, productId: string, quantity: number) => {
+    setPurchaseCart((prev) => {
+      const next = new Map(prev);
+      const key = getPurchaseCartKey(storeId, productId);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        next.delete(key);
+      } else {
+        next.set(key, Math.floor(quantity));
+      }
+      return next;
+    });
+  };
 
   const handleUpdateStock = (product: ProductWithDetails, adjustment: number) => {
     const newQuantity = (product.quantity || 0) + adjustment;
@@ -263,6 +302,48 @@ export default function InventoryScreen() {
     Toast.show({ type: 'success', text1: '成功', text2: `${inboundProduct.name} 入库 ${qty} 件成功` });
     setInboundModalVisible(false);
     resetInboundForm();
+  };
+
+  const resetPurchaseForm = () => {
+    setPurchaseCart(new Map());
+    setPurchaseStoreId(null);
+  };
+
+  const handleConfirmPurchase = async () => {
+    if (!canCreatePurchase) return;
+    if (purchaseCartEntries.length === 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请至少选择一个进货商品' });
+      return;
+    }
+
+    const groupMap = new Map<string, { store_id: string; city_id: string; products: Array<{ product_id: string; quantity: number }> }>();
+    purchaseCartEntries.forEach(([key, quantity]) => {
+      const [storeId, productId] = key.split(':');
+      const store = activePurchaseStores.find((item) => item.id === storeId);
+      if (!store || !productId) return;
+      const group = groupMap.get(storeId) || { store_id: storeId, city_id: store.city_id, products: [] };
+      group.products.push({ product_id: productId, quantity });
+      groupMap.set(storeId, group);
+    });
+
+    const groupedItems = Array.from(groupMap.values());
+    if (groupedItems.length === 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '进货店铺无效，请重新选择' });
+      return;
+    }
+
+    setSubmittingPurchase(true);
+    const { error } = await createPurchaseOrder(groupedItems);
+    setSubmittingPurchase(false);
+
+    if (error) {
+      Toast.show({ type: 'error', text1: '进货建单失败', text2: error.message });
+      return;
+    }
+
+    Toast.show({ type: 'success', text1: '成功', text2: '进货单已创建，待到货确认' });
+    setPurchaseModalVisible(false);
+    resetPurchaseForm();
   };
 
   const renderFilterButton = (filterKey: 'all' | 'low' | 'normal', label: string) => {
@@ -468,32 +549,47 @@ export default function InventoryScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>库存管理</Text>
-        {isAdminOrManager ? (
-          <TouchableOpacity
-            onPress={() => {
-              resetInboundForm();
-              setInboundModalVisible(true);
-            }}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={['#FF6B9D', '#5B8DEF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.inboundButton}
+        <View style={styles.headerActions}>
+          {canCreatePurchase ? (
+            <TouchableOpacity
+              onPress={() => {
+                resetPurchaseForm();
+                setPurchaseModalVisible(true);
+              }}
+              activeOpacity={0.85}
+              style={styles.headerActionSpacing}
             >
-              <Text style={styles.inboundButtonText}>入库</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        ) : null}
+              <LinearGradient
+                colors={['#FF6B9D', '#5B8DEF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.inboundButton}
+              >
+                <Text style={styles.inboundButtonText}>进货</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
+          {isAdminOrManager ? (
+            <TouchableOpacity
+              onPress={() => {
+                resetInboundForm();
+                setInboundModalVisible(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={['#FF6B9D', '#5B8DEF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.inboundButton}
+              >
+                <Text style={styles.inboundButtonText}>入库</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
-      <View
-        style={[
-          styles.cityFilterSpacer,
-          isAdminOrManager && { height: viewMode === 'store' ? 58 + 58 + 48 : 124 + 48 },
-        ]}
-      />
 
       <View style={styles.cityFilterOverlay}>
         {isAdminOrManager && (
@@ -817,6 +913,107 @@ export default function InventoryScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={purchaseModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.purchaseModalContent, { backgroundColor: theme.surface }] }>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>进货建单</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>选择店铺和商品数量，建单后需在订单页确认到货</Text>
+
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>进货店铺</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow} contentContainerStyle={styles.cityFilterContent}>
+              {activePurchaseStores.map((store) => (
+                <TouchableOpacity
+                  key={store.id}
+                  style={[styles.cityFilterItem, purchaseStoreId === store.id && styles.cityFilterItemActive]}
+                  onPress={() => setPurchaseStoreId(store.id)}
+                >
+                  <LinearGradient
+                    colors={purchaseStoreId === store.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.cityGradientChip}
+                  >
+                    <Text style={[styles.cityFilterText, purchaseStoreId === store.id && styles.cityFilterTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      {store.name}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {selectedPurchaseStore ? (
+              <FlatList
+                data={purchaseProducts}
+                keyExtractor={(item) => item.id}
+                style={styles.purchaseProductList}
+                renderItem={({ item }) => {
+                  const qty = purchaseCart.get(getPurchaseCartKey(selectedPurchaseStore.id, item.id)) || 0;
+                  return (
+                    <View style={[styles.purchaseProductRow, { borderBottomColor: theme.divider }] }>
+                      <View style={styles.purchaseProductInfo}>
+                        <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
+                        <Text style={[styles.cityName, { color: theme.textSecondary }]}>成本 {Number(item.cost || 0).toFixed(2)}元 · {item.city_name || selectedPurchaseStore.city_name || '未知城市'}</Text>
+                      </View>
+                      <View style={styles.purchaseQtyControls}>
+                        <TouchableOpacity style={styles.purchaseQtyButton} onPress={() => updatePurchaseQuantity(selectedPurchaseStore.id, item.id, qty - 1)}>
+                          <Minus size={14} color={Colors.textSecondary} />
+                        </TouchableOpacity>
+                        <TextInput
+                          style={[styles.purchaseQtyInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                          value={qty > 0 ? String(qty) : ''}
+                          onChangeText={(text) => updatePurchaseQuantity(selectedPurchaseStore.id, item.id, Number.parseInt(text.replace(/[^0-9]/g, ''), 10))}
+                          keyboardType="number-pad"
+                          placeholder="0"
+                          placeholderTextColor={theme.textTertiary}
+                        />
+                        <TouchableOpacity style={styles.purchaseQtyButton} onPress={() => updatePurchaseQuantity(selectedPurchaseStore.id, item.id, qty + 1)}>
+                          <Plus size={14} color={Colors.textSecondary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <ShoppingBag size={44} color={theme.textTertiary} strokeWidth={1.5} />
+                    <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>该店铺城市暂无商品</Text>
+                  </View>
+                }
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <ShoppingBag size={44} color={theme.textTertiary} strokeWidth={1.5} />
+                <Text style={[styles.emptyStateText, { color: theme.textTertiary }]}>请先选择进货店铺</Text>
+              </View>
+            )}
+
+            <View style={styles.purchaseSummaryBox}>
+              <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>已选 {purchaseStoreCount} 个店铺，共 {purchaseTotalQuantity} 件</Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => {
+                  setPurchaseModalVisible(false);
+                  resetPurchaseForm();
+                }}
+                disabled={submittingPurchase}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, (submittingPurchase || purchaseCartEntries.length === 0) && styles.disabledButton]}
+                onPress={handleConfirmPurchase}
+                disabled={submittingPurchase || purchaseCartEntries.length === 0}
+              >
+                <Text style={styles.saveButtonText}>{submittingPurchase ? '处理中...' : '创建进货单'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -840,6 +1037,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerActionSpacing: {
+    marginRight: 8,
+  },
   inboundButton: {
     paddingHorizontal: 16,
     paddingVertical: 9,
@@ -849,9 +1053,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
-  },
-  cityFilterSpacer: {
-    height: 58,
   },
   viewModeContainer: {
     flexDirection: 'row',
@@ -875,10 +1076,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cityFilterOverlay: {
-    position: 'absolute',
-    top: 62,
-    left: 0,
-    right: 0,
     zIndex: 10,
     elevation: 2,
   },
@@ -1125,6 +1322,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 20,
   },
+  purchaseModalContent: {
+    maxHeight: '90%',
+  },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
@@ -1241,5 +1441,49 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
     marginTop: 12,
     fontSize: 15,
+  },
+  purchaseProductList: {
+    maxHeight: 360,
+    marginTop: 8,
+  },
+  purchaseProductRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  purchaseProductInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  purchaseQtyControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  purchaseQtyButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  purchaseQtyInput: {
+    width: 52,
+    height: 32,
+    borderRadius: Radius.sm,
+    marginHorizontal: 6,
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 18,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    color: Colors.textPrimary,
+  },
+  purchaseSummaryBox: {
+    marginTop: 10,
+    marginBottom: 4,
   },
 });

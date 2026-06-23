@@ -101,100 +101,104 @@ describe('validateOrderItem', () => {
     city_id: 'city-1',
   };
 
-  it('passes for valid non-sample item with quantity = 5', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 5 }, product);
+  it('passes for distributor non-sample item with quantity = 30', () => {
+    const result = validateOrderItem({ productId: 'p1', quantity: 30 }, product, 'distributor');
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('passes for valid non-sample item with quantity = 25', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 25 }, product);
+  it('passes for admin non-sample item with quantity = 1', () => {
+    const result = validateOrderItem({ productId: 'p1', quantity: 1 }, product, 'admin');
     expect(result.valid).toBe(true);
   });
 
-  it('passes for sample item with quantity = 1 (bypasses 5× rule)', () => {
+  it('passes for distributor sample item with quantity = 1 (bypasses >=30 rule)', () => {
     const result = validateOrderItem(
       { productId: 'p1', quantity: 1, isSample: true },
       product,
+      'distributor',
     );
     expect(result.valid).toBe(true);
   });
 
-  it('passes for sample item with quantity = 3 (bypasses 5× rule)', () => {
+  it('passes for distributor sample item with quantity = 3 (bypasses >=30 rule)', () => {
     const result = validateOrderItem(
       { productId: 'p1', quantity: 3, isSample: true },
       product,
+      'distributor',
     );
     expect(result.valid).toBe(true);
   });
 
   it('rejects when product is undefined', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 5 }, undefined);
+    const result = validateOrderItem({ productId: 'p1', quantity: 5 }, undefined, 'distributor');
     expect(result.valid).toBe(false);
     expect(result.error).toBe('商品不存在');
   });
 
   it('rejects quantity = 0', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 0 }, product);
+    const result = validateOrderItem({ productId: 'p1', quantity: 0 }, product, 'distributor');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('数量必须大于0');
   });
 
   it('rejects negative quantity', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: -5 }, product);
+    const result = validateOrderItem({ productId: 'p1', quantity: -5 }, product, 'distributor');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('数量必须大于0');
   });
 
-  it('rejects non-sample quantity not multiple of 5', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 7 }, product);
+  it('rejects distributor non-sample quantity < 30', () => {
+    const result = validateOrderItem({ productId: 'p1', quantity: 29 }, product, 'distributor');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('数量必须是5的倍数');
+    expect(result.error).toContain('非样品数量必须大于等于30');
   });
 
-  it('rejects non-sample quantity = 3', () => {
-    const result = validateOrderItem({ productId: 'p1', quantity: 3 }, product);
+  it('rejects distributor non-sample quantity = 3', () => {
+    const result = validateOrderItem({ productId: 'p1', quantity: 3 }, product, 'distributor');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('数量必须是5的倍数');
+    expect(result.error).toContain('非样品数量必须大于等于30');
   });
 
   it('rejects when stock is insufficient', () => {
     const lowStockProduct = { name: '缺货商品', quantity: 3, city_id: 'city-1' };
-    const result = validateOrderItem({ productId: 'p1', quantity: 5 }, lowStockProduct);
+    const result = validateOrderItem({ productId: 'p1', quantity: 30 }, lowStockProduct, 'distributor');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('库存不足');
   });
 
   it('rejects when stock is exactly 0 and quantity > 0', () => {
     const zeroStockProduct = { name: '零库存商品', quantity: 0, city_id: 'city-1' };
-    const result = validateOrderItem({ productId: 'p1', quantity: 5 }, zeroStockProduct);
+    const result = validateOrderItem({ productId: 'p1', quantity: 30 }, zeroStockProduct, 'distributor');
     expect(result.valid).toBe(false);
     expect(result.error).toContain('库存不足');
   });
 
   it('passes when quantity equals available stock', () => {
     const exactProduct = { name: '刚好够', quantity: 10, city_id: 'city-1' };
-    const result = validateOrderItem({ productId: 'p1', quantity: 10 }, exactProduct);
+    const result = validateOrderItem({ productId: 'p1', quantity: 10 }, exactProduct, 'admin');
     expect(result.valid).toBe(true);
   });
 
-  it('sample item bypasses 5× rule but still checks stock', () => {
+  it('sample item bypasses distributor >=30 rule but still checks stock', () => {
     const lowStockProduct = { name: '样品库存不足', quantity: 0, city_id: 'city-1' };
     const result = validateOrderItem(
       { productId: 'p1', quantity: 1, isSample: true },
       lowStockProduct,
+      'distributor',
     );
     expect(result.valid).toBe(false);
     expect(result.error).toContain('库存不足');
   });
 
-  it('isSample: false explicitly still enforces 5× rule', () => {
+  it('isSample: false explicitly still enforces distributor >=30 rule', () => {
     const result = validateOrderItem(
       { productId: 'p1', quantity: 3, isSample: false },
       product,
+      'distributor',
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('数量必须是5的倍数');
+    expect(result.error).toContain('非样品数量必须大于等于30');
   });
 });
 

@@ -2,13 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Store as StoreIcon, Plus, Edit2, PowerOff, RotateCcw, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { supabase } from '../lib/supabase';
+import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const StoresScreen: React.FC = () => {
   const { user, cities, stores, addStore, updateStore, deactivateStore, deleteStore } = useAppStore();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isSuperAdmin = user?.role === 'super_admin';
 
-  const [cityFilter, setCityFilter] = useState<string>('all');
+  const [storeFilterProvinceId, setStoreFilterProvinceId] = useState<string | null>(null);
+  const [storeFilterCityId, setStoreFilterCityId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -29,6 +33,8 @@ export const StoresScreen: React.FC = () => {
     contact: '',
     address: '',
     phone: '',
+    settlement_day: '',
+    cooperation_mode: '' as '' | 'consignment' | 'buyout' | 'direct',
   });
 
   useEffect(() => {
@@ -44,15 +50,35 @@ export const StoresScreen: React.FC = () => {
   }, [isAdmin]);
 
   const filteredStores = useMemo(() => {
-    if (cityFilter === 'all') return stores;
-    return stores.filter((store) => store.city_id === cityFilter);
-  }, [cityFilter, stores]);
+    return stores.filter((store) => {
+      const city = cities.find((item) => item.id === store.city_id);
+      const province = city?.province || (city ? getProvinceForCity(city.name) : null);
+      const matchesProvince = storeFilterProvinceId
+        ? (storeFilterProvinceId === '未知省份' ? !province : province === storeFilterProvinceId)
+        : true;
+      const matchesCity = storeFilterCityId ? store.city_id === storeFilterCityId : true;
+      return matchesProvince && matchesCity;
+    });
+  }, [stores, cities, storeFilterProvinceId, storeFilterCityId]);
 
   const handleCreateStore = async (): Promise<void> => {
+    if (!isSuperAdmin) {
+      setPageNotice({ type: 'error', text: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
+
     if (!form.name.trim() || !form.city_id) {
       setPageNotice({ type: 'error', text: '请完整填写店铺名称、城市' });
       return;
     }
+
+    const settlementDayValue = form.settlement_day.trim();
+    const settlementDay = settlementDayValue ? Number(settlementDayValue) : null;
+    if (settlementDayValue && (settlementDay === null || !Number.isInteger(settlementDay) || settlementDay < 1 || settlementDay > 31)) {
+      setPageNotice({ type: 'error', text: '每月结算日需在 1-31 之间' });
+      return;
+    }
+
     const payload = {
       name: form.name.trim(),
       city_id: form.city_id,
@@ -61,6 +87,8 @@ export const StoresScreen: React.FC = () => {
       contact: form.contact.trim(),
       address: form.address.trim(),
       phone: form.phone.trim(),
+      settlement_day: settlementDay,
+      cooperation_mode: form.cooperation_mode || null,
     };
 
     const { error } = await addStore(payload);
@@ -69,17 +97,24 @@ export const StoresScreen: React.FC = () => {
       return;
     }
     setShowCreate(false);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '' });
     setPageNotice({ type: 'success', text: '新增店铺成功' });
   };
 
   const openCreateModal = (): void => {
+    if (!isSuperAdmin) {
+      setPageNotice({ type: 'error', text: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
+
     setEditingStoreId(null);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '' });
     setShowCreate(true);
   };
 
   const openEditModal = (storeId: string): void => {
+    if (!isSuperAdmin) return;
+
     const store = stores.find((item) => item.id === storeId);
     if (!store) return;
 
@@ -92,11 +127,25 @@ export const StoresScreen: React.FC = () => {
       contact: store.contact || '',
       address: store.address || '',
       phone: store.phone || '',
+      settlement_day: store.settlement_day == null ? '' : String(store.settlement_day),
+      cooperation_mode: store.cooperation_mode || '',
     });
     setShowCreate(true);
   };
 
   const handleSaveStore = async (): Promise<void> => {
+    if (!isSuperAdmin) {
+      setPageNotice({ type: 'error', text: '仅超级管理员可编辑店铺信息' });
+      return;
+    }
+
+    const settlementDayValue = form.settlement_day.trim();
+    const settlementDay = settlementDayValue ? Number(settlementDayValue) : null;
+    if (settlementDayValue && (settlementDay === null || !Number.isInteger(settlementDay) || settlementDay < 1 || settlementDay > 31)) {
+      setPageNotice({ type: 'error', text: '每月结算日需在 1-31 之间' });
+      return;
+    }
+
     if (editingStoreId) {
       const payload = {
         name: form.name.trim(),
@@ -106,6 +155,8 @@ export const StoresScreen: React.FC = () => {
         contact: form.contact.trim(),
         address: form.address.trim(),
         phone: form.phone.trim(),
+        settlement_day: settlementDay,
+        cooperation_mode: form.cooperation_mode || null,
       };
 
       if (!payload.name || !payload.city_id) {
@@ -128,6 +179,8 @@ export const StoresScreen: React.FC = () => {
   };
 
   const handleDeactivate = async (storeId: string, event: React.MouseEvent): Promise<void> => {
+    if (!isSuperAdmin) return;
+
     event.stopPropagation();
     setConfirmAction({
       kind: 'deactivate',
@@ -139,6 +192,8 @@ export const StoresScreen: React.FC = () => {
   };
 
   const handleReactivate = async (storeId: string, event: React.MouseEvent): Promise<void> => {
+    if (!isSuperAdmin) return;
+
     event.stopPropagation();
     const { error } = await updateStore(storeId, { status: 'active' });
     if (error) {
@@ -149,6 +204,8 @@ export const StoresScreen: React.FC = () => {
   };
 
   const handleDelete = async (storeId: string, event: React.MouseEvent): Promise<void> => {
+    if (!isSuperAdmin) return;
+
     event.stopPropagation();
     setConfirmAction({
       kind: 'delete',
@@ -160,6 +217,12 @@ export const StoresScreen: React.FC = () => {
   };
 
   const submitConfirmAction = async (): Promise<void> => {
+    if (!isSuperAdmin) {
+      setPageNotice({ type: 'error', text: '仅超级管理员可编辑店铺信息' });
+      setConfirmAction(null);
+      return;
+    }
+
     if (!confirmAction) return;
     if (confirmAction.kind === 'deactivate') {
       const { error } = await deactivateStore(confirmAction.storeId);
@@ -208,37 +271,35 @@ export const StoresScreen: React.FC = () => {
       )}
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
-            <StoreIcon size={16} />
+        <div className="flex-1 min-w-[280px] bg-white/5 border border-white/10 rounded-2xl p-3">
+          <div className="flex items-center gap-2 mb-2 text-white/60">
+            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
+              <StoreIcon size={14} />
+            </div>
+            <span className="text-sm font-medium">店铺筛选</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setCityFilter('all')}
-            className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === 'all' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-          >
-            全部城市
-          </button>
-          {cities.map((city) => (
-            <button
-              type="button"
-              key={city.id}
-              onClick={() => setCityFilter(city.id)}
-              className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${cityFilter === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
-            >
-              {city.name}
-            </button>
-          ))}
+          <ProvinceCityFilter
+            cities={cities}
+            selectedProvinceId={storeFilterProvinceId}
+            selectedCityId={storeFilterCityId}
+            onProvinceChange={setStoreFilterProvinceId}
+            onCityChange={setStoreFilterCityId}
+            showProvince
+          />
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
-        >
-          <Plus size={20} />
-          <span>添加新店铺</span>
-        </button>
+        {isSuperAdmin ? (
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
+          >
+            <Plus size={20} />
+            <span>添加新店铺</span>
+          </button>
+        ) : (
+          <div className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs text-white/60">仅超级管理员可编辑店铺</div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -249,7 +310,11 @@ export const StoresScreen: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.03 }}
             className="group bg-white/5 border border-white/10 rounded-3xl overflow-hidden hover:border-accent/50 transition-all duration-300 flex flex-col"
-            onClick={() => openEditModal(store.id)}
+            onClick={() => {
+              if (isSuperAdmin) {
+                openEditModal(store.id);
+              }
+            }}
           >
             <div className="p-6 flex-1 flex flex-col">
               <div className="mb-4">
@@ -276,6 +341,14 @@ export const StoresScreen: React.FC = () => {
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">联系人 / 电话</p>
                   <p className="text-sm font-medium text-white/80 truncate">{store.contact || '未填写'}{store.phone ? ` / ${store.phone}` : ''}</p>
                 </div>
+                <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
+                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">每月结算日</p>
+                  <p className="text-sm font-medium text-white/80 truncate">{store.settlement_day ?? '-'}</p>
+                </div>
+                <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
+                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">合作模式</p>
+                  <p className="text-sm font-medium text-white/80 truncate">{store.cooperation_mode || '-'}</p>
+                </div>
               </div>
 
               <div className="mt-auto flex items-center justify-between pt-4 border-t border-white/5">
@@ -284,7 +357,7 @@ export const StoresScreen: React.FC = () => {
                   <span className="text-sm font-bold text-white/80">{store.discount_rate}</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  {store.status === 'active' && (
+                  {isSuperAdmin && store.status === 'active' && (
                     <button
                       type="button"
                       onClick={(e) => handleDeactivate(store.id, e)}
@@ -294,7 +367,7 @@ export const StoresScreen: React.FC = () => {
                       <PowerOff size={18} />
                     </button>
                   )}
-                  {store.status === 'inactive' && (
+                  {isSuperAdmin && store.status === 'inactive' && (
                     <button
                       type="button"
                       onClick={(e) => handleReactivate(store.id, e)}
@@ -304,24 +377,28 @@ export const StoresScreen: React.FC = () => {
                       <RotateCcw size={18} />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={(e) => handleDelete(store.id, e)}
-                    className="p-2 rounded-xl hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors"
-                    title="删除店铺"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(store.id);
-                    }}
-                    className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors"
-                  >
-                    <Edit2 size={18} />
-                  </button>
+                  {isSuperAdmin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDelete(store.id, e)}
+                        className="p-2 rounded-xl hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors"
+                        title="删除店铺"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditModal(store.id);
+                        }}
+                        className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -342,7 +419,10 @@ export const StoresScreen: React.FC = () => {
           <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
             <h3 className="text-xl font-bold">{editingStoreId ? '编辑店铺' : '新增店铺'}</h3>
             <div className="grid grid-cols-2 gap-3">
-              <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="店铺名称" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">店铺名称</span>
+                <input value={form.name} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="店铺名称" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
               
               <div className="col-span-2 space-y-2">
                 <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择城市</p>
@@ -351,7 +431,7 @@ export const StoresScreen: React.FC = () => {
                     <button
                       type="button"
                       key={city.id}
-                      onClick={() => setForm((prev) => ({ ...prev, city_id: city.id }))}
+                      onClick={() => isSuperAdmin && setForm((prev) => ({ ...prev, city_id: city.id }))}
                       className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${form.city_id === city.id ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}`}
                     >
                       {city.name}
@@ -360,12 +440,13 @@ export const StoresScreen: React.FC = () => {
                 </div>
               </div>
 
-              <div className="col-span-2 space-y-2">
-                <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择分销商</p>
+              <label className="col-span-2 space-y-2 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider block">选择分销商</span>
                 <select
                   value={form.distributor_id}
+                  disabled={!isSuperAdmin}
                   onChange={(event) => setForm((prev) => ({ ...prev, distributor_id: event.target.value }))}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-60"
                 >
                   <option value="" className="bg-[#121217]">暂不绑定分销商（后续可编辑）</option>
                   {distributors.map((d) => (
@@ -374,16 +455,43 @@ export const StoresScreen: React.FC = () => {
                     </option>
                   ))}
                 </select>
-              </div>
+              </label>
 
-              <input value={form.discount_rate} onChange={(event) => setForm((prev) => ({ ...prev, discount_rate: event.target.value }))} placeholder="折扣率 (默认1)" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.contact} onChange={(event) => setForm((prev) => ({ ...prev, contact: event.target.value }))} placeholder="联系人" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="联系电话" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              <input value={form.address} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="详细地址" className="col-span-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">折扣率</span>
+                <input value={form.discount_rate} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, discount_rate: event.target.value }))} placeholder="折扣率 (默认1)" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">联系人</span>
+                <input value={form.contact} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, contact: event.target.value }))} placeholder="联系人" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">联系电话</span>
+                <input value={form.phone} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="联系电话" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">每月结算日</span>
+                <input value={form.settlement_day} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, settlement_day: event.target.value }))} placeholder="1-31（选填）" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">合作模式</span>
+                <select value={form.cooperation_mode} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, cooperation_mode: event.target.value as '' | 'consignment' | 'buyout' | 'direct' }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60">
+                  <option value="" className="bg-[#121217]">未设置</option>
+                  <option value="consignment" className="bg-[#121217]">consignment</option>
+                  <option value="buyout" className="bg-[#121217]">buyout</option>
+                  <option value="direct" className="bg-[#121217]">direct</option>
+                </select>
+              </label>
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">详细地址</span>
+                <input value={form.address} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="详细地址" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
-              <button type="button" onClick={handleSaveStore} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+              {isSuperAdmin ? (
+                <button type="button" onClick={handleSaveStore} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+              ) : null}
             </div>
           </div>
         </div>

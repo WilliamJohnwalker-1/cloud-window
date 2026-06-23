@@ -69,8 +69,11 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, fetchOrderDetail, fetchOrders, deleteOrder, cities, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
+  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, confirmPurchaseDelivery, fetchOrderDetail, fetchOrders, deleteOrder, cities, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin';
+  const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
+  const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFilterProvinceId, setSelectedFilterProvinceId] = useState<string | null>(null);
@@ -111,9 +114,15 @@ export const OrdersScreen: React.FC = () => {
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   const getOrderKindLabel = (kind: OrderKind): string => {
+    if (kind === 'purchase') return '进货单';
     if (kind === 'settlement') return '结算单';
     if (kind === 'retail') return '零售单';
     return '供货单';
+  };
+
+  const getOrderStatusLabel = (order: (typeof orders)[number]): string => {
+    if (order.order_kind === 'purchase') return order.status === 'accepted' ? '已到货' : '待到货';
+    return order.status === 'accepted' ? '已接单' : '待处理';
   };
 
   const baseOrders = useMemo(() => {
@@ -231,6 +240,7 @@ export const OrdersScreen: React.FC = () => {
 
   const revenueOrders = useMemo(() => {
     return filteredOrders.filter((order) => {
+      if (order.order_kind === 'purchase') return false;
       const paymentStatus = String(order.payment_status || '').toLowerCase();
       return paymentStatus !== 'refunded'
         && paymentStatus !== 'refund_pending';
@@ -296,9 +306,9 @@ export const OrdersScreen: React.FC = () => {
     }
 
     return {
-      orderCountLabel: `${rangeLabel}营收订单数`,
-      retailLabel: `${rangeLabel}营收零售总价`,
-      discountLabel: `${rangeLabel}营收折扣总价`,
+      orderCountLabel: `${rangeLabel}供货订单数`,
+      retailLabel: `${rangeLabel}供货零售总价`,
+      discountLabel: `${rangeLabel}供货折扣总价`,
       retailValue: totalRetail,
       discountValue: totalDiscount,
     };
@@ -720,6 +730,11 @@ export const OrdersScreen: React.FC = () => {
     const workbook = new ExcelJS.Workbook();
     const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
 
+    const sanitizeSheetName = (name: string): string => {
+      const base = name.replace(/[\\/?*\[\]:]/g, '-').trim() || '未命名店铺';
+      return base.slice(0, 31);
+    };
+
     const downloadWorkbook = async (filename: string): Promise<void> => {
       const buffer = await workbook.xlsx.writeBuffer({ useStyles: true });
       const blob = new Blob([buffer], {
@@ -734,6 +749,66 @@ export const OrdersScreen: React.FC = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     };
+
+    if (targetOrder.order_kind === 'purchase') {
+      const sourceOrders = filteredOrders.filter((item) => item.order_kind === 'purchase');
+      const purchaseOrders = sourceOrders.length > 0 ? sourceOrders : [targetOrder];
+      const grouped = new Map<string, { storeName: string; rows: Array<{ productName: string; quantity: number; unitCost: number }> }>();
+
+      purchaseOrders.forEach((purchaseOrder) => {
+        const storeName = purchaseOrder.store_name || '未指定店铺';
+        const key = storeName;
+        const target = grouped.get(key) || { storeName, rows: [] };
+        purchaseOrder.items.forEach((item) => {
+          target.rows.push({
+            productName: resolveItemName(item.product_id, item.product_name),
+            quantity: Number(item.quantity || 0),
+            unitCost: Number(item.unit_cost || 0),
+          });
+        });
+        grouped.set(key, target);
+      });
+
+      const usedSheetNames = new Set<string>();
+      Array.from(grouped.values()).forEach((group) => {
+        let sheetName = sanitizeSheetName(group.storeName);
+        if (usedSheetNames.has(sheetName)) {
+          let index = 2;
+          while (usedSheetNames.has(`${sheetName.slice(0, 28)}-${index}`)) {
+            index += 1;
+          }
+          sheetName = `${sheetName.slice(0, 28)}-${index}`;
+        }
+        usedSheetNames.add(sheetName);
+
+        const worksheet = workbook.addWorksheet(sheetName);
+        worksheet.columns = [
+          { width: 8 },
+          { width: 26 },
+          { width: 12 },
+          { width: 12 },
+        ];
+        worksheet.addRow(['序号', '商品名称', '数量', '成本价']);
+
+        group.rows.forEach((row, index) => {
+          worksheet.addRow([
+            index + 1,
+            row.productName,
+            row.quantity,
+            Number(row.unitCost.toFixed(2)),
+          ]);
+        });
+
+        worksheet.eachRow((row) => {
+          row.eachCell((cell) => {
+            cell.alignment = centered;
+          });
+        });
+      });
+
+      await downloadWorkbook(`purchase-orders-${Date.now()}.xlsx`);
+      return;
+    }
 
     if (targetOrder.order_kind === 'distribution') {
       const boundStore = targetOrder.store_id ? stores.find((store) => store.id === targetOrder.store_id) : null;
@@ -875,7 +950,7 @@ export const OrdersScreen: React.FC = () => {
   };
 
   const getCartKey = (productId: string, lineType: CartLineType): string => `${productId}:${lineType}`;
-  const getLineStep = (lineType: CartLineType): number => (lineType === 'sample' ? 1 : 5);
+  const getLineStep = (_lineType: CartLineType): number => 1;
 
   const getCombinedQtyByProduct = (entries: Map<string, CartDraftItem>, productId: string): number => {
     let total = 0;
@@ -915,9 +990,14 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
-    const invalid = cartItems.find((item) => !item.isSample && item.quantity % 5 !== 0);
+    const invalid = cartItems.find((item) => !item.isSample && item.quantity < minSaleQuantity);
     if (invalid) {
-      setPageNotice({ type: 'error', text: `${invalid.product.name} 数量必须是5的倍数` });
+      setPageNotice({
+        type: 'error',
+        text: user?.role === 'distributor'
+          ? `${invalid.product.name} 分销订单非样品数量必须大于等于30`
+          : `${invalid.product.name} 数量必须大于0`,
+      });
       return;
     }
 
@@ -1052,7 +1132,7 @@ export const OrdersScreen: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2">
             {[
-              { key: 'revenue', label: '营收订单' },
+              { key: 'revenue', label: '供货订单' },
               { key: 'refunded', label: '退款订单' },
               { key: 'all', label: '全部支付状态' },
             ].map((item) => (
@@ -1074,6 +1154,7 @@ export const OrdersScreen: React.FC = () => {
               { key: 'distribution', label: '供货单' },
               { key: 'settlement', label: '结算单' },
               { key: 'retail', label: '零售单' },
+              { key: 'purchase', label: '进货单' },
             ].map((item) => (
               <button
                 type="button"
@@ -1090,7 +1171,7 @@ export const OrdersScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {user?.role === 'admin' && (
+          {canCreateSettlement && (
             <button
               type="button"
               onClick={() => {
@@ -1240,12 +1321,12 @@ export const OrdersScreen: React.FC = () => {
                 <div>
                   <div className="flex items-center space-x-3">
                     <h3 className="text-lg font-bold">订单 #{order.id.slice(0, 8)}</h3>
-                    <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.order_kind === 'retail' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : 'text-violet-300 bg-violet-500/10 border-violet-500/20'}`}>
+                    <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.order_kind === 'retail' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : order.order_kind === 'purchase' ? 'text-amber-300 bg-amber-500/10 border-amber-500/20' : 'text-violet-300 bg-violet-500/10 border-violet-500/20'}`}>
                       {getOrderKindLabel(order.order_kind)}
                     </div>
                     <div className={`flex items-center space-x-1 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.status === 'accepted' ? 'text-green-500 bg-green-500/10 border-green-500/20' : 'text-orange-500 bg-orange-500/10 border-orange-500/20'}`}>
                       {order.status === 'accepted' ? <CheckCircle2 size={14} /> : <Clock size={14} />}
-                      <span>{order.status === 'accepted' ? '已接单' : '待处理'}</span>
+                      <span>{getOrderStatusLabel(order)}</span>
                     </div>
                   </div>
                   <div className="flex items-center space-x-4 mt-1 text-white/40 text-xs">
@@ -1260,7 +1341,7 @@ export const OrdersScreen: React.FC = () => {
               <div className="text-right space-y-2">
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest">订单总额</p>
                 <p className="text-2xl font-black text-white">¥{order.total_discount_amount}</p>
-                {order.status === 'pending' && (user?.role === 'admin' || user?.role === 'super_admin') && (
+                {order.status === 'pending' && order.order_kind !== 'purchase' && (user?.role === 'admin' || user?.role === 'super_admin') && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1274,6 +1355,22 @@ export const OrdersScreen: React.FC = () => {
                     className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold"
                   >
                     确认接单
+                  </button>
+                )}
+                {order.status === 'pending' && order.order_kind === 'purchase' && canConfirmPurchase && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const { error } = await confirmPurchaseDelivery(order.id);
+                      if (error) {
+                        setPageNotice({ type: 'error', text: `确认到货失败：${error.message}` });
+                        return;
+                      }
+                      setPageNotice({ type: 'success', text: '进货单已确认到货' });
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-500/30 text-xs font-bold"
+                  >
+                    确认到货
                   </button>
                 )}
               </div>
@@ -1436,7 +1533,7 @@ export const OrdersScreen: React.FC = () => {
                             onClick={() => setCartQuantity(product.id, 'sale', Math.max(0, saleQty - getLineStep('sale')))}
                             className="px-3 py-1.5 rounded-lg bg-white/10"
                           >
-                            -5
+                            -1
                           </button>
                           <input
                             value={saleQty > 0 ? String(saleQty) : ''}
@@ -1448,7 +1545,7 @@ export const OrdersScreen: React.FC = () => {
                               }
                               setCartQuantity(product.id, 'sale', value);
                             }}
-                            placeholder="数量(5的倍数)"
+                            placeholder="数量(分销商非样品≥30)"
                             className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
                           />
                           <button
@@ -1456,7 +1553,7 @@ export const OrdersScreen: React.FC = () => {
                             onClick={() => setCartQuantity(product.id, 'sale', saleQty + getLineStep('sale'))}
                             className="px-3 py-1.5 rounded-lg bg-white/10"
                           >
-                            +5
+                            +1
                           </button>
                         </div>
 
@@ -1525,7 +1622,7 @@ export const OrdersScreen: React.FC = () => {
         </div>
       )}
 
-      {showSettlementModal && user?.role === 'admin' && (
+      {showSettlementModal && canCreateSettlement && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
             <div className="flex items-center justify-between">
