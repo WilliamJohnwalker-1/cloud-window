@@ -132,7 +132,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 32. 执行 `supabase/migrate-v5.0-settlement-order.sql`
 33. 执行 `supabase/migrate-v5.1-default-store-selection.sql`
 34. 执行 `supabase/migrate-v5.2-province.sql`
-35. 执行 `supabase/storage-policies.sql`
+35. 执行 `supabase/migrate-v5.3-product-store-fields.sql`
+36. 执行 `supabase/migrate-v5.4-quantity-rules.sql`
+37. 执行 `supabase/migrate-v5.5-purchase-order.sql`
+38. 执行 `supabase/migrate-v5.6-province-sort-order.sql`
+39. 执行 `supabase/migrate-v5.7-inventory-alert-notifications.sql`
+40. 执行 `supabase/storage-policies.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -170,7 +175,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 32. 执行 `supabase/migrate-v5.0-settlement-order.sql`
 33. 执行 `supabase/migrate-v5.1-default-store-selection.sql`
 34. 执行 `supabase/migrate-v5.2-province.sql`
-35. 执行 `supabase/storage-policies.sql`
+35. 执行 `supabase/migrate-v5.3-product-store-fields.sql`
+36. 执行 `supabase/migrate-v5.4-quantity-rules.sql`
+37. 执行 `supabase/migrate-v5.5-purchase-order.sql`
+38. 执行 `supabase/migrate-v5.6-province-sort-order.sql`
+39. 执行 `supabase/migrate-v5.7-inventory-alert-notifications.sql`
+40. 执行 `supabase/storage-policies.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -186,7 +196,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.2.34）
+### 5. 启动 Web 端（v1.3.0）
 
 ```bash
 npm run web:v2
@@ -376,13 +386,30 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 后续规划
 
-- [ ] 直营店 Web 收款生产加固：微信付款码支付（签名、幂等、对账、异常补偿）
-- [ ] Cloudflare Worker 支付生产配置（商户密钥、回调地址白名单、监控告警）
-- [ ] 通知链路自动化测试（store 层）
-- [ ] 推送通知接入（FCM/APNs）
-- [ ] 更多报表维度与导出模板
+- 计划区已清空（本轮 v2-major-update 全量改动已合并到下方更新日志）
 
 ## 更新日志
+
+### Mobile v2.2.0 (2026-06-24) - 进货单体验与报表导出准确性修复
+
+- 完成 v5.3~v5.7 数据库升级链路接入（商品 SKU/品类、店铺结算日/合作模式、店铺库存阈值、数量规则、进货单系统、省份排序、库存告警通知）
+- 完成双端类型模型升级（`order_kind=purchase`、通知类型扩展、店铺/商品新字段）并保持移动端与 Web 类型口径一致
+- 移动端库存/订单/报表全链路纳入进货单：支持创建进货单、订单页确认到货、进货导出与状态流转
+- 订单数量规则升级：分销普通商品改为最小起订量校验（`>=30`），样品与零售场景保持独立规则
+- 超级管理员权限补齐：关键管理流（店铺、库存、进货、报表）按新角色矩阵统一
+- 报表导出升级为三分表经营数据导出（城市渠道汇总 / 单品明细 / 回款对账），并修复移动端导出稳定性
+- 修复移动端库存页“进货建单”数量输入框数字偏上/裁切问题：补齐 `lineHeight`、`paddingVertical`、`includeFontPadding` 与 `textAlignVertical`
+- 修复 F2 阻塞项：导出前补拉全店铺库存、落地 `store_inventory.min_quantity` 映射、移动端通知类型补齐退款变体
+
+### Web v1.3.0 (2026-06-24) - 报表导出库存覆盖与阈值口径修复
+
+- Web 端完成执行计划全量升级收口：商品/库存/订单/店铺/报表模块与迁移 v5.3~v5.7 对齐
+- 进货单双阶段工作流落地：创建进货单 -> 订单页确认到货 -> 库存入账与回退策略统一
+- 库存告警通知系统落地：店铺与总库存阈值触发 `inventory_alert`，管理端可见并处理
+- 报表导出统一为经营数据三分表，字段与移动端保持同口径
+- 修复报表导出库存覆盖：导出前补拉全店铺库存，避免仅按当前筛选店铺造成数据缺口
+- 修复店铺库存阈值口径：导出明细“安全库存阈值”优先使用 `store_inventory.min_quantity`
+- 与移动端保持报表基础数据链路一致，降低双端导出偏差
 
 ### Mobile v2.1.23 (2026-06-21) - 省份维度筛选与导出链路升级
 

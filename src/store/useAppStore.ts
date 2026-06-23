@@ -34,6 +34,12 @@ interface StoreRetailCreateItem {
   price: number;
 }
 
+interface PurchaseOrderCreateItem {
+  store_id: string;
+  city_id: string;
+  products: Array<{ product_id: string; quantity: number }>;
+}
+
 interface ProfileRow {
   id: string;
   email: string;
@@ -96,6 +102,8 @@ interface ProductRow {
   one_time_cost?: number | string | null;
   discount_price?: number | string | null;
   city_id: string;
+  sku?: string | null;
+  category?: string | null;
   image_url?: string | null;
   barcode?: string | null;
   created_at: string;
@@ -113,6 +121,8 @@ interface StoreRow {
   contact?: string | null;
   address?: string | null;
   phone?: string | null;
+  settlement_day?: number | null;
+  cooperation_mode?: Store['cooperation_mode'] | null;
   status?: Store['status'] | null;
   created_at: string;
   updated_at: string;
@@ -125,6 +135,7 @@ interface StoreInventoryRow {
   store_id: string;
   product_id: string;
   quantity?: number | string | null;
+  min_quantity?: number | string | null;
   updated_at: string;
   products?: { name?: string } | Array<{ name?: string }> | null;
 }
@@ -151,6 +162,8 @@ interface StoreCreateInput {
   contact?: string;
   address?: string;
   phone?: string;
+  settlement_day?: number | null;
+  cooperation_mode?: Store['cooperation_mode'] | null;
 }
 
 interface StoreUpdateInput {
@@ -161,6 +174,8 @@ interface StoreUpdateInput {
   contact?: string;
   address?: string;
   phone?: string;
+  settlement_day?: number | null;
+  cooperation_mode?: Store['cooperation_mode'] | null;
   status?: Store['status'];
 }
 
@@ -263,6 +278,7 @@ const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string =
 const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
   kind === 'retail' ? 'retail' :
   kind === 'settlement' ? 'settlement' :
+  kind === 'purchase' ? 'purchase' :
   'distribution'
 );
 
@@ -363,8 +379,12 @@ interface AppState {
   fetchOwnedStores: () => Promise<Store[]>;
   setDefaultStore: (storeId: string) => Promise<{ error: Error | null }>;
   fetchStoreInventory: (storeId: string) => Promise<void>;
+  fetchAllStoreInventory: () => Promise<void>;
   fetchStoreProductPrices: (storeId: string) => Promise<void>;
   fetchAllData: () => Promise<void>;
+  generateCityChannelReport: () => CityChannelReportRow[];
+  generateProductDetailReport: () => ProductDetailReportRow[];
+  generatePaymentReport: () => PaymentReportRow[];
 
   addCity: (name: string) => Promise<{ error: Error | null }>;
   deleteCity: (id: string) => Promise<{ error: Error | null }>;
@@ -420,6 +440,9 @@ interface AppState {
     storeId: string,
     items: StoreRetailCreateItem[],
   ) => Promise<{ error: Error | null }>;
+  createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ error: Error | null }>;
+  confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
+  fetchPurchaseOrders: () => Promise<void>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
   modifyDistributionOrder: (orderId: string, items: { order_item_id: string; new_quantity: number }[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
@@ -460,6 +483,8 @@ const mapStore = (raw: StoreRow): Store => {
     contact: raw.contact ?? undefined,
     address: raw.address ?? undefined,
     phone: raw.phone ?? undefined,
+    settlement_day: raw.settlement_day ?? null,
+    cooperation_mode: raw.cooperation_mode ?? null,
     status: raw.status || 'active',
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -475,6 +500,9 @@ const mapStoreInventory = (raw: StoreInventoryRow): StoreInventory => {
     product_id: raw.product_id,
     product_name: productData?.name,
     quantity: Number(raw.quantity || 0),
+    min_quantity: raw.min_quantity === null || raw.min_quantity === undefined
+      ? undefined
+      : Number(raw.min_quantity),
     updated_at: raw.updated_at,
   };
 };
@@ -528,6 +556,298 @@ const mapOrder = (raw: OrderRow): Order => {
     created_at: raw.created_at,
     items,
   };
+};
+
+export interface CityChannelReportRow {
+  序号: number;
+  城市: string;
+  城市分级: string;
+  渠道门店名称: string;
+  合作模式: string;
+  月总销售件数: number;
+  上月同期销量: number;
+  环比增长率: string;
+  供货营收: number;
+  库存总货值: number;
+  sku动销率: string;
+  结算账期: number | null;
+}
+
+export interface ProductDetailReportRow {
+  序号: number;
+  城市: string;
+  渠道门店: string;
+  SKU编号: string;
+  产品名称: string;
+  品类: string;
+  单位成本: number;
+  供货价: number;
+  终端售价: number;
+  当前实物库存: number;
+  预留库存: string;
+  总可用库存: number;
+  安全库存阈值: number;
+  本月销量: number;
+  上月销量: number;
+  库存周转天数: number;
+  滞销标记: string;
+  单品毛利: number;
+}
+
+export interface PaymentReportRow {
+  序号: number;
+  城市渠道: string;
+  对账周期: string;
+  应收货款: number;
+  已回款金额: null;
+  未结欠款: number;
+  逾期天数: number;
+  渠道扣点费用: null;
+  实际毛利额: null;
+  回款状态: string;
+}
+
+interface BusinessReportInput {
+  orders: Order[];
+  stores: Store[];
+  products: ProductWithDetails[];
+  storeInventory: StoreInventory[];
+  now?: Date;
+}
+
+const isSameMonth = (input: string, year: number, monthIndex: number): boolean => {
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getFullYear() === year && date.getMonth() === monthIndex;
+};
+
+const getMonthContext = (now: Date): {
+  year: number;
+  monthIndex: number;
+  prevYear: number;
+  prevMonthIndex: number;
+  period: string;
+} => {
+  const year = now.getFullYear();
+  const monthIndex = now.getMonth();
+  const prevDate = new Date(year, monthIndex - 1, 1);
+  return {
+    year,
+    monthIndex,
+    prevYear: prevDate.getFullYear(),
+    prevMonthIndex: prevDate.getMonth(),
+    period: `${year}-${String(monthIndex + 1).padStart(2, '0')}`,
+  };
+};
+
+const round2 = (value: number): number => Number(value.toFixed(2));
+
+const calculateStoreOverdueDays = (settlementDay: number | null | undefined, now: Date): number => {
+  if (!settlementDay || settlementDay <= 0) return 0;
+  const dueDate = new Date(now.getFullYear(), now.getMonth(), settlementDay);
+  const diffMs = now.getTime() - dueDate.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000));
+};
+
+const getRevenueOrdersForStore = (orders: Order[], storeName: string): Order[] => {
+  if (storeName === '云窗') {
+    return orders.filter((order) => order.order_kind === 'retail' && (order.store_name || '未指定店铺') === storeName);
+  }
+  return orders.filter((order) => order.order_kind === 'settlement' && (order.store_name || '未指定店铺') === storeName);
+};
+
+export const buildCityChannelReport = ({
+  orders,
+  stores,
+  products,
+  storeInventory,
+  now = new Date(),
+}: BusinessReportInput): CityChannelReportRow[] => {
+  const month = getMonthContext(now);
+
+  return stores
+    .filter((store) => store.status === 'active')
+    .map((store, index) => {
+      const storeName = store.name || '未指定店铺';
+      const revenueOrders = getRevenueOrdersForStore(orders, storeName);
+
+      let monthSalesQty = 0;
+      let prevMonthSalesQty = 0;
+      let supplyRevenue = 0;
+      const soldProductIds = new Set<string>();
+
+      revenueOrders.forEach((order) => {
+        const isCurrentMonth = isSameMonth(order.created_at, month.year, month.monthIndex);
+        const isPreviousMonth = isSameMonth(order.created_at, month.prevYear, month.prevMonthIndex);
+        if (isCurrentMonth) {
+          supplyRevenue += Number(order.total_discount_amount || 0);
+        }
+        order.items.forEach((item) => {
+          if (item.is_sample) return;
+          if (isCurrentMonth) {
+            monthSalesQty += Number(item.quantity || 0);
+            soldProductIds.add(item.product_id);
+          }
+          if (isPreviousMonth) {
+            prevMonthSalesQty += Number(item.quantity || 0);
+          }
+        });
+      });
+
+      const inventoryRows = storeInventory.filter((row) => row.store_id === store.id);
+      const inventoryValue = inventoryRows.reduce((sum, row) => {
+        const product = products.find((item) => item.id === row.product_id);
+        const price = storeName === '云窗'
+          ? Number(product?.price || 0)
+          : Number(product?.discount_price || product?.price || 0);
+        return sum + Number(row.quantity || 0) * price;
+      }, 0);
+
+      const stockedSkuCount = inventoryRows.length > 0
+        ? inventoryRows.filter((row) => Number(row.quantity || 0) > 0).length
+        : products.filter((item) => item.city_id === store.city_id).length;
+      const skuRate = stockedSkuCount > 0 ? `${round2((soldProductIds.size / stockedSkuCount) * 100)}%` : '0%';
+      const momRate = prevMonthSalesQty > 0
+        ? `${round2(((monthSalesQty - prevMonthSalesQty) / prevMonthSalesQty) * 100)}%`
+        : (monthSalesQty > 0 ? '100%' : '0%');
+
+      return {
+        序号: index + 1,
+        城市: store.city_name || '未知城市',
+        城市分级: '',
+        渠道门店名称: storeName,
+        合作模式: store.cooperation_mode || '',
+        月总销售件数: monthSalesQty,
+        上月同期销量: prevMonthSalesQty,
+        环比增长率: momRate,
+        供货营收: round2(supplyRevenue),
+        库存总货值: round2(inventoryValue),
+        sku动销率: skuRate,
+        结算账期: store.settlement_day ?? null,
+      };
+    });
+};
+
+export const buildProductDetailReport = ({
+  orders,
+  stores,
+  products,
+  storeInventory,
+  now = new Date(),
+}: BusinessReportInput): ProductDetailReportRow[] => {
+  const month = getMonthContext(now);
+  const purchaseOrders = orders.filter((order) => order.order_kind === 'purchase');
+  const rows: ProductDetailReportRow[] = [];
+
+  stores
+    .filter((store) => store.status === 'active')
+    .forEach((store) => {
+      const storeName = store.name || '未指定店铺';
+      const revenueOrders = getRevenueOrdersForStore(orders, storeName);
+      const productIds = new Set<string>();
+      storeInventory.filter((row) => row.store_id === store.id).forEach((row) => productIds.add(row.product_id));
+      revenueOrders.forEach((order) => {
+        order.items.forEach((item) => {
+          if (!item.is_sample) productIds.add(item.product_id);
+        });
+      });
+
+      Array.from(productIds).forEach((productId) => {
+        const product = products.find((item) => item.id === productId);
+        if (!product) return;
+
+        const inventoryRow = storeInventory.find((entry) => entry.store_id === store.id && entry.product_id === productId);
+        const currentInventory = inventoryRow ? Number(inventoryRow.quantity || 0) : Number(product.quantity || 0);
+        const safeThreshold = Number(inventoryRow?.min_quantity || product.min_quantity || 0);
+        const terminalPrice = Number(product.price || 0);
+        const supplyPrice = storeName === '云窗'
+          ? terminalPrice
+          : Number(product.discount_price || terminalPrice);
+        const unitCost = Number(product.cost || 0);
+
+        const monthSales = revenueOrders.reduce((sum, order) => {
+          if (!isSameMonth(order.created_at, month.year, month.monthIndex)) return sum;
+          return sum + order.items
+            .filter((item) => !item.is_sample && item.product_id === productId)
+            .reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0);
+        }, 0);
+
+        const prevSales = revenueOrders.reduce((sum, order) => {
+          if (!isSameMonth(order.created_at, month.prevYear, month.prevMonthIndex)) return sum;
+          return sum + order.items
+            .filter((item) => !item.is_sample && item.product_id === productId)
+            .reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0);
+        }, 0);
+
+        const purchaseDates = purchaseOrders
+          .filter((order) => order.store_id === store.id)
+          .filter((order) => order.items.some((item) => item.product_id === productId))
+          .map((order) => new Date(order.created_at).getTime())
+          .filter((timestamp) => Number.isFinite(timestamp))
+          .sort((a, b) => b - a);
+        const turnoverDays = purchaseDates.length >= 2
+          ? Math.max(1, Math.floor((purchaseDates[0] - purchaseDates[1]) / (24 * 60 * 60 * 1000)))
+          : 99;
+
+        rows.push({
+          序号: rows.length + 1,
+          城市: store.city_name || product.city_name || '未知城市',
+          渠道门店: storeName,
+          SKU编号: product.sku || '',
+          产品名称: product.name,
+          品类: product.category || '',
+          单位成本: round2(unitCost),
+          供货价: round2(supplyPrice),
+          终端售价: round2(terminalPrice),
+          当前实物库存: currentInventory,
+          预留库存: '',
+          总可用库存: currentInventory,
+          安全库存阈值: safeThreshold,
+          本月销量: monthSales,
+          上月销量: prevSales,
+          库存周转天数: turnoverDays,
+          滞销标记: turnoverDays > 60 ? '是' : '否',
+          单品毛利: round2((supplyPrice - unitCost) * monthSales),
+        });
+      });
+    });
+
+  return rows;
+};
+
+export const buildPaymentReport = ({
+  orders,
+  stores,
+  now = new Date(),
+}: Omit<BusinessReportInput, 'products' | 'storeInventory'>): PaymentReportRow[] => {
+  const month = getMonthContext(now);
+
+  return stores
+    .filter((store) => store.status === 'active')
+    .map((store, index) => {
+      const receivable = orders
+        .filter((order) => order.order_kind === 'settlement' && order.store_id === store.id)
+        .filter((order) => isSameMonth(order.created_at, month.year, month.monthIndex))
+        .reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
+
+      const outstanding = round2(receivable);
+      const overdueDays = calculateStoreOverdueDays(store.settlement_day ?? null, now);
+      const status = outstanding <= 0 ? '已结清' : (overdueDays > 0 ? '逾期' : '未到期');
+
+      return {
+        序号: index + 1,
+        城市渠道: `${store.city_name || '未知城市'}-${store.name || '未指定店铺'}`,
+        对账周期: month.period,
+        应收货款: round2(receivable),
+        已回款金额: null,
+        未结欠款: outstanding,
+        逾期天数: overdueDays,
+        渠道扣点费用: null,
+        实际毛利额: null,
+        回款状态: status,
+      };
+    });
 };
 
 export const useAppStore = create<AppState>()(
@@ -692,7 +1012,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (user.role !== 'admin') throw new Error('仅管理员可调整城市排序');
+          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可调整城市排序');
 
           const { error } = await supabase.rpc('swap_city_sort_order', {
             p_city_id: cityId,
@@ -739,6 +1059,8 @@ export const useAppStore = create<AppState>()(
               ...p,
               barcode: p.barcode ?? undefined,
               image_url: p.image_url ?? undefined,
+              sku: p.sku ?? null,
+              category: p.category ?? null,
               price: Number(p.price || 0),
               cost: Number(p.cost || 0),
               one_time_cost: Number(p.one_time_cost || 0),
@@ -947,6 +1269,20 @@ export const useAppStore = create<AppState>()(
         set({ storeInventory: (data as StoreInventoryRow[]).map(mapStoreInventory) });
       },
 
+      fetchAllStoreInventory: async () => {
+        const { data, error } = await supabase
+          .from('store_inventory')
+          .select('*, products(name)')
+          .order('updated_at', { ascending: false });
+
+        if (error || !data) {
+          set({ storeInventory: [] });
+          return;
+        }
+
+        set({ storeInventory: (data as StoreInventoryRow[]).map(mapStoreInventory) });
+      },
+
       fetchStoreProductPrices: async (storeId) => {
         if (!storeId) {
           set({ storeProductPrices: [] });
@@ -969,7 +1305,7 @@ export const useAppStore = create<AppState>()(
 
       fetchDistributors: async () => {
         const { user } = get();
-        if (!user || user.role !== 'admin') {
+        if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
           set({ distributors: [] });
           return;
         }
@@ -999,6 +1335,21 @@ export const useAppStore = create<AppState>()(
           get().fetchNotifications(),
         ]);
         set({ isLoading: false });
+      },
+
+      generateCityChannelReport: () => {
+        const { orders, stores, products, storeInventory } = get();
+        return buildCityChannelReport({ orders, stores, products, storeInventory });
+      },
+
+      generateProductDetailReport: () => {
+        const { orders, stores, products, storeInventory } = get();
+        return buildProductDetailReport({ orders, stores, products, storeInventory });
+      },
+
+      generatePaymentReport: () => {
+        const { orders, stores } = get();
+        return buildPaymentReport({ orders, stores });
       },
 
       addCity: async (name: string) => {
@@ -1051,6 +1402,8 @@ export const useAppStore = create<AppState>()(
             contact: store.contact?.trim() || null,
             address: store.address?.trim() || null,
             phone: store.phone?.trim() || null,
+            settlement_day: store.settlement_day ?? null,
+            cooperation_mode: store.cooperation_mode ?? null,
             status: 'active' as const,
           };
 
@@ -1068,7 +1421,7 @@ export const useAppStore = create<AppState>()(
         try {
           const { user } = get();
           if (!user) throw new Error('未登录');
-          if (!(user.role === 'admin' || user.role === 'super_admin')) throw new Error('仅管理员可编辑店铺');
+          if (user.role !== 'super_admin') throw new Error('仅超级管理员可编辑店铺');
 
           const payload: Record<string, string | number | null> = {
             updated_at: new Date().toISOString(),
@@ -1081,6 +1434,8 @@ export const useAppStore = create<AppState>()(
           if (updates.contact !== undefined) payload.contact = updates.contact.trim() || null;
           if (updates.address !== undefined) payload.address = updates.address.trim() || null;
           if (updates.phone !== undefined) payload.phone = updates.phone.trim() || null;
+          if (updates.settlement_day !== undefined) payload.settlement_day = updates.settlement_day;
+          if (updates.cooperation_mode !== undefined) payload.cooperation_mode = updates.cooperation_mode;
           if (updates.status !== undefined) payload.status = updates.status;
 
           const { error } = await supabase.from('stores').update(payload).eq('id', id);
@@ -1256,6 +1611,8 @@ export const useAppStore = create<AppState>()(
             cost: unitCost,
             one_time_cost: Number(product.one_time_cost || 0),
             discount_price: Number(product.discount_price || product.price),
+            sku: product.sku?.trim() || null,
+            category: product.category?.trim() || null,
           };
           const { data, error } = await supabase.from('products').insert(payload).select().single();
           if (error) throw error;
@@ -1302,6 +1659,8 @@ export const useAppStore = create<AppState>()(
           const payload = {
             ...updates,
             cost: updates.cost !== undefined ? Number(updates.cost) : updates.cost,
+            sku: updates.sku !== undefined ? (updates.sku?.trim() || null) : updates.sku,
+            category: updates.category !== undefined ? (updates.category?.trim() || null) : updates.category,
             updated_at: new Date().toISOString(),
           };
           const { error } = await supabase.from('products').update(payload).eq('id', id);
@@ -1610,7 +1969,7 @@ export const useAppStore = create<AppState>()(
         if (!user) return { error: new Error('未登录') };
 
         try {
-          if (user.role !== 'admin') {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
             throw new Error('当前角色无结算建单权限');
           }
 
@@ -1826,6 +2185,75 @@ export const useAppStore = create<AppState>()(
         }
       },
 
+      createPurchaseOrder: async (items) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前角色无进货建单权限');
+          }
+
+          if (!Array.isArray(items) || items.length === 0) {
+            throw new Error('进货单为空');
+          }
+
+          const invalidGroup = items.find((group) => !group.store_id || !group.city_id || !Array.isArray(group.products) || group.products.length === 0);
+          if (invalidGroup) {
+            throw new Error('进货店铺或商品参数无效');
+          }
+
+          const invalidProduct = items
+            .flatMap((group) => group.products)
+            .find((product) => !product.product_id || product.quantity <= 0);
+          if (invalidProduct) {
+            throw new Error('进货商品数量必须大于0');
+          }
+
+          for (const group of items) {
+            const { error } = await supabase.rpc('create_purchase_order_atomic', {
+              p_user_id: user.id,
+              p_store_id: group.store_id,
+              p_city_id: group.city_id,
+              p_items: group.products,
+            });
+            if (error) throw error;
+          }
+
+          await get().fetchPurchaseOrders();
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      confirmPurchaseDelivery: async (orderId) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前角色无确认进货权限');
+          }
+          if (!orderId) throw new Error('订单ID不能为空');
+
+          const { error } = await supabase.rpc('confirm_purchase_delivery_atomic', {
+            p_order_id: orderId,
+            p_confirmed_by: user.id,
+          });
+          if (error) throw error;
+
+          await Promise.all([get().fetchPurchaseOrders(), get().fetchProducts()]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      fetchPurchaseOrders: async () => {
+        await get().fetchOrders();
+      },
+
       createBatchOrders: async (items, storeId = null) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
@@ -1871,8 +2299,8 @@ export const useAppStore = create<AppState>()(
             if (item.quantity <= 0) {
               throw new Error(`${product.name} 数量必须大于0`);
             }
-            if (!isSample && item.quantity % 5 !== 0) {
-              throw new Error(`${product.name} 数量必须是5的倍数`);
+            if (user.role === 'distributor' && !isSample && item.quantity < 30) {
+              throw new Error(`${product.name} 分销订单非样品数量必须大于等于30`);
             }
 
             const available = product.quantity ?? 0;

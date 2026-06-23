@@ -3,8 +3,11 @@ import { ArrowDown, ArrowUp, Bell, ChevronRight, LogOut, Mail, MapPin, Palette, 
 import type { LucideIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
+import { supabase } from '../lib/supabase';
 import { avatarLibrary } from '../constants/avatarLibrary';
+import { getProvinceForCity, getProvincesFromCities } from '../utils/provinceMapping';
 import { parseEmojiAvatar } from '../utils/avatar';
+import type { Notification } from '../types';
 import webPackage from '../../package.json';
 
 interface SectionItem {
@@ -16,16 +19,151 @@ interface SectionItem {
 }
 
 export const ProfileScreen: React.FC = () => {
-  const { user, cities, signOut, updateOwnProfile, updateOwnAvatar, moveCityOrder } = useAppStore();
+  const {
+    user,
+    cities,
+    notifications,
+    signOut,
+    fetchNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    updateOwnProfile,
+    updateOwnAvatar,
+    moveCityOrder,
+  } = useAppStore();
   const [showEditModal, setShowEditModal] = React.useState(false);
   const [showAvatarModal, setShowAvatarModal] = React.useState(false);
+  const [showNotificationModal, setShowNotificationModal] = React.useState(false);
   const [fullName, setFullName] = React.useState(user?.full_name || '');
   const [storeName, setStoreName] = React.useState(user?.store_name || '');
   const [sortingCityId, setSortingCityId] = React.useState<string | null>(null);
+  const [sortingProvince, setSortingProvince] = React.useState<string | null>(null);
+  const [provinceOrder, setProvinceOrder] = React.useState<string[]>([]);
+  const [provinceSortReady, setProvinceSortReady] = React.useState(false);
+  const unreadCount = notifications.filter((item) => !item.is_read).length;
+
+  React.useEffect(() => {
+    if (!user) return;
+    void fetchNotifications();
+  }, [user, fetchNotifications]);
+
+  const derivedProvinces = React.useMemo(() => {
+    const baseProvinces = getProvincesFromCities(cities);
+    return [...baseProvinces].sort((a, b) => {
+      const indexA = provinceOrder.indexOf(a);
+      const indexB = provinceOrder.indexOf(b);
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.localeCompare(b, 'zh-CN');
+    });
+  }, [cities, provinceOrder]);
+
+  const provinceCityCount = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    cities.forEach((city) => {
+      const province = city.province || getProvinceForCity(city.name) || '未知省份';
+      counts.set(province, (counts.get(province) || 0) + 1);
+    });
+    return counts;
+  }, [cities]);
+
+  const fetchProvinceOrder = React.useCallback(async (): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from('province_sort_orders')
+      .select('province, sort_index')
+      .order('sort_index', { ascending: true });
+
+    if (error || !data) {
+      setProvinceOrder([]);
+      setProvinceSortReady(false);
+      return false;
+    }
+
+    setProvinceOrder(data.map((row) => row.province));
+    return true;
+  }, []);
+
+  React.useEffect(() => {
+    const checkProvinceSortAvailability = async (): Promise<void> => {
+      if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+        setProvinceSortReady(false);
+        return;
+      }
+
+      const { data, error } = await supabase.rpc('get_app_schema_version');
+      if (error || !data) {
+        setProvinceSortReady(false);
+        return;
+      }
+
+      const [major = 0, minor = 0] = String(data)
+        .split('.')
+        .map((part) => Number(part) || 0);
+
+      const isReady = major > 5 || (major === 5 && minor >= 6);
+      if (isReady) {
+        const loaded = await fetchProvinceOrder();
+        setProvinceSortReady(loaded);
+        return;
+      }
+
+      setProvinceSortReady(false);
+    };
+
+    void checkProvinceSortAvailability();
+  }, [fetchProvinceOrder, user?.role]);
+
+  const moveProvinceOrder = React.useCallback(async (province: string, direction: 'up' | 'down'): Promise<void> => {
+    if (!provinceSortReady) {
+      window.alert('当前数据库版本未启用省份排序，请先执行 v5.6 迁移。');
+      return;
+    }
+
+    setSortingProvince(province);
+    try {
+      const { error } = await supabase.rpc('swap_province_sort_order', {
+        p_province: province,
+        p_direction: direction,
+      });
+
+      if (error) {
+        window.alert(`省份排序失败：${error.message}`);
+        return;
+      }
+
+      await fetchProvinceOrder();
+    } finally {
+      setSortingProvince(null);
+    }
+  }, [fetchProvinceOrder, provinceSortReady]);
 
   if (!user) return null;
 
   const selectedEmojiAvatar = parseEmojiAvatar(user.avatar_url);
+
+  const getNotificationMeta = React.useCallback((type: Notification['type']): { label: string; badgeClass: string } => {
+    switch (type) {
+      case 'new_order':
+        return { label: '新订单', badgeClass: 'bg-blue-500/15 text-blue-300 border-blue-400/30' };
+      case 'order_accepted':
+        return { label: '订单已接单', badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' };
+      case 'inventory_alert':
+        return { label: '库存告警', badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-400/30' };
+      case 'refund_requested':
+        return { label: '退款申请', badgeClass: 'bg-purple-500/15 text-purple-300 border-purple-400/30' };
+      case 'refund_approved':
+        return { label: '退款已批准', badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' };
+      case 'refund_rejected':
+        return { label: '退款已拒绝', badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-400/30' };
+      case 'refund_completed':
+        return { label: '退款完成', badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-400/30' };
+      case 'refund_failed':
+        return { label: '退款失败', badgeClass: 'bg-red-500/15 text-red-300 border-red-400/30' };
+      default:
+        return { label: type, badgeClass: 'bg-white/10 text-white/70 border-white/20' };
+    }
+  }, []);
 
   const handleSelectAvatar = async (avatarUrl: string): Promise<void> => {
     const { error } = await updateOwnAvatar(avatarUrl);
@@ -55,7 +193,17 @@ export const ProfileScreen: React.FC = () => {
     {
       title: '应用偏好',
       items: [
-        { label: '通知设置', icon: Bell, value: '已开启' },
+        {
+          label: '通知中心',
+          icon: Bell,
+          value: unreadCount > 0 ? `未读 ${unreadCount}` : '已读',
+          color: unreadCount > 0 ? 'text-amber-300' : 'text-white/40',
+          onClick: () => {
+            void fetchNotifications();
+            void markAllNotificationsRead();
+            setShowNotificationModal(true);
+          },
+        },
         { label: '主题外观', icon: Palette, value: '深色科技 (默认)' },
         { label: '通用设置', icon: Settings },
       ],
@@ -141,7 +289,7 @@ export const ProfileScreen: React.FC = () => {
         ))}
       </div>
 
-      {user.role === 'admin' && (
+      {(user.role === 'admin' || user.role === 'super_admin') && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -182,6 +330,60 @@ export const ProfileScreen: React.FC = () => {
                         const { error } = await moveCityOrder(city.id, 'down');
                         setSortingCityId(null);
                         if (error) window.alert(`下移失败：${error.message}`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                    >
+                      <ArrowDown size={14} />
+                      <span>下移</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
+
+      {(user.role === 'admin' || user.role === 'super_admin') && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4"
+        >
+          <h3 className="text-xs font-bold text-white/20 uppercase tracking-[0.2em] ml-4">省份排序管理</h3>
+          <div className="bg-white/5 border border-white/10 rounded-[32px] p-5 space-y-3">
+            {!provinceSortReady && (
+              <div className="bg-amber-500/10 border border-amber-400/30 rounded-2xl px-4 py-3 text-sm text-amber-200">
+                当前数据库版本未启用省份排序（需要执行 v5.6 迁移）。
+              </div>
+            )}
+            {provinceSortReady && derivedProvinces.map((province, index) => {
+              const isBusy = sortingProvince === province;
+              const canMoveUp = index > 0;
+              const canMoveDown = index < derivedProvinces.length - 1;
+              return (
+                <div key={province} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
+                  <div>
+                    <p className="font-semibold">{province}</p>
+                    <p className="text-xs text-white/40">排序位置：{index + 1} · {provinceCityCount.get(province) || 0} 个城市</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!canMoveUp || isBusy}
+                      onClick={() => {
+                        void moveProvinceOrder(province, 'up');
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                    >
+                      <ArrowUp size={14} />
+                      <span>上移</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canMoveDown || isBusy}
+                      onClick={() => {
+                        void moveProvinceOrder(province, 'down');
                       }}
                       className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white/70 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
                     >
@@ -274,6 +476,46 @@ export const ProfileScreen: React.FC = () => {
                   <span className="text-3xl">{item.emoji}</span>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotificationModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">通知中心</h3>
+              <button type="button" onClick={() => setShowNotificationModal(false)} className="px-3 py-1.5 rounded-xl bg-white/10">关闭</button>
+            </div>
+
+            <div className="max-h-[420px] overflow-auto space-y-3 pr-1">
+              {notifications.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-center text-white/50 text-sm">暂无通知</div>
+              ) : (
+                notifications.map((item) => {
+                  const meta = getNotificationMeta(item.type);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        if (!item.is_read) {
+                          void markNotificationRead(item.id);
+                        }
+                      }}
+                      className={`w-full text-left rounded-2xl border px-4 py-3 transition-colors ${item.is_read ? 'bg-white/5 border-white/10' : 'bg-accent/10 border-accent/30'}`}
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <span className={`text-[11px] font-bold uppercase tracking-wider border rounded-full px-2 py-0.5 ${meta.badgeClass}`}>{meta.label}</span>
+                        {!item.is_read && <span className="text-[10px] text-amber-300">未读</span>}
+                      </div>
+                      <p className="text-sm text-white/85 leading-6">{item.message}</p>
+                      <p className="text-xs text-white/40 mt-2">{new Date(item.created_at).toLocaleString('zh-CN')}</p>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

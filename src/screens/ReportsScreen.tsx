@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Buffer } from 'buffer';
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx-js-style';
 import { useShallow } from 'zustand/react/shallow';
 import { BarChart3, TrendingUp, Download, AlertTriangle } from 'lucide-react-native';
 import { BarChart, PieChart } from 'react-native-gifted-charts';
@@ -28,10 +27,75 @@ import type { City } from '../types';
 
 type ReportType = 'sales' | 'supply' | 'inventory' | 'profit';
 
+type SheetCellValue = string | number | null;
+type SheetRow = Array<SheetCellValue>;
+
+const createStyledWorksheet = (headers: string[], rows: SheetRow[]): XLSX.WorkSheet => {
+  const allRows = [headers, ...rows];
+  const worksheet = XLSX.utils.aoa_to_sheet(allRows);
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+
+  for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+    for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex += 1) {
+      const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+      const cell = worksheet[cellAddress] || { t: 's', v: '' };
+      cell.s = { alignment: { horizontal: 'center', vertical: 'center' } };
+      worksheet[cellAddress] = cell;
+    }
+  }
+
+  worksheet['!cols'] = headers.map((header, index) => {
+    let maxLen = header.length * 2;
+    rows.forEach((row) => {
+      const len = String(row[index] ?? '').length;
+      if (len > maxLen) maxLen = len;
+    });
+    return { wch: Math.max(maxLen + 2, 10) };
+  });
+
+  return worksheet;
+};
+
+const appendStyledSheet = (workbook: XLSX.WorkBook, sheetName: string, headers: string[], rows: SheetRow[]): void => {
+  const worksheet = createStyledWorksheet(headers, rows);
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+};
+
+const shareStyledWorkbook = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
+  const workbookBase64 = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64', cellStyles: true });
+  const uri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(uri, workbookBase64, { encoding: FileSystem.EncodingType.Base64 });
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+};
+
+const isShareCancelledError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase();
+  return message.includes('cancel')
+    || message.includes('dismiss')
+    || message.includes('did not share')
+    || message.includes('didn\'t share');
+};
+
 const CHART_COLORS = ['#FF6B9D', '#5B8DEF', '#C77DFF', '#4ECDC4', '#FFB347'];
 
 export default function ReportsScreen() {
-  const { user, products, orders, stores, storeInventory, fetchProducts, fetchOrders, fetchStores, fetchStoreInventory } = useAppStore(
+  const {
+    user,
+    products,
+    orders,
+    stores,
+    storeInventory,
+    fetchProducts,
+    fetchOrders,
+    fetchStores,
+    fetchStoreInventory,
+    fetchAllStoreInventory,
+    generateCityChannelReport,
+    generateProductDetailReport,
+    generatePaymentReport,
+  } = useAppStore(
     useShallow((state) => ({
       user: state.user,
       products: state.products,
@@ -42,6 +106,10 @@ export default function ReportsScreen() {
       fetchOrders: state.fetchOrders,
       fetchStores: state.fetchStores,
       fetchStoreInventory: state.fetchStoreInventory,
+      fetchAllStoreInventory: state.fetchAllStoreInventory,
+      generateCityChannelReport: state.generateCityChannelReport,
+      generateProductDetailReport: state.generateProductDetailReport,
+      generatePaymentReport: state.generatePaymentReport,
     })),
   );
   const [reportType, setReportType] = useState<ReportType>('sales');
@@ -58,6 +126,7 @@ export default function ReportsScreen() {
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const [floatingProductName, setFloatingProductName] = useState('');
+  const exportLocks = useRef({ profitExcel: false, profitPdf: false, business: false });
 
   const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
     if (order.city_id) return order.city_id;
@@ -478,14 +547,12 @@ export default function ReportsScreen() {
   }, [revenueScopedOrders]);
 
   const exportProfitExcel = async () => {
+    if (exportLocks.current.profitExcel) return;
+    exportLocks.current.profitExcel = true;
     try {
-      await import('../polyfills/globals');
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('利润报表');
-      const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
-
+      const workbook = XLSX.utils.book_new();
       const headers = ['商品名称', '销量', '零售价', '零售总价', '折扣价', '折扣总收入', '总成本', '总利润'];
-      const dataRows = profitData.profitByProduct.map((r) => [
+      const dataRows: SheetRow[] = profitData.profitByProduct.map((r) => [
         r.name,
         r.quantity,
         Number(r.retailPrice.toFixed(2)),
@@ -495,42 +562,21 @@ export default function ReportsScreen() {
         Number(r.cost.toFixed(2)),
         Number(r.profit.toFixed(2)),
       ]);
-
-      const columnWidths = headers.map((header, colIdx) => {
-        let maxLen = header.length * 2;
-        dataRows.forEach((row) => {
-          const len = String(row[colIdx]).length;
-          if (len > maxLen) maxLen = len;
-        });
-        return Math.max(maxLen + 2, 10);
-      });
-
-      worksheet.columns = columnWidths.map((width) => ({ width }));
-      worksheet.addRow(headers);
-      dataRows.forEach((row) => {
-        worksheet.addRow(row);
-      });
-      worksheet.eachRow((row) => {
-        row.eachCell((cell) => {
-          cell.alignment = centered;
-        });
-      });
-
-      const workbookBuffer = await workbook.xlsx.writeBuffer({ useStyles: true });
-      const base64 = Buffer.from(workbookBuffer).toString('base64');
+      appendStyledSheet(workbook, '利润报表', headers, dataRows);
       const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-      const uri = `${FileSystem.cacheDirectory}profit-report${monthSuffix}-${Date.now()}.xlsx`;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
+      await shareStyledWorkbook(workbook, `profit-report${monthSuffix}-${Date.now()}.xlsx`);
     } catch (error: unknown) {
+      if (isShareCancelledError(error)) return;
       const message = error instanceof Error ? error.message : 'Excel 导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
+    } finally {
+      exportLocks.current.profitExcel = false;
     }
   };
 
   const exportProfitPdf = async () => {
+    if (exportLocks.current.profitPdf) return;
+    exportLocks.current.profitPdf = true;
     try {
       const rows = profitData.profitByProduct
         .map(
@@ -569,8 +615,86 @@ export default function ReportsScreen() {
       await FileSystem.moveAsync({ from: uri, to: newUri });
       await Sharing.shareAsync(newUri, { mimeType: 'application/pdf' });
     } catch (error: unknown) {
+      if (isShareCancelledError(error)) return;
       const message = error instanceof Error ? error.message : 'PDF 导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
+    } finally {
+      exportLocks.current.profitPdf = false;
+    }
+  };
+
+  const exportBusinessData = async () => {
+    if (exportLocks.current.business) return;
+    exportLocks.current.business = true;
+    try {
+      await fetchAllStoreInventory();
+      const workbook = XLSX.utils.book_new();
+  
+      const cityHeaders = ['序号', '城市', '城市分级', '渠道门店名称', '合作模式', '月总销售件数', '上月同期销量', '环比增长率', '供货营收', '库存总货值', 'sku动销率', '结算账期'];
+      const cityRows: SheetRow[] = generateCityChannelReport().map((row) => [
+        row.序号,
+        row.城市,
+        row.城市分级,
+        row.渠道门店名称,
+        row.合作模式,
+        row.月总销售件数,
+        row.上月同期销量,
+        row.环比增长率,
+        row.供货营收,
+        row.库存总货值,
+        row.sku动销率,
+        row.结算账期,
+      ]);
+  
+      const detailHeaders = ['序号', '城市', '渠道门店', 'SKU编号', '产品名称', '品类', '单位成本', '供货价', '终端售价', '当前实物库存', '预留库存', '总可用库存', '安全库存阈值', '本月销量', '上月销量', '库存周转天数', '滞销标记', '单品毛利'];
+      const detailRows: SheetRow[] = generateProductDetailReport().map((row) => [
+        row.序号,
+        row.城市,
+        row.渠道门店,
+        row.SKU编号,
+        row.产品名称,
+        row.品类,
+        row.单位成本,
+        row.供货价,
+        row.终端售价,
+        row.当前实物库存,
+        row.预留库存,
+        row.总可用库存,
+        row.安全库存阈值,
+        row.本月销量,
+        row.上月销量,
+        row.库存周转天数,
+        row.滞销标记,
+        row.单品毛利,
+      ]);
+  
+      const paymentHeaders = ['序号', '城市渠道', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'];
+      const paymentRows: SheetRow[] = generatePaymentReport().map((row) => [
+        row.序号,
+        row.城市渠道,
+        row.对账周期,
+        row.应收货款,
+        row.已回款金额,
+        row.未结欠款,
+        row.逾期天数,
+        row.渠道扣点费用,
+        row.实际毛利额,
+        row.回款状态,
+      ]);
+  
+      appendStyledSheet(workbook, '文创工作室多城市渠道库存&销售汇总表', cityHeaders, cityRows);
+      appendStyledSheet(workbook, '文创单品多城市库存&销售明细表', detailHeaders, detailRows);
+      appendStyledSheet(workbook, '文创渠道回款对账表', paymentHeaders, paymentRows);
+
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      await shareStyledWorkbook(workbook, `云窗渠道库存销售管理表-${timestamp}.xlsx`);
+    } catch (error: unknown) {
+      if (isShareCancelledError(error)) return;
+      const message = error instanceof Error ? error.message : '经营数据导出失败';
+      Toast.show({ type: 'error', text1: '导出失败', text2: message });
+    } finally {
+      exportLocks.current.business = false;
     }
   };
 
@@ -927,13 +1051,17 @@ export default function ReportsScreen() {
       </View>
 
       <View style={styles.exportRow}>
-        <TouchableOpacity style={styles.exportButton} onPress={exportProfitExcel}>
+        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportProfitExcel(); }}>
           <Download size={14} color="#fff" />
           <Text style={styles.exportButtonText}>导出 Excel</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.exportButton} onPress={exportProfitPdf}>
+        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportProfitPdf(); }}>
           <Download size={14} color="#fff" />
           <Text style={styles.exportButtonText}>导出 PDF</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportBusinessData(); }}>
+          <Download size={14} color="#fff" />
+          <Text style={styles.exportButtonText}>导出经营数据</Text>
         </TouchableOpacity>
       </View>
 

@@ -32,6 +32,8 @@ export interface Product {
   barcode?: string;
   image_url?: string;
   city_id: string;
+  sku?: string | null;
+  category?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +57,8 @@ export interface Store {
   contact?: string;
   address?: string;
   phone?: string;
+  settlement_day?: number | null;
+  cooperation_mode?: 'consignment' | 'buyout' | 'direct' | null;
   status: 'active' | 'inactive';
   created_at: string;
   updated_at: string;
@@ -66,6 +70,7 @@ export interface StoreInventory {
   product_id: string;
   product_name?: string;
   quantity: number;
+  min_quantity?: number;
   updated_at: string;
 }
 
@@ -141,6 +146,8 @@ export interface ProductCreateInput {
   discount_price: number;
   city_id: string;
   image_url?: string;
+  sku?: string | null;
+  category?: string | null;
 }
 
 export interface InventoryLog {
@@ -179,7 +186,7 @@ export interface InventoryReport {
 
 export type OrderStatus = 'pending' | 'accepted';
 
-export type OrderKind = 'distribution' | 'retail' | 'settlement';
+export type OrderKind = 'distribution' | 'retail' | 'settlement' | 'purchase';
 
 export type NotificationType =
   | 'new_order'
@@ -188,7 +195,8 @@ export type NotificationType =
   | 'refund_approved'
   | 'refund_rejected'
   | 'refund_completed'
-  | 'refund_failed';
+  | 'refund_failed'
+  | 'inventory_alert';
 
 export interface Notification {
   id: string;

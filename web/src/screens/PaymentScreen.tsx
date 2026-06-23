@@ -44,6 +44,18 @@ interface ActiveOrderItemDraft {
   discountPrice: number;
   draftDiscountPrice: string;
 }
+const playSuccessSpeech = (amount: number): void => {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      const utterance = new SpeechSynthesisUtterance(`收款成功，金额${amount}元`);
+      utterance.lang = 'zh-CN';
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      // degrade silently
+    }
+  }
+};
+
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
 const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
@@ -397,7 +409,7 @@ export const PaymentScreen: React.FC = () => {
     }
   };
 
-  const pollUntilSettled = useCallback(async (orderId: string): Promise<void> => {
+  const pollUntilSettled = useCallback(async (orderId: string, amount: number): Promise<void> => {
     for (let index = 0; index < 30; index += 1) {
       const latest = await queryPaymentStatus(orderId);
       setStatus(latest.status);
@@ -407,6 +419,7 @@ export const PaymentScreen: React.FC = () => {
 
       if (latest.status === 'paid') {
         setStatusMessage('收款成功，订单已标记为已支付');
+        playSuccessSpeech(amount);
         return;
       }
 
@@ -485,11 +498,12 @@ export const PaymentScreen: React.FC = () => {
       if (result.status === 'paid') {
         setStatusMessage('收款成功，订单已完成支付');
         setCart(new Map());
+        playSuccessSpeech(activeOrder.amount);
         return;
       }
 
       setStatusMessage('支付处理中，正在查询最终状态...');
-      await pollUntilSettled(activeOrder.id);
+      await pollUntilSettled(activeOrder.id, activeOrder.amount);
     } catch (error) {
       bumpDiagnostics({ rejectedAttempts: 1 });
       pushScanEvent({ target: scanTargetRef.current, code: authCode, result: 'reject_collect_exception' });
@@ -760,7 +774,7 @@ export const PaymentScreen: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white/5 border border-white/10 rounded-3xl p-5 space-y-4">
           <div className="flex items-center gap-2 text-white/80">
             <ScanLine size={18} />

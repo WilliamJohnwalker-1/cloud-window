@@ -55,6 +55,7 @@ export default function OrdersScreen() {
     createBatchOrders,
     deleteOrder,
     acceptOrder,
+    confirmPurchaseDelivery,
     findProductByBarcode,
     outboundStock,
   } = useAppStore();
@@ -67,6 +68,7 @@ export default function OrdersScreen() {
   const [selectedOrderCityId, setSelectedOrderCityId] = useState<string | null>(null);
   const [selectedOrderProvinceId, setSelectedOrderProvinceId] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [confirmingPurchaseOrderId, setConfirmingPurchaseOrderId] = useState<string | null>(null);
   const [selectedOrderStoreId, setSelectedOrderStoreId] = useState<string | null>(null);
   const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
@@ -103,18 +105,22 @@ export default function OrdersScreen() {
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isAdminOrManager = isAdmin || user?.role === 'inventory_manager';
-  const isOnlyAdmin = user?.role === 'admin';
+  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin';
+  const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
+  const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
 
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
     if (kind === 'retail') return '零售单';
     if (kind === 'settlement') return '结算单';
+    if (kind === 'purchase') return '进货单';
     return '供货单';
   };
 
   const getOrderTotalLabel = (kind: Order['order_kind']): string => {
     if (kind === 'retail') return '收款总价';
     if (kind === 'settlement') return '结算总价';
+    if (kind === 'purchase') return '进货总价';
     return '折扣总价';
   };
 
@@ -406,7 +412,7 @@ export default function OrdersScreen() {
   }, [isAdminOrManager, selectedOrderProvinceId, selectedOrderCityId, selectedOrderStoreId, selectedOrderKind, statsRange]);
 
   const getCartKey = (productId: string, lineType: 'sale' | 'sample'): string => `${productId}:${lineType}`;
-  const getLineStep = (lineType: 'sale' | 'sample'): number => (lineType === 'sample' ? 1 : 5);
+  const getLineStep = (_lineType: 'sale' | 'sample'): number => 1;
   const getCombinedQtyByProduct = (entries: Map<string, CartItem>, productId: string): number => {
     let total = 0;
     entries.forEach((item) => {
@@ -469,8 +475,8 @@ export default function OrdersScreen() {
       Toast.show({ type: 'error', text1: '错误', text2: '请输入有效数量' });
       return;
     }
-    if (!isSample && qty % 5 !== 0) {
-      Toast.show({ type: 'error', text1: '错误', text2: '数量必须是5的倍数' });
+    if (!isSample && user?.role === 'distributor' && qty < 30) {
+      Toast.show({ type: 'error', text1: '错误', text2: '分销订单非样品数量必须大于等于30' });
       return;
     }
     const combinedWithoutCurrent = getCombinedQtyByProduct(cart, product.id) - (currentItem?.quantity || 0);
@@ -547,14 +553,15 @@ export default function OrdersScreen() {
       return;
     }
 
-    // Validate all items are multiples of 5
-    const invalidItems = cartItems.filter((item) => !item.isSample && item.quantity % 5 !== 0);
+    const invalidItems = cartItems.filter((item) => !item.isSample && item.quantity < minSaleQuantity);
     if (invalidItems.length > 0) {
       const invalidNames = invalidItems.map((item) => `${item.product.name}(${item.quantity})`).join(', ');
       Toast.show({ 
         type: 'error', 
         text1: '下单失败', 
-        text2: `以下商品数量不是5的倍数: ${invalidNames}` 
+        text2: user?.role === 'distributor'
+          ? `以下商品非样品数量小于30: ${invalidNames}`
+          : `以下商品数量必须大于0: ${invalidNames}`,
       });
       return;
     }
@@ -595,6 +602,19 @@ export default function OrdersScreen() {
         },
       },
     ]);
+  };
+
+  const handleConfirmPurchaseDelivery = async (order: Order) => {
+    setConfirmingPurchaseOrderId(order.id);
+    const { error } = await confirmPurchaseDelivery(order.id);
+    setConfirmingPurchaseOrderId(null);
+
+    if (error) {
+      Toast.show({ type: 'error', text1: '确认到货失败', text2: error.message });
+      return;
+    }
+
+    Toast.show({ type: 'success', text1: '成功', text2: '进货单已确认到货' });
   };
 
   const handleOutboundBarcodeLookup = (rawCode?: string) => {
@@ -652,6 +672,11 @@ export default function OrdersScreen() {
       const workbook = new ExcelJS.Workbook();
       const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
 
+      const sanitizeSheetName = (name: string): string => {
+        const base = name.replace(/[\\/?*\[\]:]/g, '-').trim() || '未命名店铺';
+        return base.slice(0, 31);
+      };
+
       const saveWorkbook = async (filename: string): Promise<void> => {
         const workbookBuffer = await workbook.xlsx.writeBuffer({ useStyles: true });
 
@@ -679,6 +704,66 @@ export default function OrdersScreen() {
           mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
       };
+
+      if (order.order_kind === 'purchase') {
+        const sourceOrders = filteredOrders.filter((item) => item.order_kind === 'purchase');
+        const purchaseOrders = sourceOrders.length > 0 ? sourceOrders : [order];
+        const grouped = new Map<string, { storeName: string; rows: Array<{ productName: string; quantity: number; unitCost: number }> }>();
+
+        purchaseOrders.forEach((purchaseOrder) => {
+          const storeName = purchaseOrder.store_name || '未指定店铺';
+          const key = storeName;
+          const target = grouped.get(key) || { storeName, rows: [] };
+          purchaseOrder.items.forEach((item) => {
+            target.rows.push({
+              productName: item.product_name || '未知商品',
+              quantity: Number(item.quantity || 0),
+              unitCost: Number(item.unit_cost || 0),
+            });
+          });
+          grouped.set(key, target);
+        });
+
+        const usedSheetNames = new Set<string>();
+        Array.from(grouped.values()).forEach((group) => {
+          let sheetName = sanitizeSheetName(group.storeName);
+          if (usedSheetNames.has(sheetName)) {
+            let index = 2;
+            while (usedSheetNames.has(`${sheetName.slice(0, 28)}-${index}`)) {
+              index += 1;
+            }
+            sheetName = `${sheetName.slice(0, 28)}-${index}`;
+          }
+          usedSheetNames.add(sheetName);
+
+          const worksheet = workbook.addWorksheet(sheetName);
+          worksheet.columns = [
+            { width: 8 },
+            { width: 26 },
+            { width: 12 },
+            { width: 12 },
+          ];
+          worksheet.addRow(['序号', '商品名称', '数量', '成本价']);
+
+          group.rows.forEach((row, index) => {
+            worksheet.addRow([
+              index + 1,
+              row.productName,
+              row.quantity,
+              Number(row.unitCost.toFixed(2)),
+            ]);
+          });
+
+          worksheet.eachRow((row) => {
+            row.eachCell((cell) => {
+              cell.alignment = centered;
+            });
+          });
+        });
+
+        await saveWorkbook(`purchase-orders-${Date.now()}.xlsx`);
+        return;
+      }
 
       if (order.order_kind === 'distribution') {
         const boundStore = order.store_id ? stores.find((store) => store.id === order.store_id) : null;
@@ -791,8 +876,13 @@ export default function OrdersScreen() {
     }
   };
 
-  const totalRetail = filteredOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
-  const totalDiscount = filteredOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
+  const summaryOrders = selectedOrderKind === 'purchase'
+    ? filteredOrders
+    : filteredOrders.filter((order) => order.order_kind !== 'purchase');
+  const totalRetail = summaryOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
+  const totalDiscount = summaryOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
+  const summaryRetailLabel = selectedOrderKind === 'purchase' ? '进货成本' : '零售总价';
+  const summaryDiscountLabel = selectedOrderKind === 'purchase' ? '进货总价' : '折扣总价';
 
   const renderOrder = ({ item }: { item: Order }) => (
     <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
@@ -844,7 +934,7 @@ export default function OrdersScreen() {
           <Download size={14} color={Colors.blue} />
           <Text style={styles.exportButtonText}>导出</Text>
         </TouchableOpacity>
-        {isAdmin && item.status === 'pending' && (
+        {isAdmin && item.status === 'pending' && item.order_kind !== 'purchase' && (
           <TouchableOpacity
             style={styles.acceptOrderButton}
             onPress={async () => {
@@ -855,9 +945,23 @@ export default function OrdersScreen() {
             <Text style={styles.acceptOrderButtonText}>接单</Text>
           </TouchableOpacity>
         )}
+        {canConfirmPurchase && item.status === 'pending' && item.order_kind === 'purchase' && (
+          <TouchableOpacity
+            style={[styles.acceptOrderButton, confirmingPurchaseOrderId === item.id && styles.deleteOrderButtonDisabled]}
+            onPress={() => handleConfirmPurchaseDelivery(item)}
+            disabled={confirmingPurchaseOrderId === item.id}
+          >
+            <Text style={styles.acceptOrderButtonText}>{confirmingPurchaseOrderId === item.id ? '确认中...' : '确认到货'}</Text>
+          </TouchableOpacity>
+        )}
+        {item.status === 'pending' && item.order_kind === 'purchase' && !canConfirmPurchase && (
+          <View style={styles.pendingTag}>
+            <Text style={styles.pendingTagText}>待到货</Text>
+          </View>
+        )}
         {item.status === 'accepted' && (
           <View style={styles.acceptedTag}>
-            <Text style={styles.acceptedTagText}>已接单</Text>
+            <Text style={styles.acceptedTagText}>{item.order_kind === 'purchase' ? '已到货' : '已接单'}</Text>
           </View>
         )}
         {isAdmin && item.status === 'accepted' && item.order_kind === 'distribution' && item.store_id && (
@@ -963,7 +1067,7 @@ export default function OrdersScreen() {
             ) : <Text style={styles.qtyEmpty}>0</Text>}
             <TouchableOpacity onPress={() => addToCart(item, 'sale')} activeOpacity={0.85}>
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qtyBtnAdd}>
-                <Text style={styles.qtyBtnAddText}>+5</Text>
+                <Text style={styles.qtyBtnAddText}>+1</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -1015,7 +1119,7 @@ export default function OrdersScreen() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>销售订单</Text>
         <View style={styles.headerActions}>
-          {isOnlyAdmin && (
+          {canCreateSettlement && (
             <TouchableOpacity
               onPress={() => {
                 setRetailStoreId(null);
@@ -1067,11 +1171,11 @@ export default function OrdersScreen() {
         </View>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{totalRetail.toFixed(2)}元</Text>
-          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>零售总价</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{summaryRetailLabel}</Text>
         </View>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryValue}>{totalDiscount.toFixed(2)}元</Text>
-          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>折扣总价</Text>
+          <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>{summaryDiscountLabel}</Text>
         </View>
       </View>
 
@@ -1301,6 +1405,7 @@ export default function OrdersScreen() {
                     { key: 'distribution', label: '供货单' },
                     { key: 'settlement', label: '结算单' },
                     { key: 'retail', label: '零售单' },
+                    { key: 'purchase', label: '进货单' },
                   ] as Array<{ key: OrderKind; label: string }>
                 ).map((item) => (
                   <TouchableOpacity
@@ -2228,6 +2333,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   acceptedTagText: { color: Colors.success, fontSize: 11, fontWeight: '600' },
+  pendingTag: {
+    backgroundColor: Colors.warningBg,
+    borderRadius: Radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  pendingTagText: { color: Colors.warning, fontSize: 11, fontWeight: '600' },
   emptyContainer: { alignItems: 'center', paddingTop: 60 },
   emptyContainerModal: { alignItems: 'center', paddingTop: 40 },
   emptyText: { textAlign: 'center', color: Colors.textTertiary, marginTop: 12, fontSize: 14 },
