@@ -22,6 +22,7 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
+import { useProductSeriesStore } from '../store/useProductSeriesStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { encodeEAN13Bars } from '../utils/barcode';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
@@ -81,6 +82,15 @@ export default function ProductsScreen() {
       user: state.user,
     })),
   );
+  const {
+    series,
+    fetchSeries,
+  } = useProductSeriesStore(
+    useShallow((state) => ({
+      series: state.series,
+      fetchSeries: state.fetchSeries,
+    })),
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithDetails | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -98,6 +108,7 @@ export default function ProductsScreen() {
   const [filterCityId, setFilterCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [customStorePrice, setCustomStorePrice] = useState('');
+  const [selectedSeriesId, setSelectedSeriesId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [hasPinnedOwnCity, setHasPinnedOwnCity] = useState(false);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
@@ -126,10 +137,11 @@ export default function ProductsScreen() {
 
   useEffect(() => {
     fetchCities();
+    fetchSeries();
     if (user?.role === 'admin' || user?.role === 'super_admin') {
       fetchStores();
     }
-  }, [fetchCities, fetchStores, user?.role]);
+  }, [fetchCities, fetchSeries, fetchStores, user?.role]);
 
   useEffect(() => {
     if (isDistributor && user?.city_id && !hasPinnedOwnCity) {
@@ -177,6 +189,7 @@ export default function ProductsScreen() {
     setSku('');
     setCategory('');
     setSelectedCity('');
+    setSelectedSeriesId('');
     setImageUrl('');
     setEditingProduct(null);
     setSelectedStoreId('');
@@ -200,6 +213,7 @@ export default function ProductsScreen() {
     setOneTimeCost(product.one_time_cost?.toString() || '');
     setSku(product.sku || '');
     setCategory(product.category || '');
+    setSelectedSeriesId(product.series_id || '');
     setSelectedCity(product.city_id);
     setImageUrl(product.image_url || '');
     setModalVisible(true);
@@ -224,6 +238,7 @@ export default function ProductsScreen() {
       discount_price: parseFloat(price) || 0,
       sku: sku.trim() || null,
       category: category.trim() || null,
+      series_id: selectedSeriesId || null,
       city_id: selectedCity,
       image_url: imageUrl,
     };
@@ -376,10 +391,11 @@ export default function ProductsScreen() {
       </View>
         <View style={styles.productInfo}>
         <Text style={[styles.productName, { color: theme.textPrimary }]}>{item.name}</Text>
-        {(item.sku || item.category) ? (
-          <Text style={[styles.productMeta, { color: theme.textSecondary }]}>
+        {(item.sku || item.category || item.series_name) ? (
+          <Text style={[styles.productMeta, { color: theme.textSecondary }]}> 
             {item.sku ? `SKU: ${item.sku}` : 'SKU: -'}
             {item.category ? `  品类: ${item.category}` : ''}
+            {item.series_name ? `  系列: ${item.series_name}` : ''}
           </Text>
         ) : null}
         <View style={styles.cityRow}>
@@ -538,6 +554,37 @@ export default function ProductsScreen() {
                   placeholder="可选，纯文本"
                   placeholderTextColor={theme.textTertiary}
                 />
+              </View>
+
+              <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>商品系列</Text>
+              <View style={styles.cityList}>
+                <TouchableOpacity
+                  style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedSeriesId === '' && styles.cityItemSelected]}
+                  onPress={() => setSelectedSeriesId('')}
+                >
+                  {selectedSeriesId === '' ? (
+                    <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalCityGradientChip}>
+                      <Text style={styles.cityItemTextSelected}>不设置</Text>
+                    </LinearGradient>
+                  ) : (
+                    <Text style={[styles.cityItemText, { color: theme.textSecondary }]}>不设置</Text>
+                  )}
+                </TouchableOpacity>
+                {series.map((seriesItem) => (
+                  <TouchableOpacity
+                    key={seriesItem.id}
+                    style={[styles.cityItem, { backgroundColor: theme.surfaceSecondary }, selectedSeriesId === seriesItem.id && styles.cityItemSelected]}
+                    onPress={() => setSelectedSeriesId(seriesItem.id)}
+                  >
+                    {selectedSeriesId === seriesItem.id ? (
+                      <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalCityGradientChip}>
+                        <Text style={styles.cityItemTextSelected}>{seriesItem.name}</Text>
+                      </LinearGradient>
+                    ) : (
+                      <Text style={[styles.cityItemText, { color: theme.textSecondary }]}>{seriesItem.name}</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
               </View>
 
               {!isDistributor && (

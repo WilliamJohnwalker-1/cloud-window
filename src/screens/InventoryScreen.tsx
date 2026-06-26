@@ -394,6 +394,20 @@ export default function InventoryScreen() {
             </View>
           </View>
         </View>
+        <View style={[styles.stockInfo, { marginTop: -4 }]}>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>成本价</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{item.cost ?? 0}</Text>
+          </View>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>结算价</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{item.discount_price ?? 0}</Text>
+          </View>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>库存价值</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{((item.cost ?? 0) * (item.quantity ?? 0)).toFixed(2)}</Text>
+          </View>
+        </View>
 
         {isAdminOrManager && (
           <View style={styles.actions}>
@@ -435,6 +449,7 @@ export default function InventoryScreen() {
   };
 
   const renderStoreInventoryItem = ({ item }: { item: StoreInventory }) => {
+    const product = products.find(p => p.id === item.product_id);
     const openStoreInventoryEditor = () => {
       if (!isSuperAdmin) return;
       setEditingStoreInventoryItem(item);
@@ -468,6 +483,20 @@ export default function InventoryScreen() {
             <Text style={[styles.stockValue, { color: theme.textPrimary }]}>
               {item.quantity ?? 0}
             </Text>
+          </View>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>成本价</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{product?.cost ?? 0}</Text>
+          </View>
+          <View style={styles.stockItem}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>结算价</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{product?.discount_price ?? 0}</Text>
+          </View>
+        </View>
+        <View style={[styles.stockInfo, { marginTop: -4, justifyContent: 'flex-start' }]}>
+          <View style={[styles.stockItem, { marginRight: 40 }]}>
+            <Text style={[styles.stockLabel, { color: theme.textTertiary }]}>库存价值</Text>
+            <Text style={[styles.stockValue, { color: theme.textPrimary, fontSize: 16 }]}>¥{((product?.cost ?? 0) * (item.quantity ?? 0)).toFixed(2)}</Text>
           </View>
         </View>
 
@@ -512,6 +541,18 @@ export default function InventoryScreen() {
 
   const totalStock = cityFilteredProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
   const lowStockCount = lowStockProducts.length;
+
+  const currentTotalStock = viewMode === 'main' 
+    ? totalStock
+    : filteredStoreInventory.reduce((sum, item) => sum + (item.quantity || 0), 0);
+
+  const totalCostValue = viewMode === 'main'
+    ? cityFilteredProducts.reduce((sum, p) => sum + (p.cost || 0) * (p.quantity || 0), 0)
+    : filteredStoreInventory.reduce((sum, item) => sum + (products.find(p => p.id === item.product_id)?.cost || 0) * (item.quantity || 0), 0);
+
+  const totalSettlementValue = viewMode === 'main'
+    ? cityFilteredProducts.reduce((sum, p) => sum + (p.discount_price || 0) * (p.quantity || 0), 0)
+    : filteredStoreInventory.reduce((sum, item) => sum + (products.find(p => p.id === item.product_id)?.discount_price || 0) * (item.quantity || 0), 0);
 
   const handleSaveStoreInventoryQuantity = async () => {
     if (!isSuperAdmin || !editingStoreInventoryItem || !selectedStoreId) return;
@@ -685,6 +726,16 @@ export default function InventoryScreen() {
               <Text style={styles.summaryLabel}>库存不足</Text>
             </View>
           </View>
+          <View style={[styles.summary, { backgroundColor: theme.surface, borderTopWidth: 0, paddingTop: 0 }] }>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>¥{totalCostValue.toFixed(2)}</Text>
+              <Text style={styles.summaryLabel}>库存价值(成本)</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>¥{totalSettlementValue.toFixed(2)}</Text>
+              <Text style={styles.summaryLabel}>库存价值(结算)</Text>
+            </View>
+          </View>
 
           <View style={[styles.filterRow, { backgroundColor: theme.surface }]}>
             {renderFilterButton('all', '全部')}
@@ -722,6 +773,26 @@ export default function InventoryScreen() {
         </>
       ) : (
         <>
+          <View style={[styles.summary, { backgroundColor: theme.surface, borderTopColor: theme.border }] }>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>{filteredStoreInventory.length}</Text>
+              <Text style={styles.summaryLabel}>商品种类</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>{currentTotalStock}</Text>
+              <Text style={styles.summaryLabel}>总库存</Text>
+            </View>
+          </View>
+          <View style={[styles.summary, { backgroundColor: theme.surface, borderTopWidth: 0, paddingTop: 0 }] }>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>¥{totalCostValue.toFixed(2)}</Text>
+              <Text style={styles.summaryLabel}>库存价值(成本)</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>¥{totalSettlementValue.toFixed(2)}</Text>
+              <Text style={styles.summaryLabel}>库存价值(结算)</Text>
+            </View>
+          </View>
           <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary, marginTop: 10 }] }>
             <Search size={18} color={theme.textTertiary} />
             <TextInput
@@ -1129,7 +1200,7 @@ const styles = StyleSheet.create({
   summary: {
     flexDirection: 'row',
     backgroundColor: Colors.surface,
-    paddingVertical: 15,
+    paddingVertical: 10,
     marginBottom: 8,
     borderTopWidth: 1,
     borderTopColor: Colors.borderLight,
@@ -1142,10 +1213,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dangerBg,
     borderRadius: Radius.sm,
     marginHorizontal: 4,
-    paddingVertical: 8,
+    paddingVertical: 5,
   },
   summaryValue: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
@@ -1153,9 +1224,9 @@ const styles = StyleSheet.create({
     color: Colors.danger,
   },
   summaryLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.textSecondary,
-    marginTop: 4,
+    marginTop: 2,
   },
   filterRow: {
     flexDirection: 'row',

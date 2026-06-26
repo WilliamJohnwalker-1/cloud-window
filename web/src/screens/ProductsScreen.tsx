@@ -1,22 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Filter, Package, Plus } from 'lucide-react';
+import { Edit2, Filter, Package, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { BarcodePreview } from '../components/BarcodePreview';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
+import { useProductSeriesStore } from '../store/useProductSeriesStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
+import { canEditProductSeries } from '../utils/permissions';
 
 export const ProductsScreen: React.FC = () => {
   const { user, cities, products, stores, storeProductPrices, fetchStores, fetchStoreProductPrices, setStoreProductPrice, addProduct, updateProduct, fetchProducts } = useAppStore();
+  const { series, isLoading: seriesLoading, fetchSeries, addSeries, updateSeries, deleteSeries } = useProductSeriesStore();
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const canManageSeries = canEditProductSeries(user?.role);
 
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [provinceFilter, setProvinceFilter] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showSeriesModal, setShowSeriesModal] = useState(false);
   const [showPricingPanel, setShowPricingPanel] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('');
   const [customStorePrice, setCustomStorePrice] = useState<string>('');
+  const [seriesName, setSeriesName] = useState<string>('');
+  const [seriesSortIndex, setSeriesSortIndex] = useState<string>('');
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -25,6 +33,7 @@ export const ProductsScreen: React.FC = () => {
     city_id: '',
     sku: '',
     category: '',
+    series_id: '',
   });
 
   useEffect(() => {
@@ -32,6 +41,10 @@ export const ProductsScreen: React.FC = () => {
       fetchStores();
     }
   }, [isAdminOrManager, fetchStores]);
+
+  useEffect(() => {
+    void fetchSeries();
+  }, [fetchSeries]);
   useEffect(() => {
     if (selectedStoreId) {
       fetchStoreProductPrices(selectedStoreId);
@@ -87,6 +100,7 @@ export const ProductsScreen: React.FC = () => {
       city_id: form.city_id,
       sku: form.sku.trim() || null,
       category: form.category.trim() || null,
+      series_id: form.series_id || null,
     };
 
     if (!payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -101,12 +115,12 @@ export const ProductsScreen: React.FC = () => {
     }
     await fetchProducts();
     setShowCreate(false);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '', series_id: '' });
   };
 
   const openCreateModal = (): void => {
     setEditingProductId(null);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '', series_id: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
     setShowPricingPanel(false);
@@ -126,6 +140,7 @@ export const ProductsScreen: React.FC = () => {
       city_id: product.city_id,
       sku: product.sku || '',
       category: product.category || '',
+      series_id: product.series_id || '',
     });
     setSelectedStoreId('');
     setCustomStorePrice('');
@@ -144,6 +159,7 @@ export const ProductsScreen: React.FC = () => {
         city_id: form.city_id,
         sku: form.sku.trim() || null,
         category: form.category.trim() || null,
+        series_id: form.series_id || null,
       };
 
       if (!payload.name || !payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -187,6 +203,59 @@ export const ProductsScreen: React.FC = () => {
     }
   };
 
+  const openSeriesModal = (): void => {
+    setEditingSeriesId(null);
+    setSeriesName('');
+    setSeriesSortIndex('');
+    setShowSeriesModal(true);
+  };
+
+  const openSeriesEdit = (seriesId: string): void => {
+    const target = series.find((item) => item.id === seriesId);
+    if (!target) return;
+    setEditingSeriesId(target.id);
+    setSeriesName(target.name);
+    setSeriesSortIndex(String(target.sort_index));
+    setShowSeriesModal(true);
+  };
+
+  const handleSaveSeries = async (): Promise<void> => {
+    if (!canManageSeries) return;
+    if (!seriesName.trim()) {
+      window.alert('请输入系列名称');
+      return;
+    }
+    const parsedSort = Number(seriesSortIndex || 0);
+    if (Number.isNaN(parsedSort)) {
+      window.alert('排序值必须是数字');
+      return;
+    }
+
+    const payload = { name: seriesName.trim(), sort_index: parsedSort };
+    const result = editingSeriesId
+      ? await updateSeries(editingSeriesId, payload)
+      : await addSeries(payload);
+
+    if (result.error) {
+      window.alert(`保存系列失败：${result.error.message}`);
+      return;
+    }
+
+    setEditingSeriesId(null);
+    setSeriesName('');
+    setSeriesSortIndex('');
+    setShowSeriesModal(false);
+  };
+
+  const handleDeleteSeries = async (seriesId: string): Promise<void> => {
+    if (!canManageSeries) return;
+    if (!window.confirm('确认删除该系列吗？')) return;
+    const { error } = await deleteSeries(seriesId);
+    if (error) {
+      window.alert(`删除失败：${error.message}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -205,14 +274,25 @@ export const ProductsScreen: React.FC = () => {
         </div>
 
         {isAdminOrManager && (
-          <button
-            type="button"
-            onClick={openCreateModal}
-            className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
-          >
-            <Plus size={20} />
-            <span>添加新商品</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {canManageSeries && (
+              <button
+                type="button"
+                onClick={openSeriesModal}
+                className="px-4 py-2.5 rounded-xl font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all"
+              >
+                商品系列管理
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={openCreateModal}
+              className="bg-tech-gradient px-6 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all active:scale-[0.98]"
+            >
+              <Plus size={20} />
+              <span>添加新商品</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -249,10 +329,11 @@ export const ProductsScreen: React.FC = () => {
             <div className="p-6 flex-1 flex flex-col">
               <div className="mb-4">
                 <h3 className="text-lg font-bold group-hover:text-accent transition-colors truncate">{product.name}</h3>
-                {(product.sku || product.category) && (
+                {(product.sku || product.category || product.series_name) && (
                   <p className="text-xs text-white/60 mt-1">
                     {product.sku ? `SKU: ${product.sku}` : 'SKU: -'}
                     {product.category ? ` · 品类: ${product.category}` : ''}
+                    {product.series_name ? ` · 系列: ${product.series_name}` : ''}
                   </p>
                 )}
                 <div className="flex items-center space-x-2 mt-1.5">
@@ -382,6 +463,19 @@ export const ProductsScreen: React.FC = () => {
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">品类</span>
                 <input value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))} placeholder="可选，纯文本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">系列</span>
+                <select
+                  value={form.series_id}
+                  onChange={(event) => setForm((prev) => ({ ...prev, series_id: event.target.value }))}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white"
+                >
+                  <option value="" className="text-black bg-white">未选择</option>
+                  {series.map((seriesItem) => (
+                    <option key={seriesItem.id} value={seriesItem.id} className="text-black bg-white">{seriesItem.name}</option>
+                  ))}
+                </select>
+              </label>
               <div className="col-span-2 space-y-2">
                 <p className="text-xs font-bold text-white/40 uppercase tracking-wider">选择城市</p>
                 <div className="flex flex-wrap gap-2">
@@ -401,6 +495,61 @@ export const ProductsScreen: React.FC = () => {
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
               <button type="button" onClick={handleSaveProduct} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSeriesModal && canManageSeries && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <h3 className="text-xl font-bold">商品系列管理</h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">系列名称</span>
+                <input
+                  value={seriesName}
+                  onChange={(event) => setSeriesName(event.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                />
+              </label>
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">排序</span>
+                <input
+                  value={seriesSortIndex}
+                  onChange={(event) => setSeriesSortIndex(event.target.value)}
+                  type="number"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setShowSeriesModal(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>
+              <button type="button" onClick={handleSaveSeries} className="px-4 py-2 rounded-xl bg-tech-gradient font-bold">保存</button>
+            </div>
+
+            <div className="space-y-2">
+              {series.length === 0 && (
+                <p className="text-sm text-white/50">{seriesLoading ? '加载中...' : '暂无系列'}</p>
+              )}
+              {series.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <div>
+                    <p className="font-semibold">{item.name}</p>
+                    <p className="text-xs text-white/50">排序: {item.sort_index}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => openSeriesEdit(item.id)} className="p-2 rounded-xl hover:bg-white/10 text-white/50 hover:text-white">
+                      <Edit2 size={16} />
+                    </button>
+                    <button type="button" onClick={() => { void handleDeleteSeries(item.id); }} className="p-2 rounded-xl hover:bg-red-500/20 text-white/50 hover:text-red-400">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

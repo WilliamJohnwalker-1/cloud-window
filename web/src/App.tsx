@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, Search } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
+import { FinanceScreen } from './screens/FinanceScreen';
 import { InventoryScreen } from './screens/InventoryScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { OrdersScreen } from './screens/OrdersScreen';
@@ -9,9 +10,21 @@ import { ProductsScreen } from './screens/ProductsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { ReportsScreen } from './screens/ReportsScreen';
 import { StoresScreen } from './screens/StoresScreen';
+import { SuppliersScreen } from './screens/SuppliersScreen';
 import { useAppStore } from './store/useAppStore';
+import { KnowledgeBasePanel } from './components/KnowledgeBasePanel';
+import {
+  canViewFinance,
+  canViewInventory,
+  canViewOrders,
+  canViewPayment,
+  canViewProducts,
+  canViewReports,
+  canViewStores,
+  canViewSuppliers,
+} from './utils/permissions';
 
-type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'reports' | 'profile' | 'stores';
+type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'finance' | 'reports' | 'profile' | 'stores' | 'suppliers';
 
 interface SearchResultItem {
   id: string;
@@ -43,11 +56,43 @@ function App() {
   const notifRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
+  const allowedTabs = useMemo<TabKey[]>(() => {
+    if (!user) {
+      return ['products'];
+    }
+
+    const role = user.role;
+    const tabs: TabKey[] = ['profile'];
+    if (canViewProducts(role)) tabs.unshift('products');
+    if (canViewInventory(role)) tabs.push('inventory');
+    if (canViewOrders(role)) tabs.push('orders');
+    if (canViewPayment(role)) tabs.push('payment');
+    if (canViewFinance(role)) tabs.push('finance');
+    if (canViewReports(role)) tabs.push('reports');
+    if (canViewStores(role)) tabs.push('stores');
+    if (canViewSuppliers(role)) tabs.push('suppliers');
+    return tabs;
+  }, [user]);
+
+  const switchToTab = (tab: TabKey): void => {
+    if (allowedTabs.includes(tab)) {
+      setActiveTab(tab);
+      return;
+    }
+    setActiveTab(allowedTabs[0] || 'profile');
+  };
+
   useEffect(() => {
     if (user) {
       void fetchAllData();
     }
   }, [fetchAllData, user]);
+
+  useEffect(() => {
+    if (!allowedTabs.includes(activeTab)) {
+      setActiveTab(allowedTabs[0] || 'profile');
+    }
+  }, [activeTab, allowedTabs]);
 
   useEffect(() => {
     if (!user) return;
@@ -168,8 +213,10 @@ function App() {
         tab: 'inventory',
       }));
 
-    return [...productResults, ...orderResults, ...inventoryResults].slice(0, 10);
-  }, [orders, products, searchKeyword]);
+    return [...productResults, ...orderResults, ...inventoryResults]
+      .filter((item) => allowedTabs.includes(item.tab))
+      .slice(0, 10);
+  }, [allowedTabs, orders, products, searchKeyword]);
 
   if (!user) {
     return <LoginScreen />;
@@ -212,12 +259,16 @@ function App() {
         return <OrdersScreen />;
       case 'payment':
         return <PaymentScreen />;
+      case 'finance':
+        return <FinanceScreen />;
       case 'reports':
         return <ReportsScreen />;
       case 'profile':
         return <ProfileScreen />;
       case 'stores':
         return <StoresScreen />;
+      case 'suppliers':
+        return <SuppliersScreen />;
       default:
         return <ProductsScreen />;
     }
@@ -233,12 +284,16 @@ function App() {
         return '订单中心';
       case 'payment':
         return '扫码收银台';
+      case 'finance':
+        return '财务收支';
       case 'reports':
         return '数据报表';
       case 'profile':
         return '个人中心';
       case 'stores':
         return '店铺管理';
+      case 'suppliers':
+        return '供应商管理';
       default:
         return '云窗文创';
     }
@@ -246,7 +301,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background text-white flex">
-      <Sidebar activeTab={activeTab} setActiveTab={(tab) => setActiveTab(tab as TabKey)} />
+      <Sidebar activeTab={activeTab} setActiveTab={(tab) => switchToTab(tab as TabKey)} />
 
       <main className="flex-1 ml-64 p-8">
         <header className="flex items-center justify-between mb-8">
@@ -281,7 +336,7 @@ function App() {
                       type="button"
                       key={result.id}
                       onClick={() => {
-                        setActiveTab(result.tab);
+                        switchToTab(result.tab);
                         setSearchOpen(false);
                       }}
                       className="w-full px-4 py-3 text-left hover:bg-white/5 border-b border-white/5 last:border-b-0"
@@ -325,7 +380,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() => {
-                            setActiveTab('orders');
+                            switchToTab('orders');
                             setNotifOpen(false);
                           }}
                           className="w-full text-left"
@@ -362,6 +417,8 @@ function App() {
           {renderContent()}
         </div>
       </main>
+
+      <KnowledgeBasePanel />
     </div>
   );
 }

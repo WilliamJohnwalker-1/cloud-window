@@ -24,10 +24,14 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
+import { useFinanceStore } from '../store/useFinanceStore';
+import { useProductSeriesStore } from '../store/useProductSeriesStore';
+import { useSupplierStore } from '../store/useSupplierStore';
 import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
-import type { Notification, Store } from '../types';
+import type { FinancialTransaction, Notification, Store, Supplier } from '../types';
+import { canEditFinance, canEditProductSeries, canEditSuppliers, canViewFinance, canViewSuppliers } from '../utils/permissions';
 import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 export default function ProfileScreen() {
@@ -47,6 +51,7 @@ export default function ProfileScreen() {
     fetchCities,
     fetchDistributors,
     fetchNotifications,
+    fetchStores,
     addCity,
     deleteCity,
     moveCityOrder,
@@ -77,6 +82,7 @@ export default function ProfileScreen() {
       fetchCities: state.fetchCities,
       fetchDistributors: state.fetchDistributors,
       fetchNotifications: state.fetchNotifications,
+      fetchStores: state.fetchStores,
       addCity: state.addCity,
       deleteCity: state.deleteCity,
       moveCityOrder: state.moveCityOrder,
@@ -90,6 +96,72 @@ export default function ProfileScreen() {
       acceptOrder: state.acceptOrder,
       markNotificationRead: state.markNotificationRead,
       markAllNotificationsRead: state.markAllNotificationsRead,
+    })),
+  );
+
+  const {
+    transactions,
+    balance,
+    financeLoading,
+    financeError,
+    categories,
+    fetchTransactions,
+    fetchBalance,
+    addTransaction,
+    updateTransaction,
+    updateBalance,
+    deleteTransaction,
+    fetchCategories,
+  } = useFinanceStore(
+    useShallow((state) => ({
+      transactions: state.transactions,
+      balance: state.balance,
+      financeLoading: state.isLoading,
+      financeError: state.error,
+      categories: state.categories,
+      fetchTransactions: state.fetchTransactions,
+      fetchBalance: state.fetchBalance,
+      addTransaction: state.addTransaction,
+      updateTransaction: state.updateTransaction,
+      updateBalance: state.updateBalance,
+      deleteTransaction: state.deleteTransaction,
+      fetchCategories: state.fetchCategories,
+    })),
+  );
+
+  const {
+    series,
+    seriesLoading,
+    fetchSeries,
+    addSeries,
+    updateSeries,
+    deleteSeries,
+  } = useProductSeriesStore(
+    useShallow((state) => ({
+      series: state.series,
+      seriesLoading: state.isLoading,
+      fetchSeries: state.fetchSeries,
+      addSeries: state.addSeries,
+      updateSeries: state.updateSeries,
+      deleteSeries: state.deleteSeries,
+    })),
+  );
+
+  const {
+    suppliers,
+    supplierLoading,
+    fetchSuppliers,
+    addSupplier,
+    updateSupplier,
+    deleteSupplier,
+  } = useSupplierStore(
+    useShallow((state) => ({
+      suppliers: state.suppliers,
+      supplierLoading: state.isLoading,
+      fetchSuppliers: state.fetchSuppliers,
+      addSupplier: state.addSupplier,
+      updateSupplier: state.updateSupplier,
+      deleteSupplier: state.deleteSupplier,
     })),
   );
 
@@ -108,6 +180,9 @@ export default function ProfileScreen() {
     phone: '',
     settlement_day: '',
     cooperation_mode: 'consignment' as 'consignment' | 'buyout' | 'direct',
+    contract_expiry_date: '',
+    grade: '' as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E',
+    contract_file_url: '',
     status: 'active' as 'active' | 'inactive',
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -132,13 +207,70 @@ export default function ProfileScreen() {
   const [sortingProvince, setSortingProvince] = useState<string | null>(null);
   const [storeFilterProvinceId, setStoreFilterProvinceId] = useState<string | null>(null);
   const [storeFilterCityId, setStoreFilterCityId] = useState<string | null>(null);
+  const [seriesModalVisible, setSeriesModalVisible] = useState(false);
+  const [isAddingSeries, setIsAddingSeries] = useState(false);
+  const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
+  const [seriesName, setSeriesName] = useState('');
+  const [seriesSortIndex, setSeriesSortIndex] = useState('');
+  const [financeModalVisible, setFinanceModalVisible] = useState(false);
+  const [isEditingBalance, setIsEditingBalance] = useState(false);
+  const [balanceDraft, setBalanceDraft] = useState('');
+  const [isAddingTransaction, setIsAddingTransaction] = useState(false);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editTransactionData, setEditTransactionData] = useState({
+    transaction_type: 'expense' as 'income' | 'expense',
+    category: '',
+    amount: '',
+    transaction_date: new Date().toISOString().slice(0, 10),
+    store_id: '',
+    supplier_id: '',
+    channel_name: '',
+    description: '',
+    is_recurring: false,
+  });
+  const [supplierModalVisible, setSupplierModalVisible] = useState(false);
+  const [isAddingSupplier, setIsAddingSupplier] = useState(false);
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [editSupplierData, setEditSupplierData] = useState({
+    company_name: '',
+    contact: '',
+    phone: '',
+    address: '',
+    delivery_cycle_days: '',
+    avg_unit_price: '',
+    status: 'active' as 'active' | 'inactive',
+  });
 
   const theme = isDarkMode ? DarkColors : LightColors;
   const appVersion = Constants.expoConfig?.version || '未知版本';
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
   const isDistributor = user?.role === 'distributor';
+  const canManageProductSeries = canEditProductSeries(user?.role);
+  const canViewFinanceManagement = canViewFinance(user?.role);
+  const canEditFinanceManagement = canEditFinance(user?.role);
+  const canViewSupplierManagement = canViewSuppliers(user?.role);
+  const canEditSupplierManagement = canEditSuppliers(user?.role);
+  const financeEntryLabel = canEditFinanceManagement ? '余额总览' : '余额总览（只读）';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  const formatCurrency = (amount: number): string => amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const formatDateTime = (value?: string | null): string => {
+    if (!value) {
+      return '暂未更新';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return date.toLocaleString('zh-CN');
+  };
 
   const compareVersion = (current: string, target: string): number => {
     const normalize = (value: string): number[] => value
@@ -208,6 +340,34 @@ export default function ProfileScreen() {
     if (isAdmin) fetchDistributors();
     fetchNotifications();
   }, [isAdmin, fetchCities, fetchDistributors, fetchNotifications]);
+
+  useEffect(() => {
+    if (!canManageProductSeries) return;
+    fetchSeries();
+  }, [canManageProductSeries, fetchSeries]);
+
+  useEffect(() => {
+    if (!canViewSupplierManagement) return;
+    fetchSuppliers();
+  }, [canViewSupplierManagement, fetchSuppliers]);
+
+  useEffect(() => {
+    if (!canViewFinanceManagement) return;
+
+    fetchBalance();
+    fetchCategories();
+    fetchTransactions();
+    fetchStores();
+  }, [canViewFinanceManagement, fetchBalance, fetchCategories, fetchTransactions, fetchStores]);
+
+  useEffect(() => {
+    if (isEditingBalance) {
+      return;
+    }
+
+    setBalanceDraft(balance ? String(balance.balance) : '');
+  }, [balance, isEditingBalance]);
+
   useEffect(() => {
     const loadProvinceOrder = async () => {
       try {
@@ -256,6 +416,21 @@ export default function ProfileScreen() {
       return matchesProvince && matchesCity;
     });
   }, [stores, cities, storeFilterProvinceId, storeFilterCityId]);
+
+  const filteredFinanceCategories = React.useMemo(
+    () => categories.filter((item) => item.type === editTransactionData.transaction_type),
+    [categories, editTransactionData.transaction_type],
+  );
+
+  const transactionStoreMap = React.useMemo(
+    () => new Map(stores.map((item) => [item.id, item.name])),
+    [stores],
+  );
+
+  const transactionSupplierMap = React.useMemo(
+    () => new Map(suppliers.map((item) => [item.id, item.company_name])),
+    [suppliers],
+  );
 
   const moveProvinceOrder = async (province: string, direction: 'up' | 'down') => {
     setSortingProvince(province);
@@ -331,6 +506,414 @@ export default function ProfileScreen() {
     setEditingDistributorId(null);
   };
 
+  const resetTransactionEditor = () => {
+    setIsAddingTransaction(false);
+    setEditingTransactionId(null);
+    setEditTransactionData({
+      transaction_type: 'expense',
+      category: '',
+      amount: '',
+      transaction_date: new Date().toISOString().slice(0, 10),
+      store_id: '',
+      supplier_id: '',
+      channel_name: '',
+      description: '',
+      is_recurring: false,
+    });
+  };
+
+  const resetBalanceEditor = () => {
+    setIsEditingBalance(false);
+    setBalanceDraft(balance ? String(balance.balance) : '');
+  };
+
+  const handleOpenFinanceOverview = () => {
+    fetchBalance();
+    fetchCategories();
+    fetchTransactions();
+    fetchStores();
+    if (canViewSupplierManagement) {
+      fetchSuppliers();
+    }
+    setFinanceModalVisible(true);
+  };
+
+  const openBalanceEditor = () => {
+    if (!canEditFinanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可更新余额' });
+      return;
+    }
+
+    setIsEditingBalance(true);
+    setBalanceDraft(balance ? String(balance.balance) : '');
+  };
+
+  const handleSaveBalance = async () => {
+    if (!canEditFinanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可更新余额' });
+      return;
+    }
+
+    const nextBalance = Number(balanceDraft);
+    if (!Number.isFinite(nextBalance)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效的余额数字' });
+      return;
+    }
+
+    const { error } = await updateBalance(nextBalance);
+    if (error) {
+      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      return;
+    }
+
+    setBalanceDraft(String(nextBalance));
+    setIsEditingBalance(false);
+    Toast.show({
+      type: 'success',
+      text1: '成功',
+      text2: balance ? '余额已更新' : '余额已录入',
+    });
+  };
+
+  const openAddTransaction = () => {
+    if (!canEditFinanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可新增或编辑财务流水' });
+      return;
+    }
+
+    resetTransactionEditor();
+    setIsAddingTransaction(true);
+  };
+
+  const openEditTransaction = (transaction: FinancialTransaction) => {
+    if (!canEditFinanceManagement) {
+      return;
+    }
+
+    setIsAddingTransaction(false);
+    setEditingTransactionId(transaction.id);
+    setEditTransactionData({
+      transaction_type: transaction.transaction_type,
+      category: transaction.category,
+      amount: String(transaction.amount),
+      transaction_date: transaction.transaction_date,
+      store_id: transaction.store_id || '',
+      supplier_id: transaction.supplier_id || '',
+      channel_name: transaction.channel_name || '',
+      description: transaction.description || '',
+      is_recurring: transaction.is_recurring,
+    });
+  };
+
+  const handleSaveTransaction = async () => {
+    if (!canEditFinanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可新增或编辑财务流水' });
+      return;
+    }
+
+    if (!editTransactionData.category.trim()) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请选择财务分类' });
+      return;
+    }
+
+    const amountValue = Number(editTransactionData.amount);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '金额需为大于 0 的数字' });
+      return;
+    }
+
+    if (!editTransactionData.transaction_date.trim()) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入交易日期' });
+      return;
+    }
+
+    const payload = {
+      transaction_type: editTransactionData.transaction_type,
+      category: editTransactionData.category.trim(),
+      amount: amountValue,
+      transaction_date: editTransactionData.transaction_date.trim(),
+      store_id: editTransactionData.store_id || null,
+      supplier_id: editTransactionData.supplier_id || null,
+      channel_name: editTransactionData.channel_name.trim() || null,
+      description: editTransactionData.description.trim() || null,
+      is_recurring: editTransactionData.is_recurring,
+    };
+
+    const result = isAddingTransaction
+      ? await addTransaction(payload)
+      : editingTransactionId
+        ? await updateTransaction(editingTransactionId, payload)
+        : { error: new Error('未找到要保存的财务流水') };
+
+    if (result.error) {
+      Toast.show({ type: 'error', text1: '错误', text2: result.error.message });
+      return;
+    }
+
+    Toast.show({
+      type: 'success',
+      text1: '成功',
+      text2: isAddingTransaction ? '财务流水已添加' : '财务流水已更新',
+    });
+    resetTransactionEditor();
+  };
+
+  const handleDeleteTransaction = (transaction: FinancialTransaction) => {
+    if (!canEditFinanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可删除财务流水' });
+      return;
+    }
+
+    Alert.alert('确认删除', `确定要删除「${transaction.category}」这条流水吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await deleteTransaction(transaction.id);
+          if (error) {
+            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            return;
+          }
+
+          if (editingTransactionId === transaction.id) {
+            resetTransactionEditor();
+          }
+
+          Toast.show({ type: 'success', text1: '成功', text2: '财务流水已删除' });
+        },
+      },
+    ]);
+  };
+
+  const openAddSeries = () => {
+    if (!canManageProductSeries) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员可编辑商品系列' });
+      return;
+    }
+
+    const nextSortIndex = series.length > 0
+      ? Math.max(...series.map((item) => Number(item.sort_index || 0))) + 1
+      : 1;
+
+    setIsAddingSeries(true);
+    setEditingSeriesId(null);
+    setSeriesName('');
+    setSeriesSortIndex(String(nextSortIndex));
+  };
+
+  const openEditSeries = (id: string, name: string, sortIndex: number) => {
+    if (!canManageProductSeries) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员可编辑商品系列' });
+      return;
+    }
+
+    setIsAddingSeries(false);
+    setEditingSeriesId(id);
+    setSeriesName(name);
+    setSeriesSortIndex(String(sortIndex));
+  };
+
+  const handleSaveSeries = async () => {
+    if (!canManageProductSeries) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员可编辑商品系列' });
+      return;
+    }
+
+    if (!seriesName.trim()) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入系列名称' });
+      return;
+    }
+
+    const sortValue = Number(seriesSortIndex);
+    if (!Number.isInteger(sortValue) || sortValue < 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '排序值需为大于等于 0 的整数' });
+      return;
+    }
+
+    if (isAddingSeries) {
+      const { error } = await addSeries({
+        name: seriesName.trim(),
+        sort_index: sortValue,
+      });
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+      Toast.show({ type: 'success', text1: '成功', text2: '系列已添加' });
+    } else if (editingSeriesId) {
+      const { error } = await updateSeries(editingSeriesId, {
+        name: seriesName.trim(),
+        sort_index: sortValue,
+      });
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+      Toast.show({ type: 'success', text1: '成功', text2: '系列已更新' });
+    }
+
+    await fetchSeries();
+    setIsAddingSeries(false);
+    setEditingSeriesId(null);
+    setSeriesName('');
+    setSeriesSortIndex('');
+  };
+
+  const handleDeleteSeries = (id: string, name: string) => {
+    if (!canManageProductSeries) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员可编辑商品系列' });
+      return;
+    }
+
+    Alert.alert('确认删除', `确定要删除系列「${name}」吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await deleteSeries(id);
+          if (error) {
+            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            return;
+          }
+
+          await fetchSeries();
+          Toast.show({ type: 'success', text1: '成功', text2: '系列已删除' });
+        },
+      },
+    ]);
+  };
+
+  const openAddSupplier = () => {
+    if (!canEditSupplierManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑供应商信息' });
+      return;
+    }
+
+    setIsAddingSupplier(true);
+    setEditingSupplierId(null);
+    setEditSupplierData({
+      company_name: '',
+      contact: '',
+      phone: '',
+      address: '',
+      delivery_cycle_days: '',
+      avg_unit_price: '',
+      status: 'active',
+    });
+  };
+
+  const openEditSupplier = (supplier: Supplier) => {
+    if (!canEditSupplierManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑供应商信息' });
+      return;
+    }
+
+    setIsAddingSupplier(false);
+    setEditingSupplierId(supplier.id);
+    setEditSupplierData({
+      company_name: supplier.company_name,
+      contact: supplier.contact || '',
+      phone: supplier.phone || '',
+      address: supplier.address || '',
+      delivery_cycle_days: supplier.delivery_cycle_days == null ? '' : String(supplier.delivery_cycle_days),
+      avg_unit_price: supplier.avg_unit_price == null ? '' : String(supplier.avg_unit_price),
+      status: supplier.status,
+    });
+  };
+
+  const handleSaveSupplier = async () => {
+    if (!canEditSupplierManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑供应商信息' });
+      return;
+    }
+
+    if (!editSupplierData.company_name.trim()) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入供应商名称' });
+      return;
+    }
+
+    const deliveryCycleText = editSupplierData.delivery_cycle_days.trim();
+    const avgUnitPriceText = editSupplierData.avg_unit_price.trim();
+
+    const deliveryCycleValue = deliveryCycleText ? Number(deliveryCycleText) : null;
+    const avgUnitPriceValue = avgUnitPriceText ? Number(avgUnitPriceText) : null;
+
+    if (deliveryCycleText && (!Number.isInteger(deliveryCycleValue) || Number(deliveryCycleValue) < 0)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '交付周期需为大于等于 0 的整数' });
+      return;
+    }
+
+    if (avgUnitPriceText && (!Number.isFinite(avgUnitPriceValue) || Number(avgUnitPriceValue) < 0)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '均价需为大于等于 0 的数字' });
+      return;
+    }
+
+    if (isAddingSupplier) {
+      const { error } = await addSupplier({
+        company_name: editSupplierData.company_name.trim(),
+        contact: editSupplierData.contact.trim() || null,
+        phone: editSupplierData.phone.trim() || null,
+        address: editSupplierData.address.trim() || null,
+        delivery_cycle_days: deliveryCycleValue,
+        avg_unit_price: avgUnitPriceValue,
+        status: editSupplierData.status,
+      });
+
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+
+      Toast.show({ type: 'success', text1: '成功', text2: '供应商已添加' });
+    } else if (editingSupplierId) {
+      const { error } = await updateSupplier(editingSupplierId, {
+        company_name: editSupplierData.company_name.trim(),
+        contact: editSupplierData.contact.trim() || null,
+        phone: editSupplierData.phone.trim() || null,
+        address: editSupplierData.address.trim() || null,
+        delivery_cycle_days: deliveryCycleValue,
+        avg_unit_price: avgUnitPriceValue,
+        status: editSupplierData.status,
+      });
+
+      if (error) {
+        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        return;
+      }
+
+      Toast.show({ type: 'success', text1: '成功', text2: '供应商已更新' });
+    }
+
+    setIsAddingSupplier(false);
+    setEditingSupplierId(null);
+  };
+
+  const handleDeleteSupplier = (id: string, companyName: string) => {
+    if (!canEditSupplierManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅超级管理员可编辑供应商信息' });
+      return;
+    }
+
+    Alert.alert('确认删除', `确定要删除供应商「${companyName}」吗？删除后不可恢复。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await deleteSupplier(id);
+          if (error) {
+            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            return;
+          }
+
+          Toast.show({ type: 'success', text1: '成功', text2: '供应商已删除' });
+        },
+      },
+    ]);
+  };
+
   // --- Admin store management ---
   const openAddStore = () => {
     if (!isSuperAdmin) {
@@ -349,6 +932,9 @@ export default function ProfileScreen() {
       phone: '',
       settlement_day: '',
       cooperation_mode: 'consignment',
+      contract_expiry_date: '',
+      grade: '',
+      contract_file_url: '',
       status: 'active',
     });
   };
@@ -370,6 +956,9 @@ export default function ProfileScreen() {
       phone: store.phone || '',
       settlement_day: store.settlement_day == null ? '' : String(store.settlement_day),
       cooperation_mode: store.cooperation_mode || 'consignment',
+      contract_expiry_date: store.contract_expiry_date || '',
+      grade: store.grade || '',
+      contract_file_url: store.contract_file_url || '',
       status: store.status,
     });
   };
@@ -411,6 +1000,9 @@ export default function ProfileScreen() {
         phone: editStoreData.phone,
         settlement_day: settlementDayValue,
         cooperation_mode: editStoreData.cooperation_mode,
+        contract_expiry_date: editStoreData.contract_expiry_date || null,
+        grade: (editStoreData.grade || null) as Store['grade'] | null,
+        contract_file_url: editStoreData.contract_file_url || null,
       });
       if (error) {
         Toast.show({ type: 'error', text1: '错误', text2: error.message });
@@ -428,6 +1020,9 @@ export default function ProfileScreen() {
         phone: editStoreData.phone,
         settlement_day: settlementDayValue,
         cooperation_mode: editStoreData.cooperation_mode,
+        contract_expiry_date: editStoreData.contract_expiry_date || null,
+        grade: (editStoreData.grade || null) as Store['grade'] | null,
+        contract_file_url: editStoreData.contract_file_url || null,
         status: editStoreData.status,
       });
       if (error) {
@@ -581,6 +1176,7 @@ export default function ProfileScreen() {
       case 'super_admin': return '超级管理员';
       case 'distributor': return '分销商';
       case 'inventory_manager': return '库存管理员';
+      case 'finance': return '财务';
       default: return role;
     }
   };
@@ -625,8 +1221,21 @@ export default function ProfileScreen() {
       ? [
           { IconComponent: MapPin, label: '省份管理', onPress: () => setProvinceModalVisible(true) },
           { IconComponent: MapPin, label: '城市管理', onPress: () => setCityModalVisible(true) },
+          ...(canManageProductSeries
+            ? [{ IconComponent: PackagePlus, label: '商品系列管理', onPress: () => setSeriesModalVisible(true) }]
+            : []),
           { IconComponent: Users, label: '分销商管理', onPress: () => setDistributorModalVisible(true) },
           { IconComponent: StoreIcon, label: '店铺管理', onPress: () => setStoreModalVisible(true) },
+        ]
+      : []),
+    ...(canViewSupplierManagement
+      ? [
+          { IconComponent: Users, label: '供应商管理', onPress: () => setSupplierModalVisible(true) },
+        ]
+      : []),
+    ...(canViewFinanceManagement
+      ? [
+          { IconComponent: PackagePlus, label: financeEntryLabel, onPress: handleOpenFinanceOverview },
         ]
       : []),
     {
@@ -831,6 +1440,611 @@ export default function ProfileScreen() {
                 © 2026 云窗文创 版权所有
               </Text>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Finance Transactions Modal */}
+      <Modal visible={financeModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}> 
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>余额总览</Text>
+              <TouchableOpacity onPress={() => { setFinanceModalVisible(false); resetTransactionEditor(); resetBalanceEditor(); }}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!canEditFinanceManagement && (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }]}> 
+                <Text style={[styles.editorHint, { color: theme.textSecondary }]}>当前为只读模式：仅财务可新增/编辑/删除流水，管理员与超级管理员仅可查看。</Text>
+              </View>
+            )}
+
+            {!!financeError && (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }]}> 
+                <Text style={[styles.editorHint, { color: theme.danger }]}>{financeError}</Text>
+              </View>
+            )}
+
+            <View style={[styles.editorBox, styles.financeOverviewCard, { backgroundColor: theme.surfaceSecondary }]}> 
+              <View style={styles.financeOverviewHeader}>
+                <View style={styles.financeOverviewTitleWrap}>
+                  <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>当前余额</Text>
+                  <Text style={[styles.financeOverviewMeta, { color: theme.textSecondary }]}>更新时间：{formatDateTime(balance?.last_updated_at)}</Text>
+                </View>
+                {!canEditFinanceManagement && (
+                  <View style={[styles.transactionTypeBadge, { backgroundColor: theme.surface }]}> 
+                    <Text style={[styles.transactionTypeBadgeText, { color: theme.textSecondary }]}>只读</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.financeOverviewAmount, { color: theme.textPrimary }]}> 
+                {financeLoading && !balance ? '加载中...' : balance ? `¥${formatCurrency(balance.balance)}` : '暂无记录'}
+              </Text>
+              <Text style={[styles.financeOverviewHint, { color: theme.textTertiary }]}> 
+                {canEditFinanceManagement
+                  ? '请录入当前现金余额，管理员与超级管理员可查看最新总览。'
+                  : '当前余额仅供查看，如需调整请联系财务角色更新。'}
+              </Text>
+
+              {isEditingBalance ? (
+                <>
+                  <TextInput
+                    style={[styles.financeBalanceInput, { backgroundColor: theme.surface, color: theme.textPrimary }]}
+                    placeholder="输入当前余额"
+                    value={balanceDraft}
+                    editable={canEditFinanceManagement}
+                    onChangeText={setBalanceDraft}
+                    placeholderTextColor={theme.textTertiary}
+                    keyboardType="numeric"
+                  />
+                  <View style={styles.editActions}>
+                    <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={resetBalanceEditor}>
+                      <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveBalance}>
+                      <Text style={styles.smallBtnPrimaryText}>保存余额</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : canEditFinanceManagement ? (
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={openBalanceEditor}>
+                    <Text style={styles.smallBtnPrimaryText}>{balance ? '更新余额' : '录入余额'}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+
+            <Text style={[styles.editorTitle, styles.financeSectionTitle, { color: theme.textPrimary }]}>流水记录</Text>
+
+            {!isAddingTransaction && !editingTransactionId && canEditFinanceManagement && (
+              <TouchableOpacity style={styles.addCityRow} onPress={openAddTransaction} activeOpacity={0.85}>
+                <LinearGradient
+                  colors={[theme.pink, theme.blue]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.addCityButton, { width: '100%' }]}
+                >
+                  <Text style={styles.addCityButtonText}>添加流水</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+
+            {(isAddingTransaction || editingTransactionId) ? (
+              <ScrollView
+                style={styles.financeEditorScroll}
+                contentContainerStyle={styles.financeEditorScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}> 
+                  <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>{isAddingTransaction ? '添加流水' : '编辑流水'}</Text>
+
+                  <Text style={[styles.editorHint, { color: theme.textTertiary }]}>收支类型</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                    {([
+                      { value: 'income', label: '收入' },
+                      { value: 'expense', label: '支出' },
+                    ] as const).map((item) => (
+                      <TouchableOpacity
+                        key={item.value}
+                        style={[
+                          styles.cityChip,
+                          { backgroundColor: theme.surface },
+                          editTransactionData.transaction_type === item.value && { backgroundColor: theme.pink },
+                        ]}
+                        disabled={!canEditFinanceManagement}
+                        onPress={() => setEditTransactionData((current) => ({
+                          ...current,
+                          transaction_type: item.value,
+                          category: '',
+                        }))}
+                      >
+                        <Text
+                          style={[
+                            styles.cityChipText,
+                            { color: theme.textSecondary },
+                            editTransactionData.transaction_type === item.value && { color: '#fff', fontWeight: '600' },
+                          ]}
+                        >
+                          {item.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  <Text style={[styles.editorHint, { color: theme.textTertiary }]}>财务分类</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                    {filteredFinanceCategories.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.cityChip,
+                          { backgroundColor: theme.surface },
+                          editTransactionData.category === item.name && { backgroundColor: theme.pink },
+                        ]}
+                        disabled={!canEditFinanceManagement}
+                        onPress={() => setEditTransactionData({ ...editTransactionData, category: item.name })}
+                      >
+                        <Text
+                          style={[
+                            styles.cityChipText,
+                            { color: theme.textSecondary },
+                            editTransactionData.category === item.name && { color: '#fff', fontWeight: '600' },
+                          ]}
+                        >
+                          {item.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    {filteredFinanceCategories.length === 0 && (
+                      <Text style={[styles.editorHint, { color: theme.textSecondary }]}>暂无可用分类</Text>
+                    )}
+                  </ScrollView>
+
+                  <TextInput
+                    style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                    placeholder="金额"
+                    value={editTransactionData.amount}
+                    editable={canEditFinanceManagement}
+                    onChangeText={(text) => setEditTransactionData({ ...editTransactionData, amount: text })}
+                    placeholderTextColor={theme.textTertiary}
+                    keyboardType="numeric"
+                  />
+
+                  <TextInput
+                    style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                    placeholder="交易日期 (如 2026-06-26)"
+                    value={editTransactionData.transaction_date}
+                    editable={canEditFinanceManagement}
+                    onChangeText={(text) => setEditTransactionData({ ...editTransactionData, transaction_date: text })}
+                    placeholderTextColor={theme.textTertiary}
+                  />
+
+                  <Text style={[styles.editorHint, { color: theme.textTertiary }]}>关联店铺（选填）</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                    <TouchableOpacity
+                      style={[
+                        styles.cityChip,
+                        { backgroundColor: theme.surface },
+                        !editTransactionData.store_id && { backgroundColor: theme.pink },
+                      ]}
+                      disabled={!canEditFinanceManagement}
+                      onPress={() => setEditTransactionData({ ...editTransactionData, store_id: '' })}
+                    >
+                      <Text style={[
+                        styles.cityChipText,
+                        { color: theme.textSecondary },
+                        !editTransactionData.store_id && { color: '#fff', fontWeight: '600' },
+                      ]}>不关联</Text>
+                    </TouchableOpacity>
+                    {stores.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.cityChip,
+                          { backgroundColor: theme.surface },
+                          editTransactionData.store_id === item.id && { backgroundColor: theme.pink },
+                        ]}
+                        disabled={!canEditFinanceManagement}
+                        onPress={() => setEditTransactionData({ ...editTransactionData, store_id: item.id })}
+                      >
+                        <Text style={[
+                          styles.cityChipText,
+                          { color: theme.textSecondary },
+                          editTransactionData.store_id === item.id && { color: '#fff', fontWeight: '600' },
+                        ]}>{item.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  <Text style={[styles.editorHint, { color: theme.textTertiary }]}>关联供应商（选填）</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                    <TouchableOpacity
+                      style={[
+                        styles.cityChip,
+                        { backgroundColor: theme.surface },
+                        !editTransactionData.supplier_id && { backgroundColor: theme.pink },
+                      ]}
+                      disabled={!canEditFinanceManagement}
+                      onPress={() => setEditTransactionData({ ...editTransactionData, supplier_id: '' })}
+                    >
+                      <Text style={[
+                        styles.cityChipText,
+                        { color: theme.textSecondary },
+                        !editTransactionData.supplier_id && { color: '#fff', fontWeight: '600' },
+                      ]}>不关联</Text>
+                    </TouchableOpacity>
+                    {suppliers.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.cityChip,
+                          { backgroundColor: theme.surface },
+                          editTransactionData.supplier_id === item.id && { backgroundColor: theme.pink },
+                        ]}
+                        disabled={!canEditFinanceManagement}
+                        onPress={() => setEditTransactionData({ ...editTransactionData, supplier_id: item.id })}
+                      >
+                        <Text style={[
+                          styles.cityChipText,
+                          { color: theme.textSecondary },
+                          editTransactionData.supplier_id === item.id && { color: '#fff', fontWeight: '600' },
+                        ]}>{item.company_name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  <TextInput
+                    style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                    placeholder="渠道名称 (选填)"
+                    value={editTransactionData.channel_name}
+                    editable={canEditFinanceManagement}
+                    onChangeText={(text) => setEditTransactionData({ ...editTransactionData, channel_name: text })}
+                    placeholderTextColor={theme.textTertiary}
+                  />
+
+                  <TextInput
+                    style={[styles.financeMultilineInput, { backgroundColor: theme.surface, color: theme.textPrimary }]}
+                    placeholder="备注说明 (选填)"
+                    value={editTransactionData.description}
+                    editable={canEditFinanceManagement}
+                    onChangeText={(text) => setEditTransactionData({ ...editTransactionData, description: text })}
+                    placeholderTextColor={theme.textTertiary}
+                    multiline
+                    textAlignVertical="top"
+                  />
+
+                  <View style={[styles.infoRow, { borderBottomWidth: 0, paddingVertical: 0, marginTop: 10 }]}> 
+                    <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>周期性流水</Text>
+                    <Switch
+                      value={editTransactionData.is_recurring}
+                      disabled={!canEditFinanceManagement}
+                      onValueChange={(value) => setEditTransactionData({ ...editTransactionData, is_recurring: value })}
+                      trackColor={{ false: theme.border, true: theme.pinkLight }}
+                      thumbColor={editTransactionData.is_recurring ? theme.pink : theme.textTertiary}
+                    />
+                  </View>
+
+                  <View style={styles.editActions}>
+                    <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={resetTransactionEditor}>
+                      <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
+                    </TouchableOpacity>
+                    {canEditFinanceManagement && (
+                      <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveTransaction}>
+                        <Text style={styles.smallBtnPrimaryText}>保存</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </ScrollView>
+            ) : null}
+
+            {!isAddingTransaction && !editingTransactionId && (
+              <FlatList
+                data={transactions}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.cityRow, styles.transactionRow, { borderBottomColor: theme.divider }]}
+                    onPress={canEditFinanceManagement ? () => openEditTransaction(item) : undefined}
+                    disabled={!canEditFinanceManagement}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.transactionHeaderRow}>
+                        <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.category}</Text>
+                        <View style={[
+                          styles.transactionTypeBadge,
+                          { backgroundColor: item.transaction_type === 'income' ? theme.successBg : theme.warningBg },
+                        ]}>
+                          <Text style={[
+                            styles.transactionTypeBadgeText,
+                            { color: item.transaction_type === 'income' ? theme.success : theme.warning },
+                          ]}>{item.transaction_type === 'income' ? '收入' : '支出'}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.transactionAmount, { color: item.transaction_type === 'income' ? theme.success : theme.warning }]}>
+                        {item.transaction_type === 'income' ? '+' : '-'}¥{Number(item.amount).toFixed(2)}
+                      </Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>日期：{item.transaction_date}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>店铺：{item.store_id ? (transactionStoreMap.get(item.store_id) || item.store_id) : '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>供应商：{item.supplier_id ? (transactionSupplierMap.get(item.supplier_id) || item.supplier_id) : '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>渠道：{item.channel_name || '-'}</Text>
+                      {item.description ? <Text style={[styles.distributorSubText, { color: theme.textSecondary }]} numberOfLines={2}>备注：{item.description}</Text> : null}
+                    </View>
+                    <View style={styles.cityActionsRow}>
+                      {canEditFinanceManagement ? (
+                        <>
+                          <TouchableOpacity onPress={() => openEditTransaction(item)} style={{ marginRight: 15 }}>
+                            <Text style={styles.closeButton}>编辑</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteTransaction(item)}>
+                            <Text style={styles.deleteCityText}>删除</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <Text style={[styles.distributorSubText, { color: theme.textTertiary }]}>{item.is_recurring ? '周期性' : '单次'}</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>{financeLoading ? '加载中...' : '暂无财务流水'}</Text>}
+                style={styles.cityList}
+                contentContainerStyle={transactions.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Product Series Management Modal */}
+      <Modal visible={seriesModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}> 
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>商品系列管理</Text>
+              <TouchableOpacity onPress={() => setSeriesModalVisible(false)}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!isAddingSeries && !editingSeriesId && canManageProductSeries && (
+              <TouchableOpacity style={styles.addCityRow} onPress={openAddSeries} activeOpacity={0.85}>
+                <LinearGradient
+                  colors={[theme.pink, theme.blue]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.addCityButton, { width: '100%' }]}
+                >
+                  <Text style={styles.addCityButtonText}>添加系列</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+
+            {(isAddingSeries || editingSeriesId) ? (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}> 
+                <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>{isAddingSeries ? '添加系列' : '编辑系列'}</Text>
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="系列名称"
+                  value={seriesName}
+                  editable={canManageProductSeries}
+                  onChangeText={setSeriesName}
+                  placeholderTextColor={theme.textTertiary}
+                />
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="排序值（整数）"
+                  value={seriesSortIndex}
+                  editable={canManageProductSeries}
+                  onChangeText={setSeriesSortIndex}
+                  placeholderTextColor={theme.textTertiary}
+                  keyboardType="number-pad"
+                />
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={() => { setIsAddingSeries(false); setEditingSeriesId(null); setSeriesName(''); setSeriesSortIndex(''); }}>
+                    <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
+                  </TouchableOpacity>
+                  {canManageProductSeries && (
+                    <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveSeries}>
+                      <Text style={styles.smallBtnPrimaryText}>保存</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ) : null}
+
+            {!isAddingSeries && !editingSeriesId && (
+              <FlatList
+                data={series}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.cityRow, { borderBottomColor: theme.divider }]}
+                    onPress={() => openEditSeries(item.id, item.name, item.sort_index)}
+                    disabled={!canManageProductSeries}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.name}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>排序：{item.sort_index}</Text>
+                    </View>
+                    <View style={styles.cityActionsRow}>
+                      {canManageProductSeries && (
+                        <>
+                          <TouchableOpacity onPress={() => openEditSeries(item.id, item.name, item.sort_index)} style={{ marginRight: 15 }}>
+                            <Text style={styles.closeButton}>编辑</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteSeries(item.id, item.name)}>
+                            <Text style={styles.deleteCityText}>删除</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>{seriesLoading ? '加载中...' : '暂无系列'}</Text>}
+                style={styles.cityList}
+                contentContainerStyle={series.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Supplier Management Modal */}
+      <Modal visible={supplierModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>供应商管理</Text>
+              <TouchableOpacity onPress={() => setSupplierModalVisible(false)}>
+                <Text style={styles.closeButton}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!canEditSupplierManagement && (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }]}> 
+                <Text style={[styles.editorHint, { color: theme.textSecondary }]}>当前为只读模式：仅超级管理员可新增/编辑/删除供应商。</Text>
+              </View>
+            )}
+
+            {!isAddingSupplier && !editingSupplierId && canEditSupplierManagement && (
+              <TouchableOpacity style={styles.addCityRow} onPress={openAddSupplier} activeOpacity={0.85}>
+                <LinearGradient
+                  colors={[theme.pink, theme.blue]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.addCityButton, { width: '100%' }]}
+                >
+                  <Text style={styles.addCityButtonText}>添加供应商</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+
+            {(isAddingSupplier || editingSupplierId) ? (
+              <View style={[styles.editorBox, { backgroundColor: theme.surfaceSecondary }]}> 
+                <Text style={[styles.editorTitle, { color: theme.textPrimary }]}>{isAddingSupplier ? '添加供应商' : '编辑供应商'}</Text>
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="供应商名称"
+                  value={editSupplierData.company_name}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, company_name: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="联系人 (选填)"
+                  value={editSupplierData.contact}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, contact: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="电话 (选填)"
+                  value={editSupplierData.phone}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, phone: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="地址 (选填)"
+                  value={editSupplierData.address}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, address: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="交付周期（天，选填）"
+                  value={editSupplierData.delivery_cycle_days}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, delivery_cycle_days: text })}
+                  placeholderTextColor={theme.textTertiary}
+                  keyboardType="number-pad"
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="平均单价（选填）"
+                  value={editSupplierData.avg_unit_price}
+                  editable={canEditSupplierManagement}
+                  onChangeText={(text) => setEditSupplierData({ ...editSupplierData, avg_unit_price: text })}
+                  placeholderTextColor={theme.textTertiary}
+                  keyboardType="numeric"
+                />
+
+                <View style={[styles.infoRow, { borderBottomWidth: 0, paddingVertical: 0, marginBottom: 10 }]}> 
+                  <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>状态</Text>
+                  <Switch
+                    value={editSupplierData.status === 'active'}
+                    disabled={!canEditSupplierManagement}
+                    onValueChange={(val) => setEditSupplierData({ ...editSupplierData, status: val ? 'active' : 'inactive' })}
+                    trackColor={{ false: theme.border, true: theme.pinkLight }}
+                    thumbColor={editSupplierData.status === 'active' ? theme.pink : theme.textTertiary}
+                  />
+                </View>
+
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={() => { setIsAddingSupplier(false); setEditingSupplierId(null); }}>
+                    <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
+                  </TouchableOpacity>
+                  {canEditSupplierManagement && (
+                    <TouchableOpacity style={[styles.smallBtn, styles.smallBtnPrimary, { backgroundColor: theme.pink }]} onPress={handleSaveSupplier}>
+                      <Text style={styles.smallBtnPrimaryText}>保存</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ) : null}
+
+            {!isAddingSupplier && !editingSupplierId && (
+              <FlatList
+                data={suppliers}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.cityRow, { borderBottomColor: theme.divider }]}
+                    onPress={canEditSupplierManagement ? () => openEditSupplier(item) : undefined}
+                    disabled={!canEditSupplierManagement}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.cityName, { color: theme.textPrimary }]}>{item.company_name}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>联系人：{item.contact || '-'} · 电话：{item.phone || '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>周期：{item.delivery_cycle_days ?? '-'} 天 · 均价：{item.avg_unit_price ?? '-'}</Text>
+                    </View>
+                    <View style={styles.cityActionsRow}>
+                      {canEditSupplierManagement ? (
+                        <>
+                          <TouchableOpacity onPress={() => openEditSupplier(item)} style={{ marginRight: 15 }}>
+                            <Text style={styles.closeButton}>编辑</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteSupplier(item.id, item.company_name)}>
+                            <Text style={styles.deleteCityText}>删除</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <Text style={[styles.distributorSubText, { color: item.status === 'active' ? theme.success : theme.textTertiary }]}>
+                          {item.status === 'active' ? '启用' : '停用'}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>{supplierLoading ? '加载中...' : '暂无供应商'}</Text>}
+                style={styles.cityList}
+                contentContainerStyle={suppliers.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
+              />
+            )}
           </View>
         </View>
       </Modal>
@@ -1368,6 +2582,47 @@ export default function ProfileScreen() {
                   keyboardType="number-pad"
                 />
 
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="合同到期日 (如 2026-12-31，选填)"
+                  value={editStoreData.contract_expiry_date}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, contract_expiry_date: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="店铺等级 (S/A/B/C/D/E，选填)"
+                  value={editStoreData.grade}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => {
+                    const normalized = text.trim().toUpperCase();
+                    const nextGrade = (
+                      normalized === ''
+                      || normalized === 'S'
+                      || normalized === 'A'
+                      || normalized === 'B'
+                      || normalized === 'C'
+                      || normalized === 'D'
+                      || normalized === 'E'
+                    )
+                      ? (normalized as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E')
+                      : editStoreData.grade;
+                    setEditStoreData({ ...editStoreData, grade: nextGrade });
+                  }}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="合同文件链接 (选填)"
+                  value={editStoreData.contract_file_url}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, contract_file_url: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
                 <Text style={[styles.editorHint, { color: theme.textTertiary }]}>合作模式</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
                   {([
@@ -1440,6 +2695,8 @@ export default function ProfileScreen() {
                       </Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>联系人：{item.contact || '-'} · 电话：{item.phone || '-'}</Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>结算日：{item.settlement_day ?? '-'} · 合作模式：{item.cooperation_mode || '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>等级：{item.grade || '-'} · 合同到期：{item.contract_expiry_date || '-'}</Text>
+                      {item.contract_file_url ? <Text style={[styles.distributorSubText, { color: theme.blue }]} numberOfLines={1}>合同链接：{item.contract_file_url}</Text> : null}
                     </View>
                     <View style={styles.cityActionsRow}>
                       {isSuperAdmin && (
@@ -1721,6 +2978,56 @@ const styles = StyleSheet.create({
   storeEditorScrollContent: {
     paddingBottom: 10,
   },
+  financeEditorScroll: {
+    maxHeight: 520,
+  },
+  financeEditorScrollContent: {
+    paddingBottom: 10,
+  },
+  financeOverviewCard: {
+    paddingBottom: 14,
+  },
+  financeOverviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  financeOverviewTitleWrap: {
+    flex: 1,
+    marginRight: 12,
+  },
+  financeOverviewMeta: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  financeOverviewAmount: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    marginTop: 8,
+  },
+  financeOverviewHint: {
+    fontSize: 12,
+    color: Colors.textTertiary,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  financeBalanceInput: {
+    height: 48,
+    borderWidth: 0,
+    borderRadius: Radius.lg,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    lineHeight: 20,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    marginTop: 2,
+  },
+  financeSectionTitle: {
+    marginTop: 2,
+    marginBottom: 10,
+  },
   cityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1745,6 +3052,30 @@ const styles = StyleSheet.create({
   citySortBtnDisabled: {
     opacity: 0.5,
   },
+  transactionRow: {
+    alignItems: 'flex-start',
+  },
+  transactionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  transactionTypeBadge: {
+    borderRadius: Radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+  transactionTypeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  transactionAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
   cityName: { fontSize: 16, color: Colors.textPrimary },
   deleteCityText: { fontSize: 14, color: Colors.danger, fontWeight: '500' },
   emptyCityText: { textAlign: 'center', color: Colors.textTertiary, paddingVertical: 20, fontSize: 14 },
@@ -1768,6 +3099,16 @@ const styles = StyleSheet.create({
   cityChipActive: { backgroundColor: Colors.pink },
   cityChipText: { fontSize: 12, color: Colors.textSecondary },
   cityChipTextActive: { color: '#fff', fontWeight: '600' },
+  financeMultilineInput: {
+    minHeight: 92,
+    borderWidth: 0,
+    borderRadius: Radius.lg,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    fontSize: 16,
+    marginBottom: 10,
+  },
   editActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
   smallBtn: {
     paddingHorizontal: 12,

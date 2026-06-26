@@ -2,17 +2,29 @@ import React from 'react';
 import { 
   Package, 
   Database, 
+  Wallet,
   ScanLine,
   ShoppingCart, 
   BarChart3, 
   User, 
   LogOut,
-  Store
+  Store,
+  Truck
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { parseEmojiAvatar } from '../utils/avatar';
+import {
+  canViewFinance,
+  canViewInventory,
+  canViewOrders,
+  canViewPayment,
+  canViewProducts,
+  canViewReports,
+  canViewStores,
+  canViewSuppliers,
+} from '../utils/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -23,20 +35,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const { user, signOut, notifications } = useAppStore();
   const unreadCount = notifications.filter((item) => !item.is_read).length;
   const selectedEmojiAvatar = parseEmojiAvatar(user?.avatar_url);
+  const role = user?.role;
 
   const menuItems = [
-    { id: 'products', label: '商品', icon: Package },
-    { id: 'inventory', label: '库存', icon: Database, roles: ['admin', 'super_admin', 'inventory_manager'] },
-    { id: 'orders', label: '订单', icon: ShoppingCart },
-    { id: 'payment', label: '收银台', icon: ScanLine, roles: ['admin', 'super_admin', 'inventory_manager'] },
-    { id: 'reports', label: '报表', icon: BarChart3, roles: ['admin', 'super_admin'] },
-    { id: 'profile', label: '我的', icon: User },
-    { id: 'stores', label: '店铺', icon: Store, roles: ['admin', 'super_admin'] },
+    { id: 'products', label: '商品', icon: Package, canView: canViewProducts(role) },
+    { id: 'inventory', label: '库存', icon: Database, canView: canViewInventory(role) },
+    { id: 'orders', label: '订单', icon: ShoppingCart, canView: canViewOrders(role) },
+    { id: 'payment', label: '收银台', icon: ScanLine, canView: canViewPayment(role) },
+    { id: 'finance', label: '财务', icon: Wallet, canView: canViewFinance(role) },
+    { id: 'reports', label: '报表', icon: BarChart3, canView: canViewReports(role) },
+    { id: 'profile', label: '我的', icon: User, canView: true },
+    { id: 'stores', label: '店铺', icon: Store, canView: canViewStores(role) },
+    { id: 'suppliers', label: '供应商', icon: Truck, canView: canViewSuppliers(role) },
   ];
 
-  const filteredItems = menuItems.filter(item => 
-    !item.roles || (user && item.roles.includes(user.role))
-  );
+  const filteredItems = menuItems.filter((item) => item.canView);
 
   return (
     <aside className="w-64 h-screen bg-background border-r border-white/10 flex flex-col fixed left-0 top-0 z-50">

@@ -104,11 +104,13 @@ interface ProductRow {
   city_id: string;
   sku?: string | null;
   category?: string | null;
+  series_id?: string | null;
   image_url?: string | null;
   barcode?: string | null;
   created_at: string;
   updated_at: string;
   cities?: { name: string } | null;
+  product_series?: { name?: string | null } | null;
   inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
 }
 
@@ -123,6 +125,9 @@ interface StoreRow {
   phone?: string | null;
   settlement_day?: number | null;
   cooperation_mode?: Store['cooperation_mode'] | null;
+  contract_expiry_date?: string | null;
+  grade?: Store['grade'] | null;
+  contract_file_url?: string | null;
   status?: Store['status'] | null;
   created_at: string;
   updated_at: string;
@@ -164,6 +169,9 @@ interface StoreCreateInput {
   phone?: string;
   settlement_day?: number | null;
   cooperation_mode?: Store['cooperation_mode'] | null;
+  contract_expiry_date?: string | null;
+  grade?: Store['grade'] | null;
+  contract_file_url?: string | null;
 }
 
 interface StoreUpdateInput {
@@ -176,6 +184,9 @@ interface StoreUpdateInput {
   phone?: string;
   settlement_day?: number | null;
   cooperation_mode?: Store['cooperation_mode'] | null;
+  contract_expiry_date?: string | null;
+  grade?: Store['grade'] | null;
+  contract_file_url?: string | null;
   status?: Store['status'];
 }
 
@@ -485,6 +496,9 @@ const mapStore = (raw: StoreRow): Store => {
     phone: raw.phone ?? undefined,
     settlement_day: raw.settlement_day ?? null,
     cooperation_mode: raw.cooperation_mode ?? null,
+    contract_expiry_date: raw.contract_expiry_date ?? null,
+    grade: raw.grade ?? null,
+    contract_file_url: raw.contract_file_url ?? null,
     status: raw.status || 'active',
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -650,6 +664,13 @@ const calculateStoreOverdueDays = (settlementDay: number | null | undefined, now
   return Math.floor(diffMs / (24 * 60 * 60 * 1000));
 };
 
+const getCooperationModeLabel = (mode: Store['cooperation_mode'] | null | undefined): string => {
+  if (mode === 'consignment') return '寄售';
+  if (mode === 'buyout') return '买断';
+  if (mode === 'direct') return '直营';
+  return '';
+};
+
 const getRevenueOrdersForStore = (orders: Order[], storeName: string): Order[] => {
   if (storeName === '云窗') {
     return orders.filter((order) => order.order_kind === 'retail' && (order.store_name || '未指定店铺') === storeName);
@@ -715,9 +736,9 @@ export const buildCityChannelReport = ({
       return {
         序号: index + 1,
         城市: store.city_name || '未知城市',
-        城市分级: '',
+        城市分级: store.grade || '未分级',
         渠道门店名称: storeName,
-        合作模式: store.cooperation_mode || '',
+        合作模式: getCooperationModeLabel(store.cooperation_mode),
         月总销售件数: monthSalesQty,
         上月同期销量: prevMonthSalesQty,
         环比增长率: momRate,
@@ -1033,7 +1054,7 @@ export const useAppStore = create<AppState>()(
 
         const { data, error } = await supabase
           .from('products')
-          .select('*, cities(name), inventory(quantity, min_quantity)')
+          .select('*, cities(name), product_series(name), inventory(quantity, min_quantity)')
           .order('name');
         if (error || !data) return;
 
@@ -1061,6 +1082,8 @@ export const useAppStore = create<AppState>()(
               image_url: p.image_url ?? undefined,
               sku: p.sku ?? null,
               category: p.category ?? null,
+              series_id: p.series_id ?? null,
+              series_name: p.product_series?.name ?? undefined,
               price: Number(p.price || 0),
               cost: Number(p.cost || 0),
               one_time_cost: Number(p.one_time_cost || 0),
@@ -1405,6 +1428,9 @@ export const useAppStore = create<AppState>()(
             settlement_day: store.settlement_day ?? null,
             cooperation_mode: store.cooperation_mode ?? null,
             status: 'active' as const,
+            contract_expiry_date: store.contract_expiry_date ?? null,
+            grade: store.grade ?? null,
+            contract_file_url: store.contract_file_url ?? null,
           };
 
           const { error } = await supabase.from('stores').insert(payload);
@@ -1437,6 +1463,9 @@ export const useAppStore = create<AppState>()(
           if (updates.settlement_day !== undefined) payload.settlement_day = updates.settlement_day;
           if (updates.cooperation_mode !== undefined) payload.cooperation_mode = updates.cooperation_mode;
           if (updates.status !== undefined) payload.status = updates.status;
+          if (updates.contract_expiry_date !== undefined) payload.contract_expiry_date = updates.contract_expiry_date;
+          if (updates.grade !== undefined) payload.grade = updates.grade;
+          if (updates.contract_file_url !== undefined) payload.contract_file_url = updates.contract_file_url;
 
           const { error } = await supabase.from('stores').update(payload).eq('id', id);
           if (error) throw error;
