@@ -15,10 +15,12 @@ import InventoryScreen from './src/screens/InventoryScreen';
 import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import KnowledgeBaseFloatingBall from './src/components/KnowledgeBaseFloatingBall';
 import { useAppStore } from './src/store/useAppStore';
 import AppConfirmModal from './src/components/AppConfirmModal';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
+import { canViewInventory, canViewOrders, canViewProducts, canViewReports } from './src/utils/permissions';
 import type { Store } from './src/types';
 
 const Tab = createBottomTabNavigator();
@@ -52,6 +54,11 @@ function MainTabs() {
   const storedUser = useAppStore((state) => state.user);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
+  const role = storedUser?.role;
+  const shouldShowProducts = canViewProducts(role);
+  const shouldShowInventory = canViewInventory(role);
+  const shouldShowOrders = canViewOrders(role);
+  const shouldShowReports = canViewReports(role);
 
   useEffect(() => {
     if (storedUser) {
@@ -73,26 +80,34 @@ function MainTabs() {
       })}
     >
 
-      <Tab.Screen 
-        name="Products" 
-        component={ProductsScreen}
-        options={{ title: '商品' }}
-      />
-      <Tab.Screen 
-        name="Inventory" 
-        component={InventoryScreen}
-        options={{ title: '库存' }}
-      />
-      <Tab.Screen 
-        name="Orders" 
-        component={OrdersScreen}
-        options={{ title: '订单' }}
-      />
-      <Tab.Screen 
-        name="Reports" 
-        component={ReportsScreen}
-        options={{ title: '报表' }}
-      />
+      {shouldShowProducts && (
+        <Tab.Screen
+          name="Products"
+          component={ProductsScreen}
+          options={{ title: '商品' }}
+        />
+      )}
+      {shouldShowInventory && (
+        <Tab.Screen
+          name="Inventory"
+          component={InventoryScreen}
+          options={{ title: '库存' }}
+        />
+      )}
+      {shouldShowOrders && (
+        <Tab.Screen
+          name="Orders"
+          component={OrdersScreen}
+          options={{ title: '订单' }}
+        />
+      )}
+      {shouldShowReports && (
+        <Tab.Screen
+          name="Reports"
+          component={ReportsScreen}
+          options={{ title: '报表' }}
+        />
+      )}
       <Tab.Screen 
         name="Profile" 
         component={ProfileScreen}
@@ -407,6 +422,7 @@ export default function App() {
           void Updates.reloadAsync();
         }}
       />
+      <KnowledgeBaseFloatingBall />
       <Toast config={toastConfig} />
     </>
   );

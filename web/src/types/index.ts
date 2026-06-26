@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'super_admin' | 'distributor' | 'inventory_manager';
+export type UserRole = 'admin' | 'super_admin' | 'distributor' | 'inventory_manager' | 'finance';
 
 export interface Profile {
   id: string;
@@ -34,6 +34,8 @@ export interface Product {
   city_id: string;
   sku?: string | null;
   category?: string | null;
+  series_id?: string | null;
+  series_name?: string;
   created_at: string;
   updated_at: string;
 }
@@ -60,6 +62,9 @@ export interface Store {
   settlement_day?: number | null;
   cooperation_mode?: 'consignment' | 'buyout' | 'direct' | null;
   status: 'active' | 'inactive';
+  contract_expiry_date?: string | null;
+  grade?: 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | null;
+  contract_file_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -145,6 +150,7 @@ export interface ProductCreateInput {
   one_time_cost: number;
   discount_price: number;
   city_id: string;
+  series_id?: string | null;
   image_url?: string;
   sku?: string | null;
   category?: string | null;
@@ -215,4 +221,52 @@ export interface ProfitReport {
   totalProfit: number;
   profitByProduct: { name: string; profit: number }[];
   profitByCity: { city: string; profit: number }[];
+}
+
+export interface Supplier {
+  id: string;
+  company_name: string;
+  delivery_cycle_days?: number | null;
+  avg_unit_price?: number | null;
+  contact?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductSeries {
+  id: string;
+  name: string;
+  sort_index: number;
+  created_at: string;
+}
+
+export interface FinancialTransaction {
+  id: string;
+  transaction_type: 'income' | 'expense';
+  category: string;
+  subcategory?: string;
+  amount: number;
+  transaction_date: string;
+  store_id?: string | null;
+  supplier_id?: string | null;
+  channel_name?: string | null;
+  description?: string | null;
+  is_recurring: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeBaseFile {
+  id: string;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  file_type: string;
+  category: 'contract_template' | 'internal_contract' | 'business_license' | 'other';
+  uploaded_by: string;
+  created_at: string;
 }

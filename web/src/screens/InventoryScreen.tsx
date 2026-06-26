@@ -118,6 +118,24 @@ export const InventoryScreen: React.FC = () => {
     return cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10));
   }, [cityFilteredProducts, showWarningOnly]);
 
+  const currentTotalStock = React.useMemo(() => {
+    return viewMode === 'main'
+      ? cityFilteredProducts.reduce((sum, p) => sum + Number(p.quantity || 0), 0)
+      : filteredStoreInventory.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  }, [viewMode, cityFilteredProducts, filteredStoreInventory]);
+
+  const totalCostValue = React.useMemo(() => {
+    return viewMode === 'main'
+      ? cityFilteredProducts.reduce((sum, p) => sum + Number(p.cost || 0) * Number(p.quantity || 0), 0)
+      : filteredStoreInventory.reduce((sum, item) => sum + Number(item.product?.cost || 0) * Number(item.quantity || 0), 0);
+  }, [viewMode, cityFilteredProducts, filteredStoreInventory]);
+
+  const totalSettlementValue = React.useMemo(() => {
+    return viewMode === 'main'
+      ? cityFilteredProducts.reduce((sum, p) => sum + Number(p.discount_price || 0) * Number(p.quantity || 0), 0)
+      : filteredStoreInventory.reduce((sum, item) => sum + Number(item.product?.discount_price || 0) * Number(item.quantity || 0), 0);
+  }, [viewMode, cityFilteredProducts, filteredStoreInventory]);
+
   const selectedPurchaseStore = React.useMemo(
     () => stores.find((store) => store.id === purchaseStoreId) || null,
     [purchaseStoreId, stores],
@@ -335,6 +353,25 @@ export const InventoryScreen: React.FC = () => {
         </div>
       )}
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <p className="text-sm text-white/60 mb-1">商品种类</p>
+          <p className="text-2xl font-bold">{viewMode === 'main' ? cityFilteredProducts.length : filteredStoreInventory.length}</p>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <p className="text-sm text-white/60 mb-1">总库存</p>
+          <p className="text-2xl font-bold">{currentTotalStock}</p>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <p className="text-sm text-white/60 mb-1">库存价值(成本)</p>
+          <p className="text-2xl font-bold text-accent">¥{totalCostValue.toFixed(2)}</p>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <p className="text-sm text-white/60 mb-1">库存价值(结算)</p>
+          <p className="text-2xl font-bold text-accent">¥{totalSettlementValue.toFixed(2)}</p>
+        </div>
+      </div>
+
       <div className="bg-white/5 border border-white/10 rounded-[32px] overflow-hidden backdrop-blur-md">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -342,6 +379,9 @@ export const InventoryScreen: React.FC = () => {
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest">商品信息</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">城市</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">当前库存</th>
+              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">成本价</th>
+              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">结算价</th>
+              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">库存价值</th>
               {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">告警阈值</th>}
               {viewMode === 'main' && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">快速操作</th>}
               {viewMode === 'store' && isSuperAdmin && <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-right">店铺池调整</th>}
@@ -379,6 +419,15 @@ export const InventoryScreen: React.FC = () => {
                         <span className={`text-xl font-black ${isLowStock ? 'text-red-500' : 'text-green-500'}`}>{currentQty}</span>
                         {isLowStock && <span className="text-[10px] bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-bold mt-1">库存不足</span>}
                       </div>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">¥{Number(product.cost || 0).toFixed(2)}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">¥{Number(product.discount_price || 0).toFixed(2)}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-accent">¥{(Number(product.cost || 0) * currentQty).toFixed(2)}</span>
                     </td>
                     <td className="px-8 py-5 text-center">
                       {editingThresholdProductId === product.id ? (
@@ -552,6 +601,15 @@ export const InventoryScreen: React.FC = () => {
                     </td>
                     <td className="px-8 py-5 text-center">
                       <span className="text-xl font-black text-white">{item.quantity}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">¥{Number(product?.cost || 0).toFixed(2)}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-white/70">¥{Number(product?.discount_price || 0).toFixed(2)}</span>
+                    </td>
+                    <td className="px-8 py-5 text-center">
+                      <span className="text-sm font-medium text-accent">¥{(Number(product?.cost || 0) * currentStoreQty).toFixed(2)}</span>
                     </td>
                     {isSuperAdmin && (
                       <td className="px-8 py-5">

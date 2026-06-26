@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Store as StoreIcon, Plus, Edit2, PowerOff, RotateCcw, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+
 import { useAppStore } from '../store/useAppStore';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { supabase } from '../lib/supabase';
+import type { Store } from '../types';
 import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const StoresScreen: React.FC = () => {
@@ -35,6 +37,9 @@ export const StoresScreen: React.FC = () => {
     phone: '',
     settlement_day: '',
     cooperation_mode: '' as '' | 'consignment' | 'buyout' | 'direct',
+    contract_expiry_date: '',
+    grade: '' as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E',
+    contract_file_url: '',
   });
 
   useEffect(() => {
@@ -89,6 +94,9 @@ export const StoresScreen: React.FC = () => {
       phone: form.phone.trim(),
       settlement_day: settlementDay,
       cooperation_mode: form.cooperation_mode || null,
+      contract_expiry_date: form.contract_expiry_date || null,
+      grade: (form.grade || null) as Store['grade'] | null,
+      contract_file_url: form.contract_file_url || null,
     };
 
     const { error } = await addStore(payload);
@@ -97,7 +105,7 @@ export const StoresScreen: React.FC = () => {
       return;
     }
     setShowCreate(false);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '' });
     setPageNotice({ type: 'success', text: '新增店铺成功' });
   };
 
@@ -108,7 +116,7 @@ export const StoresScreen: React.FC = () => {
     }
 
     setEditingStoreId(null);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '' });
     setShowCreate(true);
   };
 
@@ -129,6 +137,9 @@ export const StoresScreen: React.FC = () => {
       phone: store.phone || '',
       settlement_day: store.settlement_day == null ? '' : String(store.settlement_day),
       cooperation_mode: store.cooperation_mode || '',
+      contract_expiry_date: store.contract_expiry_date || '',
+      grade: store.grade || '',
+      contract_file_url: store.contract_file_url || '',
     });
     setShowCreate(true);
   };
@@ -157,6 +168,9 @@ export const StoresScreen: React.FC = () => {
         phone: form.phone.trim(),
         settlement_day: settlementDay,
         cooperation_mode: form.cooperation_mode || null,
+        contract_expiry_date: form.contract_expiry_date || null,
+        grade: (form.grade || null) as Store['grade'] | null,
+        contract_file_url: form.contract_file_url || null,
       };
 
       if (!payload.name || !payload.city_id) {
@@ -349,6 +363,16 @@ export const StoresScreen: React.FC = () => {
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">合作模式</p>
                   <p className="text-sm font-medium text-white/80 truncate">{store.cooperation_mode || '-'}</p>
                 </div>
+                <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
+                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">等级 / 合同到期</p>
+                  <p className="text-sm font-medium text-white/80 truncate">{store.grade || '-'}{store.contract_expiry_date ? ` / ${store.contract_expiry_date}` : ''}</p>
+                </div>
+                {store.contract_file_url && (
+                  <div className="bg-white/5 p-3 rounded-2xl border border-white/5 col-span-1 md:col-span-2">
+                    <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">合同文件</p>
+                    <p className="text-sm font-medium text-accent truncate">{store.contract_file_url}</p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-auto flex items-center justify-between pt-4 border-t border-white/5">
@@ -485,6 +509,26 @@ export const StoresScreen: React.FC = () => {
               <label className="col-span-2 space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">详细地址</span>
                 <input value={form.address} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="详细地址" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">合同到期日</span>
+                <input value={form.contract_expiry_date} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, contract_expiry_date: event.target.value }))} placeholder="如 2026-12-31" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">店铺等级</span>
+                <select value={form.grade} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, grade: event.target.value as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E' }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60">
+                  <option value="" className="bg-[#121217]">未设置</option>
+                  <option value="S" className="bg-[#121217]">S</option>
+                  <option value="A" className="bg-[#121217]">A</option>
+                  <option value="B" className="bg-[#121217]">B</option>
+                  <option value="C" className="bg-[#121217]">C</option>
+                  <option value="D" className="bg-[#121217]">D</option>
+                  <option value="E" className="bg-[#121217]">E</option>
+                </select>
+              </label>
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">合同文件链接</span>
+                <input value={form.contract_file_url} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, contract_file_url: event.target.value }))} placeholder="合同文件链接" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
               </label>
             </div>
             <div className="flex justify-end gap-2">
