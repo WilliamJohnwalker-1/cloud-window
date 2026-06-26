@@ -63,7 +63,7 @@ export const useKnowledgeBaseStore = create<KnowledgeBaseStore>()((set, get) => 
       // Delete from storage
       if (file?.file_path) {
         const { error: storageError } = await supabase.storage
-          .from('knowledge_base')
+          .from('knowledge-base')
           .remove([file.file_path]);
         if (storageError) throw storageError;
       }

@@ -38,7 +38,7 @@ export function KnowledgeBasePanel() {
       const filePath = `${user.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('knowledge_base')
+        .from('knowledge-base')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
@@ -69,7 +69,7 @@ export function KnowledgeBasePanel() {
   const handleDownload = async (filePath: string, fileName: string) => {
     try {
       const { data, error } = await supabase.storage
-        .from('knowledge_base')
+        .from('knowledge-base')
         .createSignedUrl(filePath, 60);
 
       if (error) throw error;
@@ -92,7 +92,7 @@ export function KnowledgeBasePanel() {
 
     try {
       const { error: storageError } = await supabase.storage
-        .from('knowledge_base')
+        .from('knowledge-base')
         .remove([filePath]);
 
       if (storageError) throw storageError;

@@ -69,7 +69,7 @@ export default function KnowledgeBaseFloatingBall() {
 
       // Upload to Supabase Storage
       const { error: storageError } = await supabase.storage
-        .from('knowledge_base')
+        .from('knowledge-base')
         .upload(filePath, decodeBase64(base64), {
           contentType: file.mimeType || 'application/octet-stream',
         });
@@ -120,7 +120,7 @@ export default function KnowledgeBaseFloatingBall() {
 
       // Get signed URL or public URL
       const { data } = supabase.storage
-        .from('knowledge_base')
+        .from('knowledge-base')
         .getPublicUrl(file.file_path);
 
       if (!data.publicUrl) throw new Error('无法获取文件链接');
