@@ -51,7 +51,6 @@ export const ReportsScreen: React.FC = () => {
       { key: 'inventory_turnover', label: '库存周转' },
       { key: 'revenue', label: '营收报表' },
       { key: 'supply', label: '供货统计' },
-      { key: 'sales', label: '销售报表' },
     ];
   }, [isDistributor]);
   const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
@@ -1180,7 +1179,7 @@ export const ReportsScreen: React.FC = () => {
       </div>
       )}
 
-      {reportType === 'sales' && (
+      {isDistributor && reportType === 'sales' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-bold">销售概览</h3>
@@ -1268,7 +1267,7 @@ export const ReportsScreen: React.FC = () => {
             </div>
             <h4 className="font-semibold mb-3 text-sm text-white/80">按系列平均周转天数</h4>
             <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2">
-              {turnoverData.seriesAvgTurnover.map((row, idx) => (
+              {turnoverData.seriesAvgTurnover.map((row) => (
                 <div key={row.series} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
                   <p className="text-sm text-white/90 truncate pr-3">{row.series}</p>
                   <p className="text-sm font-bold">{row.avgDays} 天</p>

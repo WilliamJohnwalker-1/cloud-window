@@ -10,12 +10,11 @@ import {
   DimensionValue,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx-js-style';
 import { useShallow } from 'zustand/react/shallow';
-import { BarChart3, TrendingUp, Download, AlertTriangle } from 'lucide-react-native';
+import { BarChart3, TrendingUp, AlertTriangle } from 'lucide-react-native';
 import { BarChart, PieChart, LineChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
@@ -143,7 +142,6 @@ export default function ReportsScreen() {
       { key: 'inventory_turnover', label: '库存周转' },
       { key: 'revenue', label: '营收报表' },
       { key: 'supply', label: '供货统计' },
-      { key: 'sales', label: '销售报表' },
     ];
   }, [isDistributor]);
 
@@ -631,7 +629,7 @@ export default function ReportsScreen() {
     let slowValue = 0;
     let regularValue = 0;
 
-    Object.entries(productTurnover).forEach(([id, p]) => {
+    Object.entries(productTurnover).forEach(([_, p]) => {
       const isHot = sortedBySales.findIndex(sp => sp.name === p.name) < top10PercentCount && p.totalSales > 0;
       const isSlow = p.recentSales < 10;
       
@@ -971,82 +969,6 @@ export default function ReportsScreen() {
     };
   }, [transactions, selectedMonth, selectedStoreId, selectedCityId, selectedProvinceId, stores, reportCityProvinceMap]);
 
-  const exportProfitExcel = async () => {
-    if (exportLocks.current.profitExcel) return;
-    exportLocks.current.profitExcel = true;
-    try {
-      const workbook = XLSX.utils.book_new();
-      const headers = ['商品名称', '销量', '零售价', '零售总价', '折扣价', '折扣总收入', '总成本', '总利润'];
-      const dataRows: SheetRow[] = profitData.profitByProduct.map((r) => [
-        r.name,
-        r.quantity,
-        Number(r.retailPrice.toFixed(2)),
-        Number(r.retailRevenue.toFixed(2)),
-        Number(r.discountPrice.toFixed(2)),
-        Number(r.discountRevenue.toFixed(2)),
-        Number(r.cost.toFixed(2)),
-        Number(r.profit.toFixed(2)),
-      ]);
-      appendStyledSheet(workbook, '利润报表', headers, dataRows);
-      const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-      await shareStyledWorkbook(workbook, `profit-report${monthSuffix}-${Date.now()}.xlsx`);
-    } catch (error: unknown) {
-      if (isShareCancelledError(error)) return;
-      const message = error instanceof Error ? error.message : 'Excel 导出失败';
-      Toast.show({ type: 'error', text1: '导出失败', text2: message });
-    } finally {
-      exportLocks.current.profitExcel = false;
-    }
-  };
-
-  const exportProfitPdf = async () => {
-    if (exportLocks.current.profitPdf) return;
-    exportLocks.current.profitPdf = true;
-    try {
-      const rows = profitData.profitByProduct
-        .map(
-          (r) => `
-          <tr>
-            <td>${r.name}</td>
-            <td>${r.retailRevenue.toFixed(2)}元</td>
-            <td>${r.discountRevenue.toFixed(2)}元</td>
-            <td>${r.cost.toFixed(2)}元</td>
-            <td>${r.profit.toFixed(2)}元</td>
-          </tr>`,
-        )
-        .join('');
-
-      const html = `
-        <html>
-          <body style="font-family: Arial; padding: 20px;">
-            <h2>利润报表</h2>
-            <p>零售总价：${profitData.totalRetailRevenue.toFixed(2)}元</p>
-            <p>折扣总收入：${profitData.totalDiscountRevenue.toFixed(2)}元</p>
-            <p>总成本：${profitData.totalCost.toFixed(2)}元</p>
-            <p>总利润：${profitData.totalProfit.toFixed(2)}元</p>
-            <table border="1" cellspacing="0" cellpadding="6" style="border-collapse: collapse; width:100%;">
-              <tr>
-                <th>商品</th><th>零售总价</th><th>折扣总收入</th><th>总成本</th><th>总利润</th>
-              </tr>
-              ${rows}
-            </table>
-          </body>
-        </html>
-      `;
-
-      const { uri } = await Print.printToFileAsync({ html });
-      const monthSuffix = selectedMonth === 'all' ? '' : `-${selectedMonth}`;
-      const newUri = `${FileSystem.cacheDirectory}profit-report${monthSuffix}-${Date.now()}.pdf`;
-      await FileSystem.moveAsync({ from: uri, to: newUri });
-      await Sharing.shareAsync(newUri, { mimeType: 'application/pdf' });
-    } catch (error: unknown) {
-      if (isShareCancelledError(error)) return;
-      const message = error instanceof Error ? error.message : 'PDF 导出失败';
-      Toast.show({ type: 'error', text1: '导出失败', text2: message });
-    } finally {
-      exportLocks.current.profitPdf = false;
-    }
-  };
 
   const exportBusinessData = async () => {
     if (exportLocks.current.business) return;
@@ -1463,74 +1385,6 @@ export default function ReportsScreen() {
     </ScrollView>
   );
 
-  const renderProfitReport = () => (
-    <ScrollView>
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>利润概览</Text>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{profitData.totalRetailRevenue.toFixed(2)}元</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>零售总价</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{profitData.totalDiscountRevenue.toFixed(2)}元</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总收入(折扣)</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, styles.profitText]}>{profitData.totalProfit.toFixed(2)}元</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总利润</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.exportRow}>
-        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportProfitExcel(); }}>
-          <Download size={14} color="#fff" />
-          <Text style={styles.exportButtonText}>导出 Excel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportProfitPdf(); }}>
-          <Download size={14} color="#fff" />
-          <Text style={styles.exportButtonText}>导出 PDF</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.exportButton} onPress={() => { void exportBusinessData(); }}>
-          <Download size={14} color="#fff" />
-          <Text style={styles.exportButtonText}>导出经营数据</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品利润排行</Text>
-        {profitData.profitByProduct.length > 0 ? (
-          profitData.profitByProduct.map((item) => (
-            <View key={item.name} style={[styles.profitItem, { borderBottomColor: theme.divider }]}>
-              <View style={styles.profitItemHeader}>
-                <TouchableOpacity onPress={() => showFullProductName(item.name)} activeOpacity={0.75} style={styles.profitNameTouchArea}>
-                  <Text style={[styles.profitItemName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-                    {item.name}
-                  </Text>
-                </TouchableOpacity>
-                <Text style={[styles.profitItemValue, item.profit >= 0 ? styles.profitText : styles.lossText]}>
-                  {item.profit.toFixed(2)}元
-                </Text>
-              </View>
-              <View style={styles.profitDetails}>
-                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>零售总价: {item.retailRevenue.toFixed(2)}元</Text>
-                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>总收入: {item.discountRevenue.toFixed(2)}元</Text>
-              </View>
-              <View style={styles.profitDetails}>
-                <Text style={[styles.profitDetailText, { color: theme.textSecondary }]}>总成本: {item.cost.toFixed(2)}元</Text>
-              </View>
-            </View>
-          ))
-        ) : (
-          <View style={styles.emptyChartContainer}>
-            <TrendingUp size={40} color={theme.textTertiary} strokeWidth={1.5} />
-            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无利润数据</Text>
-          </View>
-        )}
-      </View>
-    </ScrollView>
-  );
 
   const renderRevenueReport = () => (
     <ScrollView>
@@ -1924,7 +1778,7 @@ export default function ReportsScreen() {
       </View>
 
       <View style={[styles.content, { backgroundColor: theme.background }]}> 
-        {reportType === 'sales' && renderSalesReport()}
+        {isDistributor && reportType === 'sales' && renderSalesReport()}
         {!isDistributor && reportType === 'revenue' && renderRevenueReport()}
         {reportType === 'supply' && renderSupplyReport()}
         {!isDistributor && reportType === 'inventory_turnover' && renderInventoryReport()}
