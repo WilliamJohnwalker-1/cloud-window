@@ -17,6 +17,7 @@ import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
+import { useSupplierStore } from '../store/useSupplierStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { getProvinceForCity } from '../utils/provinceMapping';
@@ -74,6 +75,7 @@ export default function InventoryScreen() {
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [purchaseStoreId, setPurchaseStoreId] = useState<string | null>(null);
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState<string | null>(null);
   const [purchaseCart, setPurchaseCart] = useState<Map<string, number>>(new Map());
   const [submittingPurchase, setSubmittingPurchase] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -91,6 +93,12 @@ export default function InventoryScreen() {
   const isSuperAdmin = user?.role === 'super_admin';
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const canCreatePurchase = user?.role === 'admin' || user?.role === 'super_admin';
+  const { suppliers, fetchSuppliers } = useSupplierStore(
+    useShallow((state) => ({
+      suppliers: state.suppliers,
+      fetchSuppliers: state.fetchSuppliers,
+    })),
+  );
 
   useEffect(() => {
     fetchProducts();
@@ -98,7 +106,10 @@ export default function InventoryScreen() {
     if (isAdminOrManager) {
       fetchStores();
     }
-  }, [fetchProducts, fetchCities, fetchStores, isAdminOrManager]);
+    if (canCreatePurchase) {
+      void fetchSuppliers();
+    }
+  }, [canCreatePurchase, fetchCities, fetchProducts, fetchStores, fetchSuppliers, isAdminOrManager]);
 
   useEffect(() => {
     if (viewMode === 'store' && selectedStoreId) {
@@ -307,6 +318,7 @@ export default function InventoryScreen() {
   const resetPurchaseForm = () => {
     setPurchaseCart(new Map());
     setPurchaseStoreId(null);
+    setPurchaseSupplierId(null);
   };
 
   const handleConfirmPurchase = async () => {
@@ -316,12 +328,12 @@ export default function InventoryScreen() {
       return;
     }
 
-    const groupMap = new Map<string, { store_id: string; city_id: string; products: Array<{ product_id: string; quantity: number }> }>();
+    const groupMap = new Map<string, { store_id: string; city_id: string; supplier_id: string | null; products: Array<{ product_id: string; quantity: number }> }>();
     purchaseCartEntries.forEach(([key, quantity]) => {
       const [storeId, productId] = key.split(':');
       const store = activePurchaseStores.find((item) => item.id === storeId);
       if (!store || !productId) return;
-      const group = groupMap.get(storeId) || { store_id: storeId, city_id: store.city_id, products: [] };
+      const group = groupMap.get(storeId) || { store_id: storeId, city_id: store.city_id, supplier_id: purchaseSupplierId ?? null, products: [] };
       group.products.push({ product_id: productId, quantity });
       groupMap.set(storeId, group);
     });
@@ -1007,6 +1019,43 @@ export default function InventoryScreen() {
                   >
                     <Text style={[styles.cityFilterText, purchaseStoreId === store.id && styles.cityFilterTextActive]} numberOfLines={1} ellipsizeMode="tail">
                       {store.name}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>关联供应商（可选）</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow} contentContainerStyle={styles.cityFilterContent}>
+              <TouchableOpacity
+                style={[styles.cityFilterItem, purchaseSupplierId === null && styles.cityFilterItemActive]}
+                onPress={() => setPurchaseSupplierId(null)}
+              >
+                <LinearGradient
+                  colors={purchaseSupplierId === null ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cityGradientChip}
+                >
+                  <Text style={[styles.cityFilterText, purchaseSupplierId === null && styles.cityFilterTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                    不关联供应商
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              {suppliers.map((supplier) => (
+                <TouchableOpacity
+                  key={supplier.id}
+                  style={[styles.cityFilterItem, purchaseSupplierId === supplier.id && styles.cityFilterItemActive]}
+                  onPress={() => setPurchaseSupplierId(supplier.id)}
+                >
+                  <LinearGradient
+                    colors={purchaseSupplierId === supplier.id ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.cityGradientChip}
+                  >
+                    <Text style={[styles.cityFilterText, purchaseSupplierId === supplier.id && styles.cityFilterTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      {supplier.company_name}
                     </Text>
                   </LinearGradient>
                 </TouchableOpacity>

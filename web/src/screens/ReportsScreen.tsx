@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
 import { AlertTriangle, DollarSign, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
@@ -7,9 +7,10 @@ import { useAppStore } from '../store/useAppStore';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 import { getProvinceForCity } from '../utils/provinceMapping';
-import type { City } from '../types';
+import type { City, FinanceReportType } from '../types';
 
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
+type ReportType = FinanceReportType;
 
 export const ReportsScreen: React.FC = () => {
   const {
@@ -25,14 +26,33 @@ export const ReportsScreen: React.FC = () => {
     generateCityChannelReport,
     generateProductDetailReport,
     generatePaymentReport,
+    createSlowMovingAlertNotification,
   } = useAppStore();
-  const { transactions, fetchTransactions } = useFinanceStore();
+  const { transactions, cashBalance, fetchTransactions, fetchBalance } = useFinanceStore();
+  const isDistributor = user?.role === 'distributor';
+  const [reportType, setReportType] = useState<ReportType>(user?.role === 'distributor' ? 'supply' : 'finance');
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
+  const slowMovingAlertScopeRef = useRef<string | null>(null);
+  const reportTabs = useMemo<Array<{ key: ReportType; label: string }>>(() => {
+    if (isDistributor) {
+      return [
+        { key: 'supply', label: '供货统计' },
+        { key: 'sales', label: '销售报表' },
+      ];
+    }
+
+    return [
+      { key: 'finance', label: '财务报表' },
+      { key: 'inventory_turnover', label: '库存周转' },
+      { key: 'revenue', label: '营收报表' },
+      { key: 'supply', label: '供货统计' },
+    ];
+  }, [isDistributor]);
   const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
     if (order.city_id) return order.city_id;
     const fallbackName = String(order.city_name || '').trim();
@@ -98,11 +118,31 @@ export const ReportsScreen: React.FC = () => {
     if (selectedCityId && selectedCityId.startsWith('name:')) return [];
     return selectedCityId ? provinceFiltered.filter((store) => store.city_id === selectedCityId) : provinceFiltered;
   }, [reportCityProvinceMap, selectedCityId, selectedProvinceId, stores]);
+  const slowMovingAlertScopeLabel = useMemo(() => {
+    const scopeParts: string[] = [];
+    if (selectedProvinceId) {
+      scopeParts.push(selectedProvinceId);
+    }
+    if (selectedCityId) {
+      const cityName = selectedCityId.startsWith('name:')
+        ? selectedCityId.replace('name:', '')
+        : reportCities.find((city) => city.id === selectedCityId)?.name || '未知城市';
+      scopeParts.push(cityName);
+    }
+    if (selectedStore?.name) {
+      scopeParts.push(selectedStore.name);
+    }
+    if (selectedMonth !== 'all') {
+      scopeParts.push(`${selectedMonth} 月`);
+    }
+    return scopeParts.length > 0 ? scopeParts.join(' / ') : '全部范围';
+  }, [reportCities, selectedCityId, selectedMonth, selectedProvinceId, selectedStore]);
 
   useEffect(() => {
     void fetchStores();
     void fetchTransactions();
-  }, [fetchStores, fetchTransactions]);
+    void fetchBalance();
+  }, [fetchBalance, fetchStores, fetchTransactions]);
 
   useEffect(() => {
     if (selectedMonth === 'all') {
@@ -136,13 +176,16 @@ export const ReportsScreen: React.FC = () => {
     }
   }, [filteredStores, selectedStoreId]);
 
-  const medalStyles = [
-    'from-amber-400/30 to-amber-600/20 border-amber-300/40 text-amber-200',
-    'from-slate-300/30 to-slate-500/20 border-slate-300/30 text-slate-100',
-    'from-orange-500/30 to-orange-700/20 border-orange-300/30 text-orange-200',
-  ];
+  useEffect(() => {
+    if (reportTabs.some((item) => item.key === reportType)) {
+      return;
+    }
 
-  const { stats, productVolumeRanking, cityData, storeData, productAmountRanking, profitData, supplyData, turnoverData, revenueData, sellThroughData } = useMemo(() => {
+    setReportType(reportTabs[0]?.key || 'sales');
+  }, [reportTabs, reportType]);
+
+
+  const { stats, profitData, supplyData, turnoverData, revenueData, sellThroughData, salesSummary } = useMemo(() => {
     const provinceScopedOrders = selectedProvinceId
       ? orders.filter((order) => {
           const province = reportCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
@@ -314,6 +357,52 @@ export const ReportsScreen: React.FC = () => {
     const totalDiscountRevenue = profitByProduct.reduce((sum, row) => sum + row.discountRevenue, 0);
     const totalCost = profitByProduct.reduce((sum, row) => sum + row.cost, 0);
 
+    const globalSeenProductsForTrend = new Set<string>();
+    const profitTrendMap = new Map<string, { revenue: number; cost: number }>();
+    
+    const sortedRevenueOrders = [...revenueOrders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    
+    sortedRevenueOrders.forEach((order) => {
+      const date = new Date(order.created_at);
+      let key = '';
+      if (selectedMonth === 'all') {
+        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      } else {
+        key = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      }
+      
+      if (!profitTrendMap.has(key)) {
+        profitTrendMap.set(key, { revenue: 0, cost: 0 });
+      }
+      const trendEntry = profitTrendMap.get(key)!;
+      
+      order.items.forEach((item) => {
+        const qty = Number(item.quantity || 0);
+        if (item.is_sample) {
+          trendEntry.cost += qty * Number(item.unit_cost || 0);
+        } else {
+          trendEntry.revenue += qty * Number(item.discount_price || 0);
+          trendEntry.cost += qty * Number(item.unit_cost || 0);
+        }
+        
+        if (!globalSeenProductsForTrend.has(item.product_id)) {
+          globalSeenProductsForTrend.add(item.product_id);
+          trendEntry.cost += Number(item.one_time_cost || 0);
+        }
+      });
+    });
+
+    const profitTrend = Array.from(profitTrendMap.entries())
+      .map(([label, data]) => {
+        const profit = data.revenue - data.cost;
+        const marginRate = data.revenue > 0 ? (profit / data.revenue) * 100 : 0;
+        return {
+          label,
+          profit,
+          marginRate: Number(marginRate.toFixed(2))
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
     const supplyStoreMap = new Map<string, number>();
     const supplyProductMap = new Map<string, number>();
     let totalSupplyQuantity = 0;
@@ -346,52 +435,173 @@ export const ReportsScreen: React.FC = () => {
 
     const soldOrders = scopedOrders.filter((order) => order.order_kind !== 'purchase');
     
-    const productTurnover: { [key: string]: { name: string; turnoverDays: number; isSlow: boolean } } = {};
-    const lastSoldAt: Record<string, number> = {};
+    let periodDays = 30;
+    if (selectedMonth !== 'all') {
+      const [year, month] = selectedMonth.split('-');
+      periodDays = new Date(Number(year), Number(month), 0).getDate();
+    } else if (soldOrders.length > 0) {
+      const earliest = Math.min(...soldOrders.map(o => new Date(o.created_at).getTime()));
+      const latest = Math.max(...soldOrders.map(o => new Date(o.created_at).getTime()));
+      periodDays = Math.max(1, Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24)));
+    }
 
+    const productOrderCount: Record<string, number> = {};
+    const productSalesVolume: Record<string, number> = {};
+    
     soldOrders.forEach((order) => {
-      const soldAt = new Date(order.created_at).getTime();
-      if (!Number.isFinite(soldAt)) return;
+      const seenProducts = new Set<string>();
       order.items.forEach((item) => {
         if (item.is_sample || Number(item.quantity || 0) <= 0) return;
-        const current = lastSoldAt[item.product_id] || 0;
-        if (soldAt > current) {
-          lastSoldAt[item.product_id] = soldAt;
+        const pid = item.product_id;
+        if (!seenProducts.has(pid)) {
+          seenProducts.add(pid);
+          productOrderCount[pid] = (productOrderCount[pid] || 0) + 1;
         }
+        productSalesVolume[pid] = (productSalesVolume[pid] || 0) + Number(item.quantity || 0);
       });
     });
     
     const targetProducts = selectedStoreId 
-      ? storeInventory.map(p => ({ id: p.product_id, name: p.product_name || '未知' }))
-      : products.map(p => ({ id: p.id, name: p.name }));
+      ? storeInventory.map(p => ({ id: p.product_id, name: p.product_name || '未知', cost: products.find(x => x.id === p.product_id)?.cost || 0, series: products.find(x => x.id === p.product_id)?.series_name || '未知', inventoryQty: Number(p.quantity || 0) }))
+      : products.map(p => ({ id: p.id, name: p.name, cost: p.cost || 0, series: p.series_name || '未知', inventoryQty: storeInventory.filter(inv => inv.product_id === p.id).reduce((sum, inv) => sum + Number(inv.quantity || 0), 0) }));
 
     const uniqueProducts = Array.from(new Map(targetProducts.map(p => [p.id, p])).values());
 
+    const sortedByVolume = [...uniqueProducts].sort((a, b) => (productSalesVolume[b.id] || 0) - (productSalesVolume[a.id] || 0));
+    const top10PercentCount = Math.max(1, Math.floor(uniqueProducts.length * 0.1));
+    const hotProductIds = new Set(sortedByVolume.slice(0, top10PercentCount).map(p => p.id));
+
+    let slowMovingCost = 0;
+    let totalInventoryCost = 0;
+    let hotCost = 0;
+    let regularCost = 0;
+
+    const scatterData: any[] = [];
+    const seriesTurnover: Record<string, { totalDays: number; count: number }> = {};
+    let totalTurnoverDays = 0;
+    let validTurnoverCount = 0;
+
     uniqueProducts.forEach(p => {
-      const soldAt = lastSoldAt[p.id];
-      const turnoverDays = soldAt
-        ? Math.max(1, Math.floor((Date.now() - soldAt) / (24 * 60 * 60 * 1000)))
-        : 999;
-        
-      productTurnover[p.id] = {
-        name: p.name,
-        turnoverDays,
-        isSlow: turnoverDays > 60
-      };
+      const orderCount = productOrderCount[p.id] || 0;
+      const volume = productSalesVolume[p.id] || 0;
+      const turnoverDays = orderCount > 0 ? Math.round(periodDays / orderCount) : 999;
+      
+      let category = '常规款';
+      if (hotProductIds.has(p.id) && volume > 0) {
+        category = '热销款';
+      } else if (volume < 10) {
+        category = '滞销款';
+      }
+
+      const invCost = p.inventoryQty * Number(p.cost);
+      totalInventoryCost += invCost;
+
+      if (category === '滞销款') slowMovingCost += invCost;
+      else if (category === '热销款') hotCost += invCost;
+      else regularCost += invCost;
+
+      if (turnoverDays !== 999) {
+        scatterData.push({
+          id: p.id,
+          name: p.name,
+          cost: Number(p.cost),
+          turnoverDays,
+          category
+        });
+        totalTurnoverDays += turnoverDays;
+        validTurnoverCount++;
+
+        if (!seriesTurnover[p.series]) {
+          seriesTurnover[p.series] = { totalDays: 0, count: 0 };
+        }
+        seriesTurnover[p.series].totalDays += turnoverDays;
+        seriesTurnover[p.series].count++;
+      }
     });
 
-    const topTurnoverProducts = Object.values(productTurnover)
-      .sort((a, b) => a.turnoverDays - b.turnoverDays)
-      .slice(0, 5);
+    const avgTurnoverDays = validTurnoverCount > 0 ? Math.round(totalTurnoverDays / validTurnoverCount) : 0;
+    const seriesAvgTurnover = Object.entries(seriesTurnover).map(([series, data]) => ({
+      series,
+      avgDays: Math.round(data.totalDays / data.count)
+    })).sort((a, b) => a.avgDays - b.avgDays);
 
-    const slowMovingProducts = Object.values(productTurnover)
-      .filter(item => item.isSlow)
-      .sort((a, b) => b.turnoverDays - a.turnoverDays)
-      .slice(0, 5);
+    const pieData = [
+      { name: '热销款', value: hotCost, color: '#FF6B9D' },
+      { name: '常规款', value: regularCost, color: '#5B8DEF' },
+      { name: '滞销款', value: slowMovingCost, color: '#ffc658' }
+    ].filter(d => d.value > 0);
+
+    const slowMovingRatio = totalInventoryCost > 0 ? slowMovingCost / totalInventoryCost : 0;
+    const isSlowMovingAlert = slowMovingRatio > 0.15;
+
+    let drillDownData: any[] = [];
+    let drillDownLevel = 'province';
+
+    if (selectedStoreId) {
+      drillDownLevel = 'product';
+      drillDownData = uniqueProducts.map(p => ({
+        name: p.name,
+        rate: (productSalesVolume[p.id] || 0) > 0 ? 100 : 0
+      })).sort((a, b) => b.rate - a.rate).slice(0, 10);
+    } else if (selectedCityId) {
+      drillDownLevel = 'store';
+      const storesInCity = filteredStores.filter(s => s.city_id === selectedCityId);
+      drillDownData = storesInCity.map(s => {
+        const storeOrders = cityScopedOrders.filter(o => o.store_id === s.id);
+        const storeActiveSkus = new Set();
+        storeOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) storeActiveSkus.add(i.product_id); }));
+        const storeTotalSkus = storeInventory.filter(inv => inv.store_id === s.id).length || products.length;
+        return {
+          name: s.name,
+          rate: storeTotalSkus > 0 ? Math.round((storeActiveSkus.size / storeTotalSkus) * 100) : 0
+        };
+      }).sort((a, b) => b.rate - a.rate);
+    } else if (selectedProvinceId) {
+      drillDownLevel = 'city';
+      const citiesInProvince = reportCities.filter(c => (selectedProvinceId === '未知省份' ? !c.province : c.province === selectedProvinceId));
+      drillDownData = citiesInProvince.map(c => {
+        const cityOrders = provinceScopedOrders.filter(o => getOrderCityKey(o) === c.id);
+        const cityActiveSkus = new Set();
+        cityOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) cityActiveSkus.add(i.product_id); }));
+        return {
+          name: c.name,
+          rate: products.length > 0 ? Math.round((cityActiveSkus.size / products.length) * 100) : 0
+        };
+      }).sort((a, b) => b.rate - a.rate);
+    } else {
+      drillDownLevel = 'province';
+      const provinces = Array.from(new Set(reportCities.map(c => c.province || '未知省份')));
+      drillDownData = provinces.map(prov => {
+        const provOrders = orders.filter(o => {
+          const p = reportCityProvinceMap.get(getOrderCityKey(o)) || getProvinceForCity(o.city_name || '');
+          return prov === '未知省份' ? !p : p === prov;
+        });
+        const provActiveSkus = new Set();
+        provOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) provActiveSkus.add(i.product_id); }));
+        return {
+          name: prov,
+          rate: products.length > 0 ? Math.round((provActiveSkus.size / products.length) * 100) : 0
+        };
+      }).sort((a, b) => b.rate - a.rate);
+    }
 
     const turnoverData = {
-      topTurnoverProducts,
-      slowMovingProducts,
+      scatterData,
+      avgTurnoverDays,
+      seriesAvgTurnover,
+      pieData,
+      slowMovingCost,
+      slowMovingRatio,
+      totalInventoryCost,
+      isSlowMovingAlert,
+      drillDownData,
+      drillDownLevel
+    };
+
+    const salesSummary = {
+      totalSalesAmount: scopedOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0),
+      orderCount: scopedOrders.length,
+      pendingCount,
     };
 
     return {
@@ -417,6 +627,7 @@ export const ReportsScreen: React.FC = () => {
         totalCost,
         totalProfit: totalDiscountRevenue - totalCost,
         profitByProduct,
+        profitTrend,
       },
       supplyData: {
         totalOrders: supplyOrders.length,
@@ -425,8 +636,38 @@ export const ReportsScreen: React.FC = () => {
         byStore: supplyByStore,
       },
       turnoverData,
+      salesSummary,
     };
   }, [orders, products, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
+
+  useEffect(() => {
+    if (!user || user.role === 'distributor') return;
+    if (reportType !== 'inventory_turnover') return;
+    if (!turnoverData.isSlowMovingAlert || turnoverData.totalInventoryCost <= 0) return;
+    if (slowMovingAlertScopeRef.current === slowMovingAlertScopeLabel) return;
+
+    slowMovingAlertScopeRef.current = slowMovingAlertScopeLabel;
+    void (async () => {
+      const { error } = await createSlowMovingAlertNotification({
+        scopeLabel: slowMovingAlertScopeLabel,
+        slowMovingRatio: turnoverData.slowMovingRatio,
+        slowMovingCost: turnoverData.slowMovingCost,
+        totalInventoryCost: turnoverData.totalInventoryCost,
+      });
+      if (error) {
+        slowMovingAlertScopeRef.current = null;
+      }
+    })();
+  }, [
+    createSlowMovingAlertNotification,
+    reportType,
+    slowMovingAlertScopeLabel,
+    turnoverData.isSlowMovingAlert,
+    turnoverData.slowMovingCost,
+    turnoverData.slowMovingRatio,
+    turnoverData.totalInventoryCost,
+    user,
+  ]);
 
   const financeData = useMemo(() => {
     const validStoreIds = new Set(filteredStores.map(s => s.id));
@@ -452,14 +693,37 @@ export const ReportsScreen: React.FC = () => {
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
     const netIncome = totalIncome - totalExpense;
+    const incomeByCategory = new Map<string, number>();
+    const expenseByCategory = new Map<string, number>();
+
+    monthFilteredTransactions.forEach((transaction) => {
+      const category = transaction.category || '未分类';
+      if (transaction.transaction_type === 'income') {
+        incomeByCategory.set(category, (incomeByCategory.get(category) || 0) + Number(transaction.amount || 0));
+      } else if (transaction.transaction_type === 'expense') {
+        expenseByCategory.set(category, (expenseByCategory.get(category) || 0) + Number(transaction.amount || 0));
+      }
+    });
+
+    const topIncomeCategories = Array.from(incomeByCategory.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+
+    const topExpenseCategories = Array.from(expenseByCategory.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
 
     return {
       totalIncome,
       totalExpense,
       netIncome,
       transactionCount: monthFilteredTransactions.length,
+      topIncomeCategories,
+      topExpenseCategories,
     };
-  }, [transactions, selectedMonth, selectedStoreId, selectedCityId, selectedProvinceId, filteredStores]);
+  }, [filteredStores, selectedCityId, selectedMonth, selectedProvinceId, selectedStoreId, transactions]);
 
   const inventorySummary = useMemo(() => {
     if (!selectedStoreId) return null;
@@ -583,16 +847,6 @@ export const ReportsScreen: React.FC = () => {
     }
   };
 
-  const volumeTop3 = productVolumeRanking.slice(0, 3);
-  const amountTop3 = productAmountRanking.slice(0, 3);
-  const volumeChartData = productVolumeRanking.slice(0, 10).map((row) => ({
-    ...row,
-    shortName: row.name.length > 6 ? `${row.name.slice(0, 6)}…` : row.name,
-  }));
-  const amountChartData = productAmountRanking.slice(0, 10).map((row) => ({
-    ...row,
-    shortName: row.name.length > 6 ? `${row.name.slice(0, 6)}…` : row.name,
-  }));
 
   return (
     <div className="space-y-8">
@@ -612,7 +866,7 @@ export const ReportsScreen: React.FC = () => {
         </div>
       </div>
 
-      {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager') && stores.length > 0 && (
+      {!isDistributor && stores.length > 0 && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
           <div className="mb-3">
             <ProvinceCityFilter
@@ -647,7 +901,19 @@ export const ReportsScreen: React.FC = () => {
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {reportTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setReportType(tab.key)}
+              className={`px-4 py-2 rounded-xl border text-sm font-semibold ${reportType === tab.key ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/70 hover:text-white'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={() => { void exportBusinessData(); }}
@@ -657,7 +923,7 @@ export const ReportsScreen: React.FC = () => {
         </button>
       </div>
 
-      {inventorySummary && (
+      {reportType === 'inventory_turnover' && inventorySummary && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
             <p className="text-xs text-white/50">店铺商品数</p>
@@ -674,6 +940,7 @@ export const ReportsScreen: React.FC = () => {
         </div>
       )}
 
+      {reportType === 'finance' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;
@@ -699,21 +966,29 @@ export const ReportsScreen: React.FC = () => {
           );
         })}
       </div>
+      )}
 
+      {reportType === 'revenue' && (
       <div className="bg-accent/10 border border-accent/30 rounded-2xl px-4 py-3">
         <p className="text-sm font-bold text-accent">目标四报表（本轮重点）</p>
         <p className="text-xs text-white/60 mt-1">营收概览、供货统计、SKU动销率、商品周转天数</p>
       </div>
+      )}
+      {reportType === 'revenue' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-bold">营收概览</h3>
           <p className="text-sm text-white/50">口径：结算单 + 零售单（已排除退款单）</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white/[0.03] rounded-xl px-4 py-3">
             <p className="text-xs text-white/50">总营收</p>
             <p className="text-lg font-black">{revenueData.totalRevenue.toFixed(2)}元</p>
+          </div>
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">总毛利</p>
+            <p className="text-lg font-black text-green-400">{profitData.totalProfit.toFixed(2)}元</p>
           </div>
           <div className="bg-white/[0.03] rounded-xl px-4 py-3">
             <p className="text-xs text-white/50">营收订单数</p>
@@ -761,6 +1036,61 @@ export const ReportsScreen: React.FC = () => {
           )}
         </div>
 
+        {selectedStoreId && (
+          <div className="bg-white/[0.03] rounded-2xl p-4">
+            <h4 className="font-semibold mb-3">毛利与毛利率趋势</h4>
+            {profitData.profitTrend.length > 0 ? (
+              <div className="h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={profitData.profitTrend} margin={{ top: 8, right: 10, left: 0, bottom: 28 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                    <XAxis dataKey="label" stroke="#ffffff40" fontSize={11} tickLine={false} axisLine={false} interval={0} />
+                    <YAxis yAxisId="left" stroke="#ffffff40" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value: number) => `¥${value}`} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#ffffff40" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value: number) => `${value}%`} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                      itemStyle={{ color: '#fff' }}
+                      formatter={(value: number, name: string) => [name === 'profit' ? `¥${value.toFixed(2)}` : `${value}%`, name === 'profit' ? '毛利' : '毛利率']}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '12px', opacity: 0.8 }} />
+                    <Bar yAxisId="left" dataKey="profit" name="profit" fill="#5B8DEF" radius={[4, 4, 0, 0]} />
+                    <Line yAxisId="right" type="monotone" dataKey="marginRate" name="marginRate" stroke="#FF6B9D" strokeWidth={2} dot={{ r: 4, fill: '#FF6B9D' }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-white/40">暂无趋势数据</p>
+            )}
+          </div>
+        )}
+
+        <div className="bg-white/[0.03] rounded-2xl p-4">
+          <h4 className="font-semibold mb-3">SKU毛利润排行 (Top 10)</h4>
+          {profitData.profitByProduct.length > 0 ? (
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={profitData.profitByProduct.slice(0, 10)} layout="vertical" margin={{ top: 8, right: 30, left: 40, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" horizontal={false} />
+                  <XAxis type="number" stroke="#ffffff40" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value: number) => `¥${value}`} />
+                  <YAxis type="category" dataKey="name" stroke="#ffffff40" fontSize={11} tickLine={false} axisLine={false} width={80} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                    itemStyle={{ color: '#fff' }}
+                    formatter={(value: number) => [`¥${value.toFixed(2)}`, '毛利润']}
+                  />
+                  <Bar dataKey="profit" radius={[0, 10, 10, 0]}>
+                    {profitData.profitByProduct.slice(0, 10).map((entry, index) => (
+                      <Cell key={entry.name} fill={colors[index % colors.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <p className="text-sm text-white/40">暂无毛利润数据</p>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {revenueData.compositionByStore.length > 0 && (
             <div className="bg-white/[0.03] rounded-2xl p-4">
@@ -798,8 +1128,10 @@ export const ReportsScreen: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
 
+      {reportType === 'supply' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-bold">供货统计</h3>
@@ -845,160 +1177,148 @@ export const ReportsScreen: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">商品销量排行</h3>
-            <div className="text-xs text-white/40">统一导出已迁移至“导出经营数据”</div>
+      {isDistributor && reportType === 'sales' && (
+      <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-bold">销售概览</h3>
+          <p className="text-sm text-white/50">口径：当前筛选范围内全部订单</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">总销售额</p>
+            <p className="text-lg font-black text-accent">¥{salesSummary.totalSalesAmount.toFixed(2)}</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-            {volumeTop3.map((row, idx) => (
-              <div
-                key={row.name}
-                className={`rounded-2xl border bg-gradient-to-br px-4 py-3 ${medalStyles[idx] ?? 'border-white/10 text-white/80'}`}
-              >
-                <p className="text-[10px] font-black uppercase tracking-widest opacity-80">TOP {idx + 1}</p>
-                <p className="text-sm font-bold mt-1 truncate">{row.name}</p>
-                <p className="text-lg font-black mt-1">{row.value}</p>
-              </div>
-            ))}
-            {volumeTop3.length === 0 && <p className="text-sm text-white/40 col-span-3">暂无销量排行数据</p>}
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">订单数量</p>
+            <p className="text-lg font-black">{salesSummary.orderCount}</p>
           </div>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={volumeChartData} margin={{ top: 8, right: 10, left: 0, bottom: 28 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-                <XAxis
-                  dataKey="shortName"
-                  stroke="#ffffff40"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  interval={0}
-                />
-                <YAxis
-                  stroke="#ffffff40"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                  itemStyle={{ color: '#fff' }}
-                  formatter={(value: number) => [value, '销量']}
-                  labelFormatter={(_, payload) => String(payload?.[0]?.payload?.name || '')}
-                />
-                <Bar dataKey="value" radius={[10, 10, 0, 0]}>
-                  {volumeChartData.map((entry, index) => (
-                    <Cell key={entry.name} fill={colors[index % colors.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">待处理订单</p>
+            <p className="text-lg font-black">{salesSummary.pendingCount}</p>
           </div>
         </div>
+        <p className="text-sm text-white/50">共 {salesSummary.orderCount} 笔订单，总销售额 ¥{salesSummary.totalSalesAmount.toFixed(2)}。</p>
+      </div>
+      )}
 
-        <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">城市销售占比</h3>
-          </div>
-          <div className="h-[300px] flex items-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={cityData} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={8} dataKey="value">
-                  {cityData.map((entry, index) => (
-                    <Cell key={entry.name} fill={colors[index % colors.length]} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {!selectedStoreId && storeData.length > 0 && (
-          <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-xl font-bold">店铺销售占比</h3>
+      {reportType === 'inventory_turnover' && (
+      <div className="space-y-6">
+        {turnoverData.isSlowMovingAlert && (
+          <div className="bg-red-500/20 border border-red-500/50 rounded-2xl p-4 flex items-center gap-3">
+            <AlertTriangle className="text-red-400" size={24} />
+            <div>
+              <h4 className="text-red-400 font-bold">滞销报警</h4>
+              <p className="text-red-300/80 text-sm">滞销款占库存成本比例已超过 15% (当前 {(turnoverData.slowMovingRatio * 100).toFixed(1)}%)，请及时处理滞销库存。</p>
             </div>
-            <div className="h-[300px] flex items-center">
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <h3 className="text-xl font-bold mb-2">商品周转天数分布</h3>
+            <p className="text-sm text-white/50 mb-6">X轴: 商品成本，Y轴: 周转天数</p>
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                  <XAxis type="number" dataKey="cost" name="商品成本" unit="元" stroke="#ffffff40" tick={{ fill: '#ffffff80' }} />
+                  <YAxis type="number" dataKey="turnoverDays" name="周转天数" unit="天" stroke="#ffffff40" tick={{ fill: '#ffffff80' }} />
+                  <ZAxis type="category" dataKey="name" name="商品名称" />
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} />
+                  <Scatter name="商品" data={turnoverData.scatterData} fill="#5B8DEF">
+                    {turnoverData.scatterData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.category === '滞销款' ? '#ffc658' : entry.category === '热销款' ? '#FF6B9D' : '#5B8DEF'} />
+                    ))}
+                  </Scatter>
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <h3 className="text-xl font-bold mb-2">库存成本价值分布</h3>
+            <p className="text-sm text-white/50 mb-6">热销款 / 常规款 / 滞销款</p>
+            <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={storeData} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={8} dataKey="value">
-                    {storeData.map((entry, index) => (
-                      <Cell key={entry.name} fill={colors[index % colors.length]} />
+                  <Pie data={turnoverData.pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
+                    {turnoverData.pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
+                  <Tooltip formatter={(value: number) => `¥${value.toFixed(2)}`} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
+                  <Legend verticalAlign="bottom" height={36} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">SKU动销率</h3>
-        </div>
-        <p className="text-sm text-white/50 mb-4">动销率 = 有销量 SKU 数 / 总 SKU 数。</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
-            <p className="text-xs text-white/50">有销量SKU</p>
-            <p className="text-lg font-black">{sellThroughData.activeSkuCount}</p>
-          </div>
-          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
-            <p className="text-xs text-white/50">总SKU</p>
-            <p className="text-lg font-black">{sellThroughData.totalSkuCount}</p>
-          </div>
-          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
-            <p className="text-xs text-white/50">动销率</p>
-            <p className={`text-lg font-black ${sellThroughData.sellThroughRate < 0.5 ? 'text-red-300' : 'text-accent'}`}>{sellThroughData.sellThroughRate.toFixed(2)}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">商品周转天数排行榜</h3>
-        </div>
-        <p className="text-sm text-white/50 mb-4">周转天数 = 商品距上次售出天数，大于 60 天标红。</p>
-        <div className="space-y-3">
-          {turnoverData.topTurnoverProducts.map((row, index) => (
-            <div
-              key={`${row.name}-${row.turnoverDays}`}
-              className={`rounded-2xl border px-4 py-3 flex items-center justify-between ${row.isSlow ? 'border-red-400/30 bg-red-500/10' : 'border-white/10 bg-white/[0.03]'}`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-7 h-7 rounded-full bg-accent/80 text-white text-xs font-black flex items-center justify-center">{index + 1}</div>
-                <div>
-                  <p className={`text-sm font-bold ${row.isSlow ? 'text-red-200' : 'text-white/90'}`}>{row.name}</p>
-                  <p className="text-xs text-white/50">
-                    周转天数: {row.turnoverDays === 999 ? '暂无销量记录' : `${row.turnoverDays}天`}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {row.isSlow && <AlertTriangle size={14} className="text-red-300" />}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <h3 className="text-xl font-bold mb-6">平均周转指标</h3>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-white/[0.03] rounded-xl p-4">
+                <p className="text-xs text-white/50">SKU平均周转天数</p>
+                <p className="text-2xl font-black text-accent">{turnoverData.avgTurnoverDays} <span className="text-sm font-normal text-white/50">天</span></p>
               </div>
             </div>
-          ))}
-          {turnoverData.topTurnoverProducts.length === 0 && <p className="text-sm text-white/40">暂无周转数据</p>}
+            <h4 className="font-semibold mb-3 text-sm text-white/80">按系列平均周转天数</h4>
+            <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2">
+              {turnoverData.seriesAvgTurnover.map((row) => (
+                <div key={row.series} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
+                  <p className="text-sm text-white/90 truncate pr-3">{row.series}</p>
+                  <p className="text-sm font-bold">{row.avgDays} 天</p>
+                </div>
+              ))}
+              {turnoverData.seriesAvgTurnover.length === 0 && <p className="text-sm text-white/40">暂无系列周转数据</p>}
+            </div>
+          </div>
+
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xl font-bold">动销率分析</h3>
+              <span className="text-xs px-2 py-1 bg-white/10 rounded-lg text-white/70">
+                {turnoverData.drillDownLevel === 'province' ? '省份维度' : 
+                 turnoverData.drillDownLevel === 'city' ? '城市维度' : 
+                 turnoverData.drillDownLevel === 'store' ? '店铺维度' : '商品维度'}
+              </span>
+            </div>
+            <p className="text-sm text-white/50 mb-6">动销率 = 有销量SKU / 总SKU</p>
+            <div className="h-[250px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={turnoverData.drillDownData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                  <XAxis dataKey="name" stroke="#ffffff40" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#ffffff40" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(val) => `${val}%`} />
+                  <Tooltip cursor={{ fill: '#ffffff05' }} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number) => [`${value}%`, '动销率']} />
+                  <Bar dataKey="rate" radius={[4, 4, 0, 0]} fill="#82ca9d" maxBarSize={40}>
+                    {turnoverData.drillDownData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.rate < 50 ? '#ffc658' : '#82ca9d'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       </div>
+      )}
 
-      <div className="bg-white/5 border border-dashed border-white/30 rounded-2xl px-4 py-3">
-        <p className="text-sm font-bold text-white/80">暂保留报表（过渡区）</p>
-        <p className="text-xs text-white/50 mt-1">以下板块暂保留，后续按新版信息架构继续收敛。</p>
-      </div>
 
+      {reportType === 'finance' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold">财务报表</h3>
           <div className="text-xs text-white/40">基于财务流水数据</div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-white/[0.03] rounded-xl px-4 py-3">
+            <p className="text-xs text-white/50">现金余额</p>
+            <p className="text-lg font-black text-accent">¥{Number(cashBalance || 0).toFixed(2)}</p>
+          </div>
           <div className="bg-white/[0.03] rounded-xl px-4 py-3">
             <p className="text-xs text-white/50">总收入</p>
             <p className="text-lg font-black text-green-400">¥{financeData.totalIncome.toFixed(2)}</p>
@@ -1012,9 +1332,51 @@ export const ReportsScreen: React.FC = () => {
             <p className={`text-lg font-black ${financeData.netIncome >= 0 ? 'text-accent' : 'text-red-400'}`}>¥{financeData.netIncome.toFixed(2)}</p>
           </div>
         </div>
-        <p className="text-sm text-white/50">共计 {financeData.transactionCount} 笔流水记录。净收入 = 总收入 - 总支出。</p>
+        <p className="text-sm text-white/50 mb-4">共计 {financeData.transactionCount} 笔流水记录。净收入 = 总收入 - 总支出。</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white/[0.03] rounded-2xl p-4">
+            <h4 className="font-semibold mb-3">收入分类占比</h4>
+            {financeData.topIncomeCategories.length > 0 ? (
+              <div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={financeData.topIncomeCategories} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" nameKey="name" paddingAngle={6}>
+                      {financeData.topIncomeCategories.map((entry, index) => (
+                        <Cell key={entry.name} fill={colors[index % colors.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number) => [`¥${Number(value).toFixed(2)}`, '收入']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-white/40">暂无收入分类数据</p>
+            )}
+          </div>
+          <div className="bg-white/[0.03] rounded-2xl p-4">
+            <h4 className="font-semibold mb-3">支出分类占比</h4>
+            {financeData.topExpenseCategories.length > 0 ? (
+              <div className="h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={financeData.topExpenseCategories} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" nameKey="name" paddingAngle={6}>
+                      {financeData.topExpenseCategories.map((entry, index) => (
+                        <Cell key={entry.name} fill={colors[index % colors.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number) => [`¥${Number(value).toFixed(2)}`, '支出']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-white/40">暂无支出分类数据</p>
+            )}
+          </div>
+        </div>
       </div>
+      )}
 
+      {reportType === 'revenue' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold">利润报表导出</h3>
@@ -1040,60 +1402,8 @@ export const ReportsScreen: React.FC = () => {
         </div>
         <p className="text-sm text-white/50">导出格式与移动端一致：商品名称、销量、零售价、零售总价、折扣价、折扣总收入、总成本、总利润。</p>
       </div>
+      )}
 
-      <div className="bg-white/5 border border-white/10 p-8 rounded-[40px]">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">商品销售额排行</h3>
-          <div className="text-xs text-white/40">统一导出已迁移至“导出经营数据”</div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-          {amountTop3.map((row, idx) => (
-            <div
-              key={row.name}
-              className={`rounded-2xl border bg-gradient-to-br px-4 py-3 ${medalStyles[idx] ?? 'border-white/10 text-white/80'}`}
-            >
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-80">TOP {idx + 1}</p>
-              <p className="text-sm font-bold mt-1 truncate">{row.name}</p>
-              <p className="text-lg font-black mt-1">¥{row.value.toFixed(2)}</p>
-            </div>
-          ))}
-          {amountTop3.length === 0 && <p className="text-sm text-white/40 col-span-3">暂无销售额排行数据</p>}
-        </div>
-        <div className="h-[360px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={amountChartData} margin={{ top: 8, right: 10, left: 0, bottom: 28 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-              <XAxis
-                dataKey="shortName"
-                stroke="#ffffff40"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                interval={0}
-              />
-              <YAxis
-                stroke="#ffffff40"
-                fontSize={12}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value: number) => `¥${value}`}
-              />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                itemStyle={{ color: '#fff' }}
-                formatter={(value: number) => [`¥${value.toFixed(2)}`, '销售额']}
-                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.name || '')}
-              />
-              <Bar dataKey="value" radius={[10, 10, 0, 0]}>
-                {amountChartData.map((entry, index) => (
-                  <Cell key={entry.name} fill={colors[index % colors.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        {productAmountRanking.length === 0 && <p className="text-sm text-white/40 mt-4">暂无可导出的报表数据</p>}
-      </div>
     </div>
   );
 };

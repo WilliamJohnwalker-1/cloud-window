@@ -138,6 +138,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 38. 执行 `supabase/migrate-v5.6-province-sort-order.sql`
 39. 执行 `supabase/migrate-v5.7-inventory-alert-notifications.sql`
 40. 执行 `supabase/storage-policies.sql`
+41. 执行 `supabase/migrate-v6.0-foundation.sql`
+42. 执行 `supabase/migrate-v6.1-finance.sql`
+43. 执行 `supabase/migrate-v6.2-knowledge-base.sql`
+44. 执行 `supabase/migrate-v6.3-finance-integration.sql`
+45. 执行 `supabase/migrate-v6.4-financial-backfill.sql`
+46. 执行 `supabase/migrate-v6.5-inventory-slow-moving-alert.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -181,6 +187,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 38. 执行 `supabase/migrate-v5.6-province-sort-order.sql`
 39. 执行 `supabase/migrate-v5.7-inventory-alert-notifications.sql`
 40. 执行 `supabase/storage-policies.sql`
+41. 执行 `supabase/migrate-v6.0-foundation.sql`
+42. 执行 `supabase/migrate-v6.1-finance.sql`
+43. 执行 `supabase/migrate-v6.2-knowledge-base.sql`
+44. 执行 `supabase/migrate-v6.3-finance-integration.sql`
+45. 执行 `supabase/migrate-v6.4-financial-backfill.sql`
+46. 执行 `supabase/migrate-v6.5-inventory-slow-moving-alert.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -196,7 +208,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.1）
+### 5. 启动 Web 端（v1.3.2）
 
 ```bash
 npm run web:v2
@@ -386,9 +398,24 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 后续规划
 
-- 计划区已清空（本轮 v2-major-update 全量改动已合并到下方更新日志）
+- 计划区已清空（本轮 finance-report-refinement 已完成并合并到下方更新日志）
 
 ## 更新日志
+
+### Mobile v2.2.2 (2026-06-28) - 财务与报表细化计划收口
+
+- 完成财务与业务联动收口：报损、采购到货、零售收款、退款冲减、手续费等自动财务记录链路全量落地
+- 完成移动端财务角色专属入口与财务页增强（期初余额编辑权限、多维过滤、余额口径一致）
+- 报表重构完成：统一 5 Tab（财务/库存周转/营收/供货统计/销售）并对齐筛选与导出链路
+- 新增滞销告警通知闭环：库存周转慢销占比阈值预警 + 系统通知联动
+- 完成 v6.4 迁移加固：修复 `max(uuid)` 兼容问题，移除 `COMMIT` 后重复版本更新块
+
+### Web v1.3.2 (2026-06-28) - 财务与报表细化计划收口
+
+- Web 财务页与财务 Store 对齐移动端口径：余额自动计算、交易筛选、权限边界一致
+- Web 报表页完成 5 Tab 收口，库存周转/营收/供货/销售视图与移动端指标口径一致
+- 滞销告警通知类型与展示文案完成双端统一（含 Profile 通知标签）
+- 迁移链文档更新至 v6.5，补齐 finance-report-refinement 相关发布记录
 
 ### Mobile v2.2.1 (2026-06-26) - v6 升级收口 + 验收修复
 

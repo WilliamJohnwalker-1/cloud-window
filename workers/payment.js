@@ -1,4 +1,4 @@
-/* global Response, URL */
+/* global Response, URL, TextEncoder, TextDecoder, atob, btoa, crypto, fetch, URLSearchParams */
 
 /**
  * Cloudflare Worker payment API (skeleton with mock mode).
@@ -140,7 +140,7 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
   const safeMchId = mchId.replace(/"/g, '');
   const safeSerialNo = serialNo.replace(/"/g, '');
   const safeSignature = String(signature || '').replace(/[\r\n"]/g, '');
-  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${safeMchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${safeSerialNo}\",signature=\"${safeSignature}\"`;
+  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid="${safeMchId}",nonce_str="${nonce}",timestamp="${timestamp}",serial_no="${safeSerialNo}",signature="${safeSignature}"`;
 
   const response = await fetch(`${gateway}${pathWithQuery}`, {
     method,
@@ -292,6 +292,10 @@ function almostEqualAmount(left, right) {
   return Math.abs(Number(left || 0) - Number(right || 0)) < 0.01;
 }
 
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
 function publicKeyPemToArrayBuffer(pem) {
   const lines = pem
     .replace(/-----BEGIN PUBLIC KEY-----/g, '')
@@ -431,7 +435,7 @@ async function supabaseRequest(env, path, init = {}) {
 async function getOrderById(env, orderId) {
   const rows = await supabaseRequest(
     env,
-    `/orders?id=eq.${encodeURIComponent(orderId)}&select=id,total_retail_amount,payment_amount,payment_status,payment_method,payment_transaction_id`,
+    `/orders?id=eq.${encodeURIComponent(orderId)}&select=id,distributor_id,store_id,order_kind,total_retail_amount,payment_amount,payment_status,payment_method,payment_transaction_id,payment_paid_at`,
   );
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
@@ -512,40 +516,6 @@ async function increaseInventoryByProduct(env, productId, deltaQuantity) {
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({
       quantity: currentQuantity + Number(deltaQuantity || 0),
-      updated_at: new Date().toISOString(),
-    }),
-  });
-}
-
-async function increaseStoreInventoryByProduct(env, storeId, productId, deltaQuantity) {
-  const rows = await supabaseRequest(
-    env,
-    `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}&select=store_id,product_id,quantity&limit=1`,
-  );
-  if (Array.isArray(rows) && rows.length > 0) {
-    const currentQuantity = Number(rows[0]?.quantity || 0);
-    await supabaseRequest(
-      env,
-      `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}`,
-      {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          quantity: currentQuantity + Number(deltaQuantity || 0),
-          updated_at: new Date().toISOString(),
-        }),
-      },
-    );
-    return;
-  }
-
-  await supabaseRequest(env, '/store_inventory', {
-    method: 'POST',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({
-      store_id: storeId,
-      product_id: productId,
-      quantity: Number(deltaQuantity || 0),
       updated_at: new Date().toISOString(),
     }),
   });
@@ -684,6 +654,295 @@ async function getPaymentEventByKey(env, idempotencyKey) {
     `/payment_events?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,processed`,
   );
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+async function getFinanceCategoryId(env, { name, type }) {
+  const rows = await supabaseRequest(
+    env,
+    `/finance_categories?name=eq.${encodeURIComponent(name)}&type=eq.${encodeURIComponent(type)}&select=id&limit=1`,
+  );
+  const categoryId = Array.isArray(rows) && rows.length > 0
+    ? String(rows[0]?.id || '').trim()
+    : '';
+  if (!categoryId) {
+    throw new Error(`finance category not found: ${type}/${name}`);
+  }
+  return categoryId;
+}
+
+async function resolveFinanceCreatedByUserId(env, order) {
+  const directUserId = String(order?.distributor_id || '').trim();
+  if (directUserId) return directUserId;
+
+  if (order?.store_id) {
+    const storeRows = await supabaseRequest(
+      env,
+      `/stores?id=eq.${encodeURIComponent(String(order.store_id))}&select=distributor_id&limit=1`,
+    );
+    const storeUserId = Array.isArray(storeRows) && storeRows.length > 0
+      ? String(storeRows[0]?.distributor_id || '').trim()
+      : '';
+    if (storeUserId) return storeUserId;
+  }
+
+  throw new Error(`finance created_by unavailable for order ${String(order?.id || '').trim()}`);
+}
+
+async function listFinanceTransactionsByOrder(env, orderId) {
+  const rows = await supabaseRequest(
+    env,
+    `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&select=id,transaction_type,category_id,amount,description`,
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function ensureRetailPaymentFinanceRecords(env, order, {
+  amount,
+  paymentMethod,
+  outTradeNo,
+  transactionId,
+  paymentPaidAt,
+}) {
+  const orderId = String(order?.id || '').trim();
+  if (!orderId) {
+    throw new Error('finance missing order id');
+  }
+
+  if (String(order?.order_kind || '').toLowerCase() !== 'retail') {
+    return { skipped: true, reason: 'non_retail' };
+  }
+
+  const financeEventKey = buildPaymentEventKey({
+    channel: paymentMethod,
+    eventType: 'finance',
+    outTradeNo,
+    notifyId: null,
+    tradeNo: null,
+  });
+
+  const paymentAmount = roundMoney(amount);
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    throw new Error(`finance invalid payment amount for order ${orderId}`);
+  }
+
+  try {
+    const existingFinanceEvent = await getPaymentEventByKey(env, financeEventKey);
+    if (existingFinanceEvent?.processed) {
+      return { skipped: true, reason: 'already_processed' };
+    }
+
+    const createdBy = await resolveFinanceCreatedByUserId(env, order);
+    const feeAmount = roundMoney(paymentAmount * 0.006);
+    const transactionDate = String(paymentPaidAt || order?.payment_paid_at || new Date().toISOString()).slice(0, 10);
+    const [incomeCategoryId, expenseCategoryId, existingRows] = await Promise.all([
+      getFinanceCategoryId(env, { name: '线上渠道收入', type: 'income' }),
+      getFinanceCategoryId(env, { name: '线上佣金', type: 'expense' }),
+      listFinanceTransactionsByOrder(env, orderId),
+    ]);
+
+    const incomeDescription = `零售支付自动记账-收入-${orderId}`;
+    const expenseDescription = `零售支付自动记账-佣金-${orderId}`;
+    const existingDescriptions = new Set(
+      existingRows
+        .map((row) => String(row?.description || '').trim())
+        .filter(Boolean),
+    );
+    const insertRows = [];
+
+    if (!existingDescriptions.has(incomeDescription)) {
+      insertRows.push({
+        transaction_type: 'income',
+        category_id: incomeCategoryId,
+        amount: paymentAmount,
+        transaction_date: transactionDate,
+        store_id: order?.store_id || null,
+        channel_name: paymentMethod,
+        description: incomeDescription,
+        is_recurring: false,
+        created_by: createdBy,
+        source_order_id: orderId,
+      });
+    }
+
+    if (!existingDescriptions.has(expenseDescription)) {
+      insertRows.push({
+        transaction_type: 'expense',
+        category_id: expenseCategoryId,
+        amount: feeAmount,
+        transaction_date: transactionDate,
+        store_id: order?.store_id || null,
+        channel_name: paymentMethod,
+        description: expenseDescription,
+        is_recurring: false,
+        created_by: createdBy,
+        source_order_id: orderId,
+      });
+    }
+
+    if (insertRows.length > 0) {
+      await supabaseRequest(env, '/financial_transactions', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(insertRows),
+      });
+    }
+
+    await upsertPaymentEvent(env, {
+      idempotency_key: financeEventKey,
+      channel: paymentMethod,
+      out_trade_no: outTradeNo,
+      transaction_id: transactionId || order?.payment_transaction_id || null,
+      notify_id: null,
+      event_type: 'finance',
+      status: 'paid',
+      amount: paymentAmount,
+      processed: true,
+      payload: {
+        orderId,
+        storeId: order?.store_id || null,
+        createdBy,
+        incomeDescription,
+        expenseDescription,
+        insertedCount: insertRows.length,
+      },
+    });
+
+    return { skipped: false, insertedCount: insertRows.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown finance sync error';
+    try {
+      await upsertPaymentEvent(env, {
+        idempotency_key: financeEventKey,
+        channel: paymentMethod,
+        out_trade_no: outTradeNo,
+        transaction_id: transactionId || order?.payment_transaction_id || null,
+        notify_id: null,
+        event_type: 'finance',
+        status: 'failed',
+        amount: paymentAmount,
+        processed: false,
+        payload: {
+          orderId,
+          error: message,
+        },
+      });
+    } catch {
+      // Ignore payment_events fallback failure and surface the original finance error.
+    }
+    throw error;
+  }
+}
+
+async function ensureRetailRefundFinanceRecords(env, order, {
+  refundAmount,
+  paymentMethod,
+  outTradeNo,
+  refundNo,
+  transactionId,
+  refundAt,
+}) {
+  const orderId = String(order?.id || '').trim();
+  if (!orderId) {
+    throw new Error('finance refund missing order id');
+  }
+
+  if (String(order?.order_kind || '').toLowerCase() !== 'retail') {
+    return { skipped: true, reason: 'non_retail' };
+  }
+
+  const normalizedRefundNo = String(refundNo || '').trim();
+  const financeEventKey = buildPaymentEventKey({
+    channel: paymentMethod,
+    eventType: 'finance_refund',
+    outTradeNo,
+    notifyId: normalizedRefundNo || null,
+    tradeNo: null,
+  });
+
+  const amount = -Math.abs(roundMoney(refundAmount));
+  if (!Number.isFinite(amount) || amount >= 0) {
+    throw new Error(`finance invalid refund amount for order ${orderId}`);
+  }
+
+  try {
+    const existingFinanceEvent = await getPaymentEventByKey(env, financeEventKey);
+    if (existingFinanceEvent?.processed) {
+      return { skipped: true, reason: 'already_processed' };
+    }
+
+    const createdBy = await resolveFinanceCreatedByUserId(env, order);
+    const transactionDate = String(refundAt || new Date().toISOString()).slice(0, 10);
+    const incomeCategoryId = await getFinanceCategoryId(env, { name: '线上渠道收入', type: 'income' });
+    const description = normalizedRefundNo
+      ? `零售退款自动冲减-收入-${orderId}-${normalizedRefundNo}`
+      : `零售退款自动冲减-收入-${orderId}`;
+
+    const existingRows = await supabaseRequest(
+      env,
+      `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&description=eq.${encodeURIComponent(description)}&select=id&limit=1`,
+    );
+
+    if (!Array.isArray(existingRows) || existingRows.length === 0) {
+      await supabaseRequest(env, '/financial_transactions', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          transaction_type: 'income',
+          category_id: incomeCategoryId,
+          amount,
+          transaction_date: transactionDate,
+          store_id: order?.store_id || null,
+          channel_name: paymentMethod,
+          description,
+          is_recurring: false,
+          created_by: createdBy,
+          source_order_id: orderId,
+        }),
+      });
+    }
+
+    await upsertPaymentEvent(env, {
+      idempotency_key: financeEventKey,
+      channel: paymentMethod,
+      out_trade_no: outTradeNo,
+      transaction_id: transactionId || order?.payment_transaction_id || null,
+      notify_id: normalizedRefundNo || null,
+      event_type: 'finance_refund',
+      status: 'paid',
+      amount,
+      processed: true,
+      payload: {
+        orderId,
+        storeId: order?.store_id || null,
+        createdBy,
+        description,
+      },
+    });
+
+    return { skipped: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown finance refund sync error';
+    try {
+      await upsertPaymentEvent(env, {
+        idempotency_key: financeEventKey,
+        channel: paymentMethod,
+        out_trade_no: outTradeNo,
+        transaction_id: transactionId || order?.payment_transaction_id || null,
+        notify_id: normalizedRefundNo || null,
+        event_type: 'finance_refund',
+        status: 'failed',
+        amount,
+        processed: false,
+        payload: {
+          orderId,
+          error: message,
+        },
+      });
+    } catch {
+      // Ignore payment_events fallback failure and surface the original finance error.
+    }
+    throw error;
+  }
 }
 
 async function upsertPaymentEvent(env, payload) {
@@ -1026,13 +1285,26 @@ export default {
 
         const wechatTransactionId = collectResult.data?.transaction_id || null;
         const finalStatus = collectResult.ok ? collectResult.status : mapWechatErrorCodeToStatus(collectResult.code);
+        let financeWarning = null;
 
         if (finalStatus === 'paid') {
+          const paymentPaidAt = new Date().toISOString();
           await patchOrderPayment(env, orderId, {
             payment_status: 'paid',
             payment_transaction_id: wechatTransactionId,
-            payment_paid_at: new Date().toISOString(),
+            payment_paid_at: paymentPaidAt,
           });
+          try {
+            await ensureRetailPaymentFinanceRecords(env, order, {
+              amount,
+              paymentMethod: 'wechat',
+              outTradeNo: wechatOutTradeNo,
+              transactionId: wechatTransactionId,
+              paymentPaidAt,
+            });
+          } catch (error) {
+            financeWarning = `支付已成功，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+          }
         } else if (finalStatus === 'pending') {
           await patchOrderPayment(env, orderId, { payment_status: 'pending' });
         } else {
@@ -1074,6 +1346,7 @@ export default {
             orderId,
             outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
+            warning: financeWarning || undefined,
           });
         }
 
@@ -1136,6 +1409,8 @@ export default {
         product_code: 'FACE_TO_FACE_PAYMENT',
       });
 
+      let financeWarning = null;
+
       if (!alipayResult.ok) {
         const alipayError = String(alipayResult.error || '支付宝请求失败');
         const signatureHint = alipayError.includes('验签')
@@ -1163,11 +1438,23 @@ export default {
       }
 
       if (alipayResult.status === 'paid') {
+        const paymentPaidAt = new Date().toISOString();
         await patchOrderPayment(env, orderId, {
           payment_status: 'paid',
           payment_transaction_id: alipayResult.data.trade_no || null,
-          payment_paid_at: new Date().toISOString(),
+          payment_paid_at: paymentPaidAt,
         });
+        try {
+          await ensureRetailPaymentFinanceRecords(env, order, {
+            amount: Number(alipayResult.data?.total_amount || amount),
+            paymentMethod: 'alipay',
+            outTradeNo: alipayResult.data.out_trade_no || orderId,
+            transactionId: alipayResult.data.trade_no || null,
+            paymentPaidAt,
+          });
+        } catch (error) {
+          financeWarning = `支付已成功，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
       } else {
         await patchOrderPayment(env, orderId, { payment_status: 'pending' });
       }
@@ -1205,6 +1492,7 @@ export default {
         orderId,
         outTradeNo: alipayResult.data.out_trade_no || orderId,
         transactionId: alipayResult.data.trade_no,
+        warning: financeWarning || undefined,
       });
     }
 
@@ -1251,8 +1539,6 @@ export default {
       if (!order) {
         return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
       }
-      const merchantUserId = await resolveRefundApproverUserId(env, order);
-
       if (String(order.order_kind || '').toLowerCase() !== 'retail') {
         return json({ success: false, status: 'failed', error: '仅零售订单支持退款申请' }, { status: 400 });
       }
@@ -1267,8 +1553,6 @@ export default {
       if (selectedItems.length !== orderItemIds.length) {
         return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
       }
-      const refundedItemsSnapshot = buildRefundedItemsSnapshot(selectedItems);
-
       const requestedAmount = Number(
         selectedItems
           .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
@@ -1591,6 +1875,20 @@ export default {
           payload: refundResult.data,
         });
 
+        let financeWarning = null;
+        try {
+          await ensureRetailRefundFinanceRecords(env, order, {
+            refundAmount,
+            paymentMethod: 'wechat',
+            outTradeNo,
+            refundNo: outRefundNo,
+            transactionId: order.payment_transaction_id || null,
+            refundAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          financeWarning = `退款已成功，但自动冲减记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
+
         return json({
           success: true,
           status: paymentStatus,
@@ -1599,6 +1897,7 @@ export default {
           refundedAmount: nextRefundedAmount,
           remainAmount: Number((totalAmount - nextRefundedAmount).toFixed(2)),
           refundNo: outRefundNo,
+          warning: financeWarning || undefined,
         });
       }
 
@@ -1679,6 +1978,20 @@ export default {
           payload: refundResult.data,
         });
 
+        let financeWarning = null;
+        try {
+          await ensureRetailRefundFinanceRecords(env, order, {
+            refundAmount,
+            paymentMethod: 'alipay',
+            outTradeNo: orderId,
+            refundNo: outRequestNo,
+            transactionId: order.payment_transaction_id || null,
+            refundAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          financeWarning = `退款已成功，但自动冲减记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
+
         return json({
           success: true,
           status: paymentStatus,
@@ -1687,6 +2000,7 @@ export default {
           refundedAmount: nextRefundedAmount,
           remainAmount: Number((totalAmount - nextRefundedAmount).toFixed(2)),
           refundNo: outRequestNo,
+          warning: financeWarning || undefined,
         });
       }
 
@@ -1898,6 +2212,21 @@ export default {
         }
       }
 
+      if (isRefundSuccess) {
+        try {
+          await ensureRetailRefundFinanceRecords(env, order, {
+            refundAmount,
+            paymentMethod: String(order.payment_method || '').trim(),
+            outTradeNo,
+            refundNo,
+            transactionId: order.payment_transaction_id || null,
+            refundAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          mutationWarning = `${mutationWarning ? `${mutationWarning}；` : ''}退款自动冲减记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
+      }
+
       try {
         await upsertPaymentEvent(env, {
           idempotency_key: buildPaymentEventKey({
@@ -1992,14 +2321,38 @@ export default {
       const order = await getOrderById(env, orderId);
       if (!order) return json({ status: 'failed', error: 'order not found' }, { status: 404 });
       const currentStatus = String(order.payment_status || '').toLowerCase();
+      let financeWarning = null;
+
+      if (currentStatus === 'paid' && order.payment_method) {
+        try {
+          await ensureRetailPaymentFinanceRecords(env, order, {
+            amount: Number(order.payment_amount || order.total_retail_amount || 0),
+            paymentMethod: String(order.payment_method || '').trim(),
+            outTradeNo: order.payment_method === 'wechat' ? toWechatOutTradeNo(orderId) : orderId,
+            transactionId: order.payment_transaction_id || null,
+            paymentPaidAt: order.payment_paid_at || null,
+          });
+        } catch (error) {
+          financeWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
+      }
+
       if (currentStatus === 'refunded'
         || currentStatus === 'partial_refunded'
         || currentStatus === 'refund_pending'
         || currentStatus === 'partial_refund_pending') {
-        return json({ status: currentStatus, transactionId: order.payment_transaction_id || undefined });
+        return json({
+          status: currentStatus,
+          transactionId: order.payment_transaction_id || undefined,
+          warning: financeWarning || undefined,
+        });
       }
       if (order.payment_status === 'paid') {
-        return json({ status: 'paid', transactionId: order.payment_transaction_id || undefined });
+        return json({
+          status: 'paid',
+          transactionId: order.payment_transaction_id || undefined,
+          warning: financeWarning || undefined,
+        });
       }
 
       if (order.payment_method === 'wechat') {
@@ -2014,12 +2367,31 @@ export default {
         }
         const status = queryResult.ok ? queryResult.status : mapWechatErrorCodeToStatus(queryResult.code);
         const transactionId = queryResult.data?.transaction_id || null;
+        const paymentPaidAt = status === 'paid' ? new Date().toISOString() : null;
+        const queryAmount = Number.isFinite(Number(queryResult.data?.amount?.total))
+          ? roundMoney(Number(queryResult.data.amount.total) / 100)
+          : Number(order.payment_amount || order.total_retail_amount || 0);
 
         await patchOrderPayment(env, orderId, {
           payment_status: status,
           payment_transaction_id: transactionId,
-          payment_paid_at: status === 'paid' ? new Date().toISOString() : null,
+          payment_paid_at: paymentPaidAt,
         });
+
+        let queryFinanceWarning = null;
+        if (status === 'paid') {
+          try {
+            await ensureRetailPaymentFinanceRecords(env, order, {
+              amount: queryAmount,
+              paymentMethod: 'wechat',
+              outTradeNo: wechatOutTradeNo,
+              transactionId,
+              paymentPaidAt,
+            });
+          } catch (error) {
+            queryFinanceWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+          }
+        }
 
         await upsertPaymentEvent(env, {
           idempotency_key: buildPaymentEventKey({
@@ -2049,7 +2421,12 @@ export default {
           return `${queryResult.error || '微信查单失败'}${requestIdSuffix}`;
         })();
 
-        return json({ status, transactionId: transactionId || undefined, error: queryError });
+        return json({
+          status,
+          transactionId: transactionId || undefined,
+          error: queryError,
+          warning: queryFinanceWarning || undefined,
+        });
       }
 
       const queryResult = await postAlipayRequest(env, 'alipay.trade.query', {
@@ -2061,11 +2438,27 @@ export default {
       }
 
       const status = parseTradeStatus(queryResult.data.trade_status);
+      const paymentPaidAt = status === 'paid' ? new Date().toISOString() : null;
       await patchOrderPayment(env, orderId, {
         payment_status: status,
         payment_transaction_id: queryResult.data.trade_no || null,
-        payment_paid_at: status === 'paid' ? new Date().toISOString() : null,
+        payment_paid_at: paymentPaidAt,
       });
+
+      let queryFinanceWarning = null;
+      if (status === 'paid') {
+        try {
+          await ensureRetailPaymentFinanceRecords(env, order, {
+            amount: Number(queryResult.data.total_amount || order.payment_amount || order.total_retail_amount || 0),
+            paymentMethod: 'alipay',
+            outTradeNo: orderId,
+            transactionId: queryResult.data.trade_no || null,
+            paymentPaidAt,
+          });
+        } catch (error) {
+          queryFinanceWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
+        }
+      }
 
       await upsertPaymentEvent(env, {
         idempotency_key: buildPaymentEventKey({
@@ -2085,7 +2478,11 @@ export default {
         payload: queryResult.data,
       });
 
-      return json({ status, transactionId: queryResult.data.trade_no });
+      return json({
+        status,
+        transactionId: queryResult.data.trade_no,
+        warning: queryFinanceWarning || undefined,
+      });
     }
 
     if (url.pathname.startsWith('/api/payment/mock-success/') && request.method === 'POST') {
@@ -2196,13 +2593,24 @@ export default {
           return wechatNotifyResponse('FAIL', 'amount mismatch', 400);
         }
 
+        const paymentPaidAt = status === 'paid' ? new Date().toISOString() : null;
         await patchOrderPayment(env, resolvedOrderId, {
           payment_method: 'wechat',
           payment_status: status,
           payment_amount: totalAmount,
           payment_transaction_id: transactionId,
-          payment_paid_at: status === 'paid' ? new Date().toISOString() : null,
+          payment_paid_at: paymentPaidAt,
         });
+
+        if (status === 'paid') {
+          await ensureRetailPaymentFinanceRecords(env, order, {
+            amount: totalAmount,
+            paymentMethod: 'wechat',
+            outTradeNo,
+            transactionId,
+            paymentPaidAt,
+          });
+        }
 
         await upsertPaymentEvent(env, {
           idempotency_key: idempotencyKey,
@@ -2297,13 +2705,24 @@ export default {
           return new Response('failure', { status: 400 });
         }
 
+        const paymentPaidAt = status === 'paid' ? new Date().toISOString() : null;
         await patchOrderPayment(env, outTradeNo, {
           payment_method: 'alipay',
           payment_status: status,
           payment_amount: totalAmount,
           payment_transaction_id: tradeNo || null,
-          payment_paid_at: status === 'paid' ? new Date().toISOString() : null,
+          payment_paid_at: paymentPaidAt,
         });
+
+        if (status === 'paid') {
+          await ensureRetailPaymentFinanceRecords(env, order, {
+            amount: totalAmount,
+            paymentMethod: 'alipay',
+            outTradeNo,
+            transactionId: tradeNo || null,
+            paymentPaidAt,
+          });
+        }
 
         await upsertPaymentEvent(env, {
           idempotency_key: idempotencyKey,

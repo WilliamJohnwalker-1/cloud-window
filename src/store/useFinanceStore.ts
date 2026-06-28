@@ -14,6 +14,7 @@ interface FinanceCategory {
 
 interface CashBalance {
   id: string;
+  initial_balance: number;
   balance: number;
   last_updated_at: string;
   updated_by?: string | null;
@@ -22,6 +23,7 @@ interface CashBalance {
 type ActionResult = { error: Error | null };
 
 type TransactionCreateInput = Omit<FinancialTransaction, 'id' | 'created_at' | 'updated_at' | 'created_by'>;
+type TransactionCreatePayload = TransactionCreateInput & { breakage_quantity?: number };
 type TransactionUpdateInput = Partial<TransactionCreateInput>;
 
 interface FinanceStore {
@@ -31,11 +33,17 @@ interface FinanceStore {
   isLoading: boolean;
   error: string | null;
   fetchTransactions: () => Promise<void>;
-  addTransaction: (input: TransactionCreateInput) => Promise<ActionResult>;
+  addTransaction: (input: TransactionCreatePayload) => Promise<ActionResult>;
+  createBreakageTransaction: (input: {
+    product_id?: string | null;
+    store_id?: string | null;
+    quantity?: number;
+    created_by?: string;
+  }) => Promise<ActionResult>;
   updateTransaction: (id: string, input: TransactionUpdateInput) => Promise<ActionResult>;
   deleteTransaction: (id: string) => Promise<ActionResult>;
   fetchBalance: () => Promise<void>;
-  updateBalance: (balance: number) => Promise<ActionResult>;
+  setInitialBalance: (balance: number) => Promise<ActionResult>;
   fetchCategories: () => Promise<void>;
 }
 
@@ -67,7 +75,7 @@ type FinancialTransactionRow = {
 
 type CashBalanceRow = {
   id: string;
-  balance: number | string;
+  initial_balance: number | string;
   last_updated_at: string;
   updated_by?: string | null;
 };
@@ -193,8 +201,38 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
   addTransaction: async (input) => {
     set({ isLoading: true, error: null });
     try {
-      const categoryId = await resolveCategoryId(input.transaction_type, input.category, get().categories);
       const createdBy = await getCurrentUserId();
+
+      if (input.category.trim() === '损耗') {
+        const quantity = Number(input.breakage_quantity || 0);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error('报损数量必须大于 0');
+        }
+
+        if (!input.product_id) {
+          throw new Error('报损流水必须选择商品');
+        }
+
+        if (!input.store_id) {
+          throw new Error('报损流水必须选择店铺');
+        }
+
+        const { error } = await supabase.rpc('create_breakage_transaction', {
+          p_product_id: input.product_id,
+          p_store_id: input.store_id,
+          p_quantity: quantity,
+          p_created_by: createdBy,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        await Promise.all([get().fetchTransactions(), get().fetchBalance()]);
+        return { error: null };
+      }
+
+      const categoryId = await resolveCategoryId(input.transaction_type, input.category, get().categories);
 
       const { error } = await supabase
         .from('financial_transactions')
@@ -205,6 +243,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
           transaction_date: input.transaction_date,
           store_id: input.store_id ?? null,
           supplier_id: input.supplier_id ?? null,
+          product_id: input.product_id ?? null,
           channel_name: input.channel_name?.trim() || null,
           description: input.description?.trim() || null,
           is_recurring: input.is_recurring,
@@ -219,6 +258,46 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
       return { error: null };
     } catch (error) {
       const normalizedError = normalizeError(error, '新增财务流水失败');
+      set({ error: normalizedError.message });
+      return { error: normalizedError };
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  createBreakageTransaction: async (input) => {
+    set({ isLoading: true, error: null });
+    try {
+      const createdBy = input.created_by || await getCurrentUserId();
+      const quantity = Number(input.quantity || 0);
+
+      if (!input.product_id) {
+        throw new Error('报损流水必须选择商品');
+      }
+
+      if (!input.store_id) {
+        throw new Error('报损流水必须选择店铺');
+      }
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error('报损数量必须大于 0');
+      }
+
+      const { error } = await supabase.rpc('create_breakage_transaction', {
+        p_product_id: input.product_id,
+        p_store_id: input.store_id,
+        p_quantity: quantity,
+        p_created_by: createdBy,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await Promise.all([get().fetchTransactions(), get().fetchBalance()]);
+      return { error: null };
+    } catch (error) {
+      const normalizedError = normalizeError(error, '创建报损流水失败');
       set({ error: normalizedError.message });
       return { error: normalizedError };
     } finally {
@@ -300,25 +379,35 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
   fetchBalance: async () => {
     set({ isLoading: true, error: null });
     try {
-      const { data, error } = await supabase
-        .from('cash_balance')
-        .select('*')
-        .order('last_updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [{ data: latestRow, error: rowError }, { data: computedBalance, error: rpcError }] = await Promise.all([
+        supabase
+          .from('cash_balance')
+          .select('id, initial_balance, last_updated_at, updated_by')
+          .order('last_updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase.rpc('get_cash_balance'),
+      ]);
 
-      if (error) {
-        throw error;
+      if (rowError) {
+        throw rowError;
       }
 
-      const balance = data
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      const balance = latestRow
         ? {
-            ...(data as CashBalanceRow),
-            balance: Number((data as CashBalanceRow).balance || 0),
+            id: (latestRow as CashBalanceRow).id,
+            initial_balance: Number((latestRow as CashBalanceRow).initial_balance || 0),
+            balance: Number(computedBalance || 0),
+            last_updated_at: (latestRow as CashBalanceRow).last_updated_at,
+            updated_by: (latestRow as CashBalanceRow).updated_by ?? null,
           }
         : null;
 
-      set({ balance: balance as CashBalance | null });
+      set({ balance });
     } catch (error) {
       const message = normalizeError(error, '获取现金余额失败').message;
       set({ error: message });
@@ -327,7 +416,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
     }
   },
 
-  updateBalance: async (balance) => {
+  setInitialBalance: async (balance) => {
     set({ isLoading: true, error: null });
     try {
       const updatedBy = await getCurrentUserId();
@@ -348,7 +437,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         const { error } = await supabase
           .from('cash_balance')
           .update({
-            balance,
+            initial_balance: balance,
             last_updated_at: now,
             updated_by: updatedBy,
           })
@@ -361,7 +450,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         const { error } = await supabase
           .from('cash_balance')
           .insert({
-            balance,
+            initial_balance: balance,
             last_updated_at: now,
             updated_by: updatedBy,
           });
@@ -374,7 +463,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
       await get().fetchBalance();
       return { error: null };
     } catch (error) {
-      const normalizedError = normalizeError(error, '更新现金余额失败');
+      const normalizedError = normalizeError(error, '更新期初余额失败');
       set({ error: normalizedError.message });
       return { error: normalizedError };
     } finally {

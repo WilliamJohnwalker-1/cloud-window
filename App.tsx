@@ -5,7 +5,7 @@ import { Text, View, ActivityIndicator, StyleSheet, AppState, Modal, ScrollView,
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import type { ToastConfig } from 'react-native-toast-message';
-import { BarChart2, Package, ShoppingCart, TrendingUp, User } from 'lucide-react-native';
+import { BarChart2, Package, ShoppingCart, TrendingUp, User, Wallet } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
 import * as Updates from 'expo-updates';
 
@@ -14,13 +14,14 @@ import ProductsScreen from './src/screens/ProductsScreen';
 import InventoryScreen from './src/screens/InventoryScreen';
 import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
+import FinanceScreen from './src/screens/FinanceScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import KnowledgeBaseFloatingBall from './src/components/KnowledgeBaseFloatingBall';
 import { useAppStore } from './src/store/useAppStore';
 import AppConfirmModal from './src/components/AppConfirmModal';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
-import { canViewInventory, canViewOrders, canViewProducts, canViewReports } from './src/utils/permissions';
+import { canEditFinance, canViewInventory, canViewOrders, canViewProducts, canViewReports } from './src/utils/permissions';
 import type { Store } from './src/types';
 
 const Tab = createBottomTabNavigator();
@@ -34,6 +35,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     Inventory: BarChart2,
     Orders: ShoppingCart,
     Reports: TrendingUp,
+    Finance: Wallet,
     Profile: User,
   }[name] || Package;
 
@@ -59,6 +61,7 @@ function MainTabs() {
   const shouldShowInventory = canViewInventory(role);
   const shouldShowOrders = canViewOrders(role);
   const shouldShowReports = canViewReports(role);
+  const shouldShowFinance = canEditFinance(role);
 
   useEffect(() => {
     if (storedUser) {
@@ -106,6 +109,13 @@ function MainTabs() {
           name="Reports"
           component={ReportsScreen}
           options={{ title: '报表' }}
+        />
+      )}
+      {shouldShowFinance && (
+        <Tab.Screen
+          name="Finance"
+          component={FinanceScreen}
+          options={{ title: '财务' }}
         />
       )}
       <Tab.Screen 
@@ -176,17 +186,6 @@ const toastConfig: ToastConfig = {
       text2Style={{ color: Colors.textSecondary, fontSize: 13 }}
     />
   ),
-};
-
-const toastAnimationConfig = {
-  //
-  // Automatically configure Toast message animations with a subtle spring bounce
-  // for entrance and a smooth fade for exit, creating a playful yet professional feel.
-  // This draws attention to the message without being jarring.
-  //
-  velocity: 1000, // Speed of the bounce
-  tension: 68,     // Tension for bounciness (higher = more bounce)
-  friction: 12,    // Friction to slow down (higher = slower)
 };
 
 export default function App() {

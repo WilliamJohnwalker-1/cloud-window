@@ -112,6 +112,7 @@ export interface Order {
   store_name?: string | null;
   city_id?: string;
   city_name?: string;
+  supplier_id?: string | null;
   order_kind: OrderKind;
   status: OrderStatus;
   payment_method?: PaymentMethod | null;
@@ -124,6 +125,7 @@ export interface Order {
   total_discount_amount: number;
   created_at: string;
   items: OrderItem[];
+  refunded_items?: RefundedOrderItem[];
 }
 
 export interface ProductWithDetails extends Product {
@@ -131,6 +133,49 @@ export interface ProductWithDetails extends Product {
   city_name?: string;
   quantity?: number;
   min_quantity?: number;
+}
+
+export interface RefundedOrderItem {
+  order_item_id: string;
+  product_id: string;
+  product_name?: string;
+  quantity: number;
+  retail_price: number;
+  discount_price: number;
+  refunded_at?: string;
+}
+
+export interface InventoryLog {
+  id: string;
+  product_id: string;
+  product_name?: string;
+  operator_id: string;
+  action: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce' | 'breakage' | 'purchase_receive';
+  delta_quantity: number;
+  before_quantity: number;
+  after_quantity: number;
+  note?: string;
+  created_at: string;
+}
+
+export interface ProductCreateInput {
+  name: string;
+  price: number;
+  cost: number;
+  one_time_cost: number;
+  discount_price: number;
+  city_id: string;
+  series_id?: string | null;
+  image_url?: string;
+  sku?: string | null;
+  category?: string | null;
+}
+
+export interface ProfileUpdateInput {
+  full_name?: string;
+  store_name?: string;
+  avatar_url?: string | null;
+  default_store_id?: string | null;
 }
 
 export interface SalesReport {
@@ -160,11 +205,15 @@ export type NotificationType =
   | 'refund_rejected'
   | 'refund_completed'
   | 'refund_failed'
-  | 'inventory_alert';
+  | 'inventory_alert'
+  | 'inventory_slow_moving_alert';
 
-export type PaymentMethod = 'wechat' | 'alipay';
+export type PaymentMethod = 'wechat' | 'alipay' | 'unknown' | 'offline_settlement' | string;
 
-export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'timeout';
+export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'timeout' | 'refunded' | 'partial_refunded' | string;
+
+
+export type FinanceReportType = 'finance' | 'inventory_turnover' | 'revenue' | 'supply' | 'sales';
 
 export interface Notification {
   id: string;
@@ -214,6 +263,7 @@ export interface FinancialTransaction {
   transaction_date: string;
   store_id?: string | null;
   supplier_id?: string | null;
+  product_id?: string | null;
   channel_name?: string | null;
   description?: string | null;
   is_recurring: boolean;

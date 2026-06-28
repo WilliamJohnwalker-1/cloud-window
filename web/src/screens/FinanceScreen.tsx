@@ -8,6 +8,7 @@ import { useSupplierStore } from '../store/useSupplierStore';
 import type { FinancialTransaction } from '../types';
 import {
   canEditFinance,
+  canEditFinanceInitialBalance,
   canViewFinance,
   canViewSuppliers,
 } from '../utils/permissions';
@@ -21,6 +22,8 @@ interface FinanceFormState {
   transaction_date: string;
   store_id: string;
   supplier_id: string;
+  product_id: string;
+  breakage_quantity: string;
   channel_name: string;
   description: string;
   is_recurring: boolean;
@@ -42,14 +45,17 @@ const formatCurrency = (value: number): string => `¥${value.toFixed(2)}`;
 const getToday = (): string => new Date().toISOString().slice(0, 10);
 
 export const FinanceScreen: React.FC = () => {
-  const { user, stores, fetchStores } = useAppStore();
+  const { user, stores, products, fetchStores, fetchProducts } = useAppStore();
   const { suppliers, fetchSuppliers } = useSupplierStore();
   const {
     transactions,
     categories,
+    cashBalance,
     isLoading,
     error,
     fetchTransactions,
+    fetchBalance,
+    setInitialBalance,
     addTransaction,
     updateTransaction,
     deleteTransaction,
@@ -58,6 +64,7 @@ export const FinanceScreen: React.FC = () => {
 
   const canView = canViewFinance(user?.role);
   const canEdit = canEditFinance(user?.role);
+  const canEditInitialBalance = canEditFinanceInitialBalance(user?.role);
   const canLoadSuppliers = canViewSuppliers(user?.role);
 
   const [showCreate, setShowCreate] = useState(false);
@@ -70,6 +77,8 @@ export const FinanceScreen: React.FC = () => {
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
   const [keywordFilter, setKeywordFilter] = useState('');
+  const [isEditingInitialBalance, setIsEditingInitialBalance] = useState(false);
+  const [initialBalanceDraft, setInitialBalanceDraft] = useState('');
   const [form, setForm] = useState<FinanceFormState>({
     transaction_type: 'expense',
     category: '',
@@ -77,6 +86,8 @@ export const FinanceScreen: React.FC = () => {
     transaction_date: getToday(),
     store_id: '',
     supplier_id: '',
+    product_id: '',
+    breakage_quantity: '',
     channel_name: '',
     description: '',
     is_recurring: false,
@@ -112,11 +123,22 @@ export const FinanceScreen: React.FC = () => {
       transaction_date: getToday(),
       store_id: '',
       supplier_id: '',
+      product_id: '',
+      breakage_quantity: '',
       channel_name: '',
       description: '',
       is_recurring: false,
     };
   };
+
+  const isBreakageCategory = form.category === '损耗';
+  const selectedBreakageProduct = products.find((item) => item.id === form.product_id);
+  const breakageQuantity = Number(form.breakage_quantity || 0);
+  const hasBreakageInputs = Boolean(form.product_id) && Number.isFinite(breakageQuantity) && breakageQuantity > 0;
+  const autoBreakageAmount = selectedBreakageProduct
+    ? Number((Number(selectedBreakageProduct.cost || 0) * (Number.isFinite(breakageQuantity) ? breakageQuantity : 0)).toFixed(2))
+    : 0;
+  const displayedBreakageAmount = hasBreakageInputs ? autoBreakageAmount : Number(form.amount || 0);
 
   useEffect(() => {
     if (!canView) {
@@ -125,12 +147,22 @@ export const FinanceScreen: React.FC = () => {
 
     void fetchTransactions();
     void fetchCategories();
+    void fetchBalance();
     void fetchStores();
+    void fetchProducts();
 
     if (canLoadSuppliers) {
       void fetchSuppliers();
     }
-  }, [canLoadSuppliers, canView, fetchCategories, fetchStores, fetchSuppliers, fetchTransactions]);
+  }, [canLoadSuppliers, canView, fetchBalance, fetchCategories, fetchProducts, fetchStores, fetchSuppliers, fetchTransactions]);
+
+  useEffect(() => {
+    if (isEditingInitialBalance) {
+      return;
+    }
+
+    setInitialBalanceDraft(cashBalance === null ? '' : String(cashBalance));
+  }, [cashBalance, isEditingInitialBalance]);
 
   useEffect(() => {
     if (!showCreate || form.category || formCategoryOptions.length === 0) {
@@ -248,6 +280,8 @@ export const FinanceScreen: React.FC = () => {
       transaction_date: transaction.transaction_date,
       store_id: transaction.store_id || '',
       supplier_id: transaction.supplier_id || '',
+      product_id: transaction.product_id || '',
+      breakage_quantity: '',
       channel_name: transaction.channel_name || '',
       description: transaction.description || '',
       is_recurring: transaction.is_recurring,
@@ -271,10 +305,29 @@ export const FinanceScreen: React.FC = () => {
       return;
     }
 
-    const amount = Number(form.amount);
+    const baseAmount = Number(form.amount);
+    const amount = isBreakageCategory
+      ? (hasBreakageInputs ? autoBreakageAmount : baseAmount)
+      : baseAmount;
     if (!Number.isFinite(amount) || amount <= 0) {
       setPageNotice({ type: 'error', text: '金额必须大于 0' });
       return;
+    }
+
+    if (isBreakageCategory && !editingTransactionId) {
+      const qty = Number(form.breakage_quantity || 0);
+      if (!form.product_id) {
+        setPageNotice({ type: 'error', text: '损耗流水必须选择商品' });
+        return;
+      }
+      if (!form.store_id) {
+        setPageNotice({ type: 'error', text: '损耗流水必须选择店铺' });
+        return;
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        setPageNotice({ type: 'error', text: '报损数量必须大于 0' });
+        return;
+      }
     }
 
     if (!form.transaction_date) {
@@ -289,6 +342,8 @@ export const FinanceScreen: React.FC = () => {
       transaction_date: form.transaction_date,
       store_id: form.store_id || null,
       supplier_id: form.supplier_id || null,
+      product_id: form.product_id || null,
+      breakage_quantity: isBreakageCategory && !editingTransactionId ? Number(form.breakage_quantity || 0) : undefined,
       channel_name: form.channel_name.trim() || null,
       description: form.description.trim() || null,
       is_recurring: form.is_recurring,
@@ -322,6 +377,28 @@ export const FinanceScreen: React.FC = () => {
     setEditingTransactionId(null);
     setForm(buildEmptyForm());
     setPageNotice({ type: 'success', text: '新增收支流水成功' });
+  };
+
+  const handleSaveInitialBalance = async (): Promise<void> => {
+    if (!canEditInitialBalance) {
+      setPageNotice({ type: 'error', text: '仅管理员或财务可设置期初余额' });
+      return;
+    }
+
+    const value = Number(initialBalanceDraft);
+    if (!Number.isFinite(value)) {
+      setPageNotice({ type: 'error', text: '期初余额格式错误' });
+      return;
+    }
+
+    const { error: updateError } = await setInitialBalance(value);
+    if (updateError) {
+      setPageNotice({ type: 'error', text: `更新失败：${updateError.message}` });
+      return;
+    }
+
+    setIsEditingInitialBalance(false);
+    setPageNotice({ type: 'success', text: '期初余额已更新' });
   };
 
   const handleDelete = (transactionId: string, event: React.MouseEvent): void => {
@@ -385,6 +462,55 @@ export const FinanceScreen: React.FC = () => {
       )}
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="min-w-[320px] bg-white/5 border border-white/10 rounded-2xl p-4">
+          <div className="text-xs text-white/40 uppercase tracking-wider">当前余额（自动计算）</div>
+          <div className="text-3xl font-bold mt-2">{formatCurrency(Number(cashBalance || 0))}</div>
+          <div className="text-xs text-white/50 mt-2">基于期初余额 + 收入 - 支出实时计算</div>
+          {canEditInitialBalance ? (
+            <div className="mt-3 flex flex-wrap gap-2 items-center">
+              {isEditingInitialBalance ? (
+                <>
+                  <input
+                    value={initialBalanceDraft}
+                    onChange={(event) => setInitialBalanceDraft(event.target.value)}
+                    placeholder="输入期初余额"
+                    type="number"
+                    step="0.01"
+                    className="bg-white/5 border border-white/10 rounded-xl px-3 py-2"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSaveInitialBalance();
+                    }}
+                    className="px-3 py-2 rounded-xl bg-tech-gradient font-bold"
+                  >
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingInitialBalance(false);
+                      setInitialBalanceDraft(cashBalance === null ? '' : String(cashBalance));
+                    }}
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/10"
+                  >
+                    取消
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingInitialBalance(true)}
+                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm"
+                >
+                  设置期初余额
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
+
         <div className="flex-1 min-w-[280px] bg-white/5 border border-white/10 rounded-2xl p-4">
           <div className="flex items-center gap-3 text-white/70">
             <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
@@ -655,15 +781,16 @@ export const FinanceScreen: React.FC = () => {
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">金额</span>
                 <input
-                  value={form.amount}
+                  value={isBreakageCategory ? String(displayedBreakageAmount) : form.amount}
                   onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))}
                   placeholder="请输入金额"
                   type="number"
                   min="0"
                   step="0.01"
-                  disabled={!canEdit}
+                  disabled={!canEdit || isBreakageCategory}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60"
                 />
+                {isBreakageCategory ? <p className="text-[11px] text-white/40 mt-1">填写报损商品和数量后自动重算金额，不可手动编辑</p> : null}
               </label>
 
               <label className="space-y-1 block">
@@ -710,6 +837,41 @@ export const FinanceScreen: React.FC = () => {
                   ))}
                 </select>
               </label>
+
+              {isBreakageCategory ? (
+                <>
+                  <label className="space-y-1 block">
+                    <span className="text-xs font-bold text-white/40 uppercase tracking-wider">报损商品</span>
+                    <select
+                      value={form.product_id}
+                      onChange={(event) => setForm((prev) => ({ ...prev, product_id: event.target.value }))}
+                      disabled={!canEdit}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60"
+                    >
+                      <option value="" className="bg-[#121217]">请选择商品</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id} className="bg-[#121217]">
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-xs font-bold text-white/40 uppercase tracking-wider">报损数量</span>
+                    <input
+                      value={form.breakage_quantity}
+                      onChange={(event) => setForm((prev) => ({ ...prev, breakage_quantity: event.target.value }))}
+                      placeholder="请输入报损数量"
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={!canEdit}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60"
+                    />
+                  </label>
+                </>
+              ) : null}
 
               <label className="space-y-1 block md:col-span-2">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">渠道</span>

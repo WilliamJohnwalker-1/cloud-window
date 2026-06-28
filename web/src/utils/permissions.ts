@@ -64,11 +64,19 @@ export function canEditFinance(role: RoleInput): boolean {
 }
 
 /**
- * canViewSuppliers: super_admin/finance => true
+ * canEditFinanceInitialBalance: admin/super_admin/finance => true
+ */
+export function canEditFinanceInitialBalance(role: RoleInput): boolean {
+  if (!isKnownRole(role)) return false;
+  return role === 'admin' || role === 'super_admin' || role === 'finance';
+}
+
+/**
+ * canViewSuppliers: admin/super_admin/finance => true
  */
 export function canViewSuppliers(role: RoleInput): boolean {
   if (!isKnownRole(role)) return false;
-  return role === 'super_admin' || role === 'finance';
+  return role === 'admin' || role === 'super_admin' || role === 'finance';
 }
 
 /**
@@ -104,11 +112,11 @@ export function canViewReports(role: RoleInput): boolean {
 }
 
 /**
- * canViewStores: admin/super_admin => true
+ * canViewStores: admin/super_admin/finance => true
  */
 export function canViewStores(role: RoleInput): boolean {
   if (!isKnownRole(role)) return false;
-  return role === 'admin' || role === 'super_admin';
+  return role === 'admin' || role === 'super_admin' || role === 'finance';
 }
 
 /**
