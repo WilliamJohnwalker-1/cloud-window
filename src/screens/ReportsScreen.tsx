@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  DimensionValue,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
@@ -15,7 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx-js-style';
 import { useShallow } from 'zustand/react/shallow';
 import { BarChart3, TrendingUp, Download, AlertTriangle } from 'lucide-react-native';
-import { BarChart, PieChart } from 'react-native-gifted-charts';
+import { BarChart, PieChart, LineChart } from 'react-native-gifted-charts';
 import Toast from 'react-native-toast-message';
 
 import { useAppStore } from '../store/useAppStore';
@@ -24,9 +25,9 @@ import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 import { getProvinceForCity } from '../utils/provinceMapping';
-import type { City } from '../types';
+import type { City, FinanceReportType } from '../types';
 
-type ReportType = 'sales' | 'supply' | 'inventory' | 'profit' | 'finance' | 'revenue';
+type ReportType = FinanceReportType;
 
 type SheetCellValue = string | number | null;
 type SheetRow = Array<SheetCellValue>;
@@ -96,6 +97,7 @@ export default function ReportsScreen() {
     generateCityChannelReport,
     generateProductDetailReport,
     generatePaymentReport,
+    createSlowMovingAlertNotification,
   } = useAppStore(
     useShallow((state) => ({
       user: state.user,
@@ -111,6 +113,7 @@ export default function ReportsScreen() {
       generateCityChannelReport: state.generateCityChannelReport,
       generateProductDetailReport: state.generateProductDetailReport,
       generatePaymentReport: state.generatePaymentReport,
+      createSlowMovingAlertNotification: state.createSlowMovingAlertNotification,
     })),
   );
   const { transactions, fetchTransactions, balance, fetchBalance } = useFinanceStore(
@@ -121,12 +124,28 @@ export default function ReportsScreen() {
       fetchBalance: state.fetchBalance,
     }))
   );
-  const [reportType, setReportType] = useState<ReportType>('sales');
+  const [reportType, setReportType] = useState<ReportType>(user?.role === 'distributor' ? 'supply' : 'finance');
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
   const isDistributor = user?.role === 'distributor';
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const reportTabs = useMemo<Array<{ key: ReportType; label: string }>>(() => {
+    if (isDistributor) {
+      return [
+        { key: 'supply', label: '供货统计' },
+        { key: 'sales', label: '销售报表' },
+      ];
+    }
+
+    return [
+      { key: 'finance', label: '财务报表' },
+      { key: 'inventory_turnover', label: '库存周转' },
+      { key: 'revenue', label: '营收报表' },
+      { key: 'supply', label: '供货统计' },
+      { key: 'sales', label: '销售报表' },
+    ];
+  }, [isDistributor]);
 
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null);
@@ -136,6 +155,7 @@ export default function ReportsScreen() {
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const [floatingProductName, setFloatingProductName] = useState('');
   const exportLocks = useRef({ profitExcel: false, profitPdf: false, business: false });
+  const slowMovingAlertScopeRef = useRef<string | null>(null);
 
   const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
     if (order.city_id) return order.city_id;
@@ -196,6 +216,29 @@ export default function ReportsScreen() {
     if (selectedCityId.startsWith('name:')) return [];
     return storesByProvince.filter((store) => store.city_id === selectedCityId);
   }, [activeStores, reportCityProvinceMap, selectedCityId, selectedProvinceId]);
+  const selectedReportStore = useMemo(
+    () => activeStores.find((store) => store.id === selectedStoreId) || null,
+    [activeStores, selectedStoreId],
+  );
+  const slowMovingAlertScopeLabel = useMemo(() => {
+    const scopeParts: string[] = [];
+    if (selectedProvinceId) {
+      scopeParts.push(selectedProvinceId);
+    }
+    if (selectedCityId) {
+      const cityName = selectedCityId.startsWith('name:')
+        ? selectedCityId.replace('name:', '')
+        : reportCities.find((city) => city.id === selectedCityId)?.name || '未知城市';
+      scopeParts.push(cityName);
+    }
+    if (selectedReportStore?.name) {
+      scopeParts.push(selectedReportStore.name);
+    }
+    if (selectedMonth !== 'all') {
+      scopeParts.push(`${selectedMonth} 月`);
+    }
+    return scopeParts.length > 0 ? scopeParts.join(' / ') : '全部范围';
+  }, [reportCities, selectedCityId, selectedMonth, selectedProvinceId, selectedReportStore]);
   const monthOptions = useMemo(() => {
     const runtimeOptions = buildMonthOptions(orders);
     if (allModeMonthOptions.length === 0) {
@@ -259,6 +302,14 @@ export default function ReportsScreen() {
   }, [selectedStoreId, fetchStoreInventory]);
 
   useEffect(() => {
+    if (reportTabs.some((item) => item.key === reportType)) {
+      return;
+    }
+
+    setReportType(reportTabs[0]?.key || 'sales');
+  }, [reportTabs, reportType]);
+
+  useEffect(() => {
     if (!selectedStoreId) return;
     const stillVisible = filteredStores.some((store) => store.id === selectedStoreId);
     if (!stillVisible) {
@@ -289,17 +340,17 @@ export default function ReportsScreen() {
     if (selectedCityId) count += 1;
     if (selectedStoreId) count += 1;
     if (selectedMonth !== 'all') count += 1;
-    if (reportType !== 'sales') count += 1;
+    if (reportType !== (isDistributor ? 'supply' : 'finance')) count += 1;
     return count;
-  }, [reportType, selectedCityId, selectedMonth, selectedProvinceId, selectedStoreId]);
+  }, [isDistributor, reportType, selectedCityId, selectedMonth, selectedProvinceId, selectedStoreId]);
 
   const reportTypeLabel = useMemo(() => {
     if (reportType === 'sales') return '销售报表';
     if (reportType === 'revenue') return '营收报表';
     if (reportType === 'supply') return '供货统计';
-    if (reportType === 'inventory') return '库存报表';
+    if (reportType === 'inventory_turnover') return '库存周转';
     if (reportType === 'finance') return '财务报表';
-    return '利润报表';
+    return '销售报表';
   }, [reportType]);
 
   const revenueScopedOrders = useMemo(
@@ -488,6 +539,11 @@ export default function ReportsScreen() {
   const turnoverData = useMemo(() => {
     const soldOrders = filteredOrders.filter((order) => order.order_kind !== 'purchase');
     const lastSoldAt: Record<string, number> = {};
+    
+    const now = Date.now();
+    const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000;
+    const recentSalesQty: Record<string, number> = {};
+    const totalSalesQty: Record<string, number> = {};
 
     soldOrders.forEach((order) => {
       const soldAt = new Date(order.created_at).getTime();
@@ -498,15 +554,24 @@ export default function ReportsScreen() {
         if (soldAt > current) {
           lastSoldAt[item.product_id] = soldAt;
         }
+        
+        totalSalesQty[item.product_id] = (totalSalesQty[item.product_id] || 0) + item.quantity;
+        if (soldAt >= threeMonthsAgo) {
+          recentSalesQty[item.product_id] = (recentSalesQty[item.product_id] || 0) + item.quantity;
+        }
       });
     });
 
-    const productTurnover: { [key: string]: { name: string; turnoverDays: number; isSlow: boolean } } = {};
+    const productTurnover: { [key: string]: { name: string; turnoverDays: number; isSlow: boolean; cost: number; inventoryValue: number; seriesName: string; recentSales: number; totalSales: number } } = {};
+    
     const targetProducts = selectedStoreId
-      ? storeInventory.map((p) => ({ id: p.product_id, name: p.product_name || '未知' }))
-      : products.map((p) => ({ id: p.id, name: p.name }));
+      ? storeInventory.map((p) => {
+          const globalP = products.find(gp => gp.id === p.product_id);
+          return { id: p.product_id, name: p.product_name || '未知', cost: globalP?.cost || 0, quantity: p.quantity || 0, seriesName: globalP?.series_name || '无系列' };
+        })
+      : products.map((p) => ({ id: p.id, name: p.name, cost: p.cost || 0, quantity: p.quantity || 0, seriesName: p.series_name || '无系列' }));
+      
     const uniqueProducts = Array.from(new Map(targetProducts.map((p) => [p.id, p])).values());
-    const now = Date.now();
     let activeSkuCount = 0;
 
     uniqueProducts.forEach((p) => {
@@ -521,6 +586,11 @@ export default function ReportsScreen() {
         name: p.name,
         turnoverDays,
         isSlow: turnoverDays > 60,
+        cost: p.cost,
+        inventoryValue: p.cost * p.quantity,
+        seriesName: p.seriesName,
+        recentSales: recentSalesQty[p.id] || 0,
+        totalSales: totalSalesQty[p.id] || 0,
       };
     });
 
@@ -536,14 +606,149 @@ export default function ReportsScreen() {
     const totalSkuCount = uniqueProducts.length;
     const sellThroughRate = totalSkuCount > 0 ? activeSkuCount / totalSkuCount : 0;
 
+    const validTurnovers = Object.values(productTurnover).filter(p => p.turnoverDays !== 999);
+    const avgTurnoverDays = validTurnovers.length > 0 
+      ? validTurnovers.reduce((sum, p) => sum + p.turnoverDays, 0) / validTurnovers.length 
+      : 0;
+
+    const seriesTurnoverMap: Record<string, { sum: number; count: number }> = {};
+    validTurnovers.forEach(p => {
+      if (!seriesTurnoverMap[p.seriesName]) {
+        seriesTurnoverMap[p.seriesName] = { sum: 0, count: 0 };
+      }
+      seriesTurnoverMap[p.seriesName].sum += p.turnoverDays;
+      seriesTurnoverMap[p.seriesName].count += 1;
+    });
+    const seriesAvgTurnover = Object.entries(seriesTurnoverMap).map(([name, data]) => ({
+      name,
+      avgDays: data.sum / data.count
+    })).sort((a, b) => a.avgDays - b.avgDays);
+
+    const sortedBySales = [...Object.values(productTurnover)].sort((a, b) => b.totalSales - a.totalSales);
+    const top10PercentCount = Math.max(1, Math.ceil(sortedBySales.length * 0.1));
+
+    let hotValue = 0;
+    let slowValue = 0;
+    let regularValue = 0;
+
+    Object.entries(productTurnover).forEach(([id, p]) => {
+      const isHot = sortedBySales.findIndex(sp => sp.name === p.name) < top10PercentCount && p.totalSales > 0;
+      const isSlow = p.recentSales < 10;
+      
+      if (isHot) {
+        hotValue += p.inventoryValue;
+      } else if (isSlow) {
+        slowValue += p.inventoryValue;
+      } else {
+        regularValue += p.inventoryValue;
+      }
+    });
+
+    const totalInventoryValue = hotValue + slowValue + regularValue;
+    const slowValueRatio = totalInventoryValue > 0 ? slowValue / totalInventoryValue : 0;
+    const isSlowWarning = slowValueRatio > 0.15;
+
+    let drillDownData: { label: string; active: number; total: number; rate: number }[] = [];
+    
+    if (selectedStoreId) {
+      drillDownData = uniqueProducts.map(p => {
+        const active = lastSoldAt[p.id] ? 1 : 0;
+        return { label: p.name, active, total: 1, rate: active };
+      }).sort((a, b) => b.rate - a.rate).slice(0, 10);
+    } else if (selectedCityId) {
+      const storesInCity = filteredStores.filter(s => s.city_id === selectedCityId);
+      drillDownData = storesInCity.map(store => {
+        const storeOrders = soldOrders.filter(o => o.store_id === store.id);
+        const storeActiveSkus = new Set();
+        storeOrders.forEach(o => o.items.forEach(i => {
+          if (!i.is_sample && Number(i.quantity || 0) > 0) storeActiveSkus.add(i.product_id);
+        }));
+        const storeTotalSkus = storeInventory.filter(si => si.store_id === store.id).length || uniqueProducts.length;
+        const rate = storeTotalSkus > 0 ? storeActiveSkus.size / storeTotalSkus : 0;
+        return { label: store.name, active: storeActiveSkus.size, total: storeTotalSkus, rate };
+      }).sort((a, b) => b.rate - a.rate);
+    } else if (selectedProvinceId) {
+      const citiesInProvince = reportCities.filter(c => (selectedProvinceId === '未知省份' ? !c.province : c.province === selectedProvinceId));
+      drillDownData = citiesInProvince.map(city => {
+        const cityOrders = soldOrders.filter(o => getOrderCityKey(o) === city.id);
+        const cityActiveSkus = new Set();
+        cityOrders.forEach(o => o.items.forEach(i => {
+          if (!i.is_sample && Number(i.quantity || 0) > 0) cityActiveSkus.add(i.product_id);
+        }));
+        const rate = uniqueProducts.length > 0 ? cityActiveSkus.size / uniqueProducts.length : 0;
+        return { label: city.name, active: cityActiveSkus.size, total: uniqueProducts.length, rate };
+      }).sort((a, b) => b.rate - a.rate);
+    } else {
+      const provinceMap = new Map<string, Set<string>>();
+      soldOrders.forEach(o => {
+        const cityKey = getOrderCityKey(o);
+        const province = reportCityProvinceMap.get(cityKey) || getProvinceForCity(o.city_name || '') || '未知省份';
+        if (!provinceMap.has(province)) provinceMap.set(province, new Set());
+        o.items.forEach(i => {
+          if (!i.is_sample && Number(i.quantity || 0) > 0) provinceMap.get(province)!.add(i.product_id);
+        });
+      });
+      
+      drillDownData = Array.from(provinceMap.entries()).map(([province, activeSkus]) => {
+        const rate = uniqueProducts.length > 0 ? activeSkus.size / uniqueProducts.length : 0;
+        return { label: province, active: activeSkus.size, total: uniqueProducts.length, rate };
+      }).sort((a, b) => b.rate - a.rate);
+    }
+
     return {
       topTurnoverProducts,
       slowMovingProducts,
       activeSkuCount,
       totalSkuCount,
       sellThroughRate,
+      avgTurnoverDays,
+      seriesAvgTurnover,
+      inventoryValuePie: [
+        { name: '热销款', value: hotValue, color: '#FF6B9D' },
+        { name: '常规款', value: regularValue, color: '#5B8DEF' },
+        { name: '滞销款', value: slowValue, color: '#C77DFF' },
+      ].filter(item => item.value > 0),
+      isSlowWarning,
+      slowInventoryValue: slowValue,
+      slowValueRatio,
+      totalInventoryValue,
+      drillDownData,
+      scatterData: Object.values(productTurnover).filter(p => p.turnoverDays !== 999).map(p => ({
+        name: p.name,
+        cost: p.cost,
+        turnoverDays: p.turnoverDays
+      }))
     };
-  }, [filteredOrders, products, selectedStoreId, storeInventory]);
+  }, [filteredOrders, products, selectedStoreId, storeInventory, selectedCityId, selectedProvinceId, filteredStores, reportCities, reportCityProvinceMap]);
+
+  useEffect(() => {
+    if (!isAdminOrManager) return;
+    if (reportType !== 'inventory_turnover') return;
+    if (!turnoverData.isSlowWarning || turnoverData.totalInventoryValue <= 0) return;
+    if (slowMovingAlertScopeRef.current === slowMovingAlertScopeLabel) return;
+
+    slowMovingAlertScopeRef.current = slowMovingAlertScopeLabel;
+    void (async () => {
+      const { error } = await createSlowMovingAlertNotification({
+        scopeLabel: slowMovingAlertScopeLabel,
+        slowMovingRatio: turnoverData.slowValueRatio,
+        slowMovingCost: turnoverData.slowInventoryValue,
+        totalInventoryCost: turnoverData.totalInventoryValue,
+      });
+      if (error) {
+        slowMovingAlertScopeRef.current = null;
+      }
+    })();
+  }, [
+    createSlowMovingAlertNotification,
+    isAdminOrManager,
+    reportType,
+    slowMovingAlertScopeLabel,
+    turnoverData.isSlowWarning,
+    turnoverData.slowInventoryValue,
+    turnoverData.slowValueRatio,
+    turnoverData.totalInventoryValue,
+  ]);
 
   const profitData = useMemo(() => {
     const productProfit: {
@@ -624,6 +829,8 @@ export default function ReportsScreen() {
     const totalOrders = revenueScopedOrders.length;
 
     const trendMap: { [key: string]: number } = {};
+    const profitTrendMap: { [key: string]: { revenue: number; cost: number } } = {};
+    const seenProductsForTrend = new Set<string>();
     revenueScopedOrders.forEach((order) => {
       const date = new Date(order.created_at);
       let key = '';
@@ -633,12 +840,38 @@ export default function ReportsScreen() {
         key = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       }
       trendMap[key] = (trendMap[key] || 0) + Number(order.total_discount_amount || 0);
+
+      if (!profitTrendMap[key]) {
+        profitTrendMap[key] = { revenue: 0, cost: 0 };
+      }
+      
+      order.items.forEach((it) => {
+        const pKey = it.product_id;
+        if (!it.is_sample) {
+          profitTrendMap[key].revenue += it.quantity * Number(it.discount_price || 0);
+          profitTrendMap[key].cost += it.quantity * Number(it.unit_cost || 0);
+        } else {
+          profitTrendMap[key].cost += it.quantity * Number(it.unit_cost || 0);
+        }
+        
+        if (!seenProductsForTrend.has(pKey)) {
+          seenProductsForTrend.add(pKey);
+          profitTrendMap[key].cost += Number(it.one_time_cost || 0);
+        }
+      });
     });
 
     const trend = Object.entries(trendMap)
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
+    const profitTrend = Object.entries(profitTrendMap)
+      .map(([label, data]) => {
+        const profit = data.revenue - data.cost;
+        const margin = data.revenue > 0 ? (profit / data.revenue) * 100 : 0;
+        return { label, profit, margin };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
     const storeMap: { [key: string]: number } = {};
     revenueScopedOrders.forEach((order) => {
       const storeName = order.store_name || '未知店铺/历史订单';
@@ -663,6 +896,7 @@ export default function ReportsScreen() {
       totalRevenue,
       totalOrders,
       trend,
+      profitTrend,
       compositionByStore,
       compositionByCity,
     };
@@ -895,7 +1129,7 @@ export default function ReportsScreen() {
   const renderTabButton = (key: ReportType, label: string) => {
     const isActive = reportType === key;
     return (
-      <TouchableOpacity style={[styles.tab, { backgroundColor: theme.surfaceSecondary }, isActive && styles.activeTabWrap]} onPress={() => setReportType(key)}>
+      <TouchableOpacity key={key} style={[styles.tab, { backgroundColor: theme.surfaceSecondary }, isActive && styles.activeTabWrap]} onPress={() => setReportType(key)}>
         {isActive ? (
           <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.activeTab}>
             <Text style={styles.activeTabText}>{label}</Text>
@@ -909,7 +1143,7 @@ export default function ReportsScreen() {
 
   const renderSalesReport = () => (
     <ScrollView>
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>销售概览</Text>
         <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>口径：结算单 + 零售单（已排除退款单）</Text>
         <View style={styles.statsRow}>
@@ -924,52 +1158,22 @@ export default function ReportsScreen() {
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销量排行榜</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销量排行</Text>
         {salesData.topProductsQty.length > 0 ? (
-          <>
-            <BarChart
-              data={salesData.topProductsQty.map((item, index) => ({
-                value: item.quantity,
-                label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
-                frontColor: CHART_COLORS[index % CHART_COLORS.length],
-                topLabelComponent: () => (
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                    {item.quantity}
-                  </Text>
-                ),
-              }))}
-              barWidth={30}
-              spacing={20}
-              roundedTop
-              roundedBottom
-              hideRules
-              xAxisThickness={1}
-              xAxisColor={theme.divider}
-              yAxisThickness={0}
-              yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-              noOfSections={4}
-              maxValue={Math.ceil((salesData.topProductsQty[0]?.quantity || 1) * 1.2)}
-              isAnimated
-              animationDuration={500}
-              height={150}
-            />
-            <View style={styles.rankListContainer}>
-              {salesData.topProductsQty.map((item, index) => (
-                <TouchableOpacity
-                  key={`${item.name}-qty`}
-                  style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
-                  onPress={() => showFullProductName(item.name)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-                    {index + 1}. {item.name}
-                  </Text>
-                  <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.quantity}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
+          salesData.topProductsQty.map((item, index) => (
+            <TouchableOpacity
+              key={`${item.name}-qty`}
+              style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
+              onPress={() => showFullProductName(item.name)}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                {index + 1}. {item.name}
+              </Text>
+              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.quantity}</Text>
+            </TouchableOpacity>
+          ))
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -977,129 +1181,6 @@ export default function ReportsScreen() {
           </View>
         )}
       </View>
-
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品销售额排行榜</Text>
-        {salesData.topProductsAmt.length > 0 ? (
-          <>
-            <BarChart
-              data={salesData.topProductsAmt.map((item, index) => ({
-                value: item.amount,
-                label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
-                frontColor: CHART_COLORS[index % CHART_COLORS.length],
-                topLabelComponent: () => (
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                    {item.amount.toFixed(0)}
-                  </Text>
-                ),
-              }))}
-              barWidth={30}
-              spacing={20}
-              roundedTop
-              roundedBottom
-              hideRules
-              xAxisThickness={1}
-              xAxisColor={theme.divider}
-              yAxisThickness={0}
-              yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-              noOfSections={4}
-              maxValue={Math.ceil((salesData.topProductsAmt[0]?.amount || 1) * 1.2)}
-              isAnimated
-              animationDuration={500}
-              height={150}
-            />
-            <View style={styles.rankListContainer}>
-              {salesData.topProductsAmt.map((item, index) => (
-                <TouchableOpacity
-                  key={`${item.name}-amt`}
-                  style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
-                  onPress={() => showFullProductName(item.name)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-                    {index + 1}. {item.name}
-                  </Text>
-                  <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.amount.toFixed(0)}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        ) : (
-          <View style={styles.emptyChartContainer}>
-            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
-            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无销售数据</Text>
-          </View>
-        )}
-      </View>
-
-
-      {salesData.salesByCity.length > 0 && (
-        <View style={[styles.card, { backgroundColor: theme.surface }] }>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>城市销售分布</Text>
-          <View style={styles.pieContainer}>
-            <PieChart
-              data={salesData.salesByCity.map((item, index) => ({
-                value: item.total,
-                color: CHART_COLORS[index % CHART_COLORS.length],
-              }))}
-              donut
-              radius={70}
-              innerRadius={40}
-               innerCircleColor={theme.surface}
-               centerLabelComponent={() => (
-                 <View style={{ alignItems: 'center' }}>
-                   <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
-                     {salesData.salesByCity.reduce((s, c) => s + c.total, 0).toFixed(0)}
-                   </Text>
-                   <Text style={{ fontSize: 10, color: theme.textSecondary }}>总额</Text>
-                 </View>
-               )}
-            />
-            <View style={styles.legendContainer}>
-              {salesData.salesByCity.map((item, index) => (
-                <View key={item.city} style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
-                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.city}: {item.total.toFixed(0)}元</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </View>
-      )}
-
-      {!selectedStoreId && salesData.salesByStore.length > 0 && (
-        <View style={[styles.card, { backgroundColor: theme.surface }] }>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>店铺销售分布</Text>
-          <View style={styles.pieContainer}>
-            <PieChart
-              data={salesData.salesByStore.map((item, index) => ({
-                value: item.total,
-                color: CHART_COLORS[index % CHART_COLORS.length],
-              }))}
-              donut
-              radius={70}
-              innerRadius={40}
-               innerCircleColor={theme.surface}
-               centerLabelComponent={() => (
-                 <View style={{ alignItems: 'center' }}>
-                   <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
-                     {salesData.salesByStore.reduce((s, c) => s + c.total, 0).toFixed(0)}
-                   </Text>
-                   <Text style={{ fontSize: 10, color: theme.textSecondary }}>总额</Text>
-                 </View>
-               )}
-            />
-            <View style={styles.legendContainer}>
-              {salesData.salesByStore.map((item, index) => (
-                <View key={item.store} style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
-                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.store}: {item.total.toFixed(0)}元</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </View>
-      )}
     </ScrollView>
   );
 
@@ -1126,24 +1207,160 @@ export default function ReportsScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>SKU动销率</Text>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>SKU动销率与周转</Text>
         <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>动销率 = 有销量 SKU 数 / 总 SKU 数</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{turnoverData.activeSkuCount}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>有销量SKU</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{turnoverData.totalSkuCount}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总SKU</Text>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{turnoverData.activeSkuCount} / {turnoverData.totalSkuCount}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>动销SKU</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, turnoverData.sellThroughRate < 0.5 && styles.warningText]}>
-              {turnoverData.sellThroughRate.toFixed(2)}
+              {(turnoverData.sellThroughRate * 100).toFixed(1)}%
             </Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>动销率</Text>
           </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>
+              {turnoverData.avgTurnoverDays.toFixed(1)}天
+            </Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>平均周转</Text>
+          </View>
         </View>
+      </View>
+
+      {turnoverData.inventoryValuePie.length > 0 && (
+        <View style={[styles.card, { backgroundColor: theme.surface }, turnoverData.isSlowWarning && { borderColor: Colors.danger, borderWidth: 1 }] }>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>库存成本结构</Text>
+          {turnoverData.isSlowWarning && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, backgroundColor: 'rgba(248, 113, 113, 0.1)', padding: 8, borderRadius: 4 }}>
+              <AlertTriangle size={16} color={Colors.danger} style={{ marginRight: 6 }} />
+              <Text style={{ color: Colors.danger, fontSize: 12, fontWeight: '600' }}>
+                警告：滞销款库存成本占比达 {(turnoverData.slowValueRatio * 100).toFixed(1)}%，超过 15% 阈值！
+              </Text>
+            </View>
+          )}
+          <View style={styles.pieContainer}>
+            <PieChart
+              data={turnoverData.inventoryValuePie}
+              donut
+              radius={70}
+              innerRadius={40}
+              innerCircleColor={theme.surface}
+              centerLabelComponent={() => (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
+                    {turnoverData.inventoryValuePie.reduce((s, c) => s + c.value, 0).toFixed(0)}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: theme.textSecondary }}>总货值</Text>
+                </View>
+              )}
+            />
+            <View style={styles.legendContainer}>
+              {turnoverData.inventoryValuePie.map((item) => (
+                <View key={item.name} style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.name}: {item.value.toFixed(0)}元</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>动销率下钻分析</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>
+          {selectedStoreId ? '商品维度' : selectedCityId ? '店铺维度' : selectedProvinceId ? '城市维度' : '省份维度'}
+        </Text>
+        {turnoverData.drillDownData.length > 0 ? (
+          <BarChart
+            data={turnoverData.drillDownData.map((item, index) => ({
+              value: item.rate * 100,
+              label: item.label.length > 4 ? item.label.slice(0, 4) + '..' : item.label,
+              frontColor: CHART_COLORS[index % CHART_COLORS.length],
+              topLabelComponent: () => (
+                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
+                  {(item.rate * 100).toFixed(0)}%
+                </Text>
+              ),
+            }))}
+            barWidth={30}
+            spacing={20}
+            roundedTop
+            roundedBottom
+            hideRules
+            xAxisThickness={1}
+            xAxisColor={theme.divider}
+            yAxisThickness={0}
+            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
+            noOfSections={4}
+            maxValue={100}
+            isAnimated
+            animationDuration={500}
+            height={150}
+          />
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无动销数据</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品周转分布 (成本 vs 天数)</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>X轴: 成本(元)  Y轴: 周转天数</Text>
+        {turnoverData.scatterData.length > 0 ? (
+          <View style={{ height: 200, width: '100%', position: 'relative', marginTop: 10, borderWidth: 1, borderColor: theme.divider, borderRadius: 4 }}>
+            {(() => {
+              const maxCost = Math.max(...turnoverData.scatterData.map(d => d.cost), 10);
+              const maxDays = Math.max(...turnoverData.scatterData.map(d => d.turnoverDays), 10);
+              return turnoverData.scatterData.map((d, i) => {
+                const left = `${(d.cost / maxCost) * 90}%` as DimensionValue;
+                const bottom = `${(d.turnoverDays / maxDays) * 90}%` as DimensionValue;
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      left,
+                      bottom,
+                      width: 12,
+                      height: 12,
+                      borderRadius: 6,
+                      backgroundColor: d.turnoverDays > 60 ? Colors.danger : Colors.blue,
+                      opacity: 0.7,
+                      transform: [{ translateX: 6 }, { translateY: -6 }]
+                    }}
+                    onPress={() => showFullProductName(`${d.name}\n成本: ${d.cost}元\n周转: ${d.turnoverDays}天`)}
+                  />
+                );
+              });
+            })()}
+          </View>
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无周转分布数据</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>系列平均周转天数</Text>
+        {turnoverData.seriesAvgTurnover.length > 0 ? (
+          turnoverData.seriesAvgTurnover.map((item, index) => (
+            <View key={item.name} style={[styles.rankListRow, { borderBottomColor: theme.divider }]}>
+              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                {index + 1}. {item.name}
+              </Text>
+              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.avgDays.toFixed(1)}天</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无系列数据</Text>
+        )}
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
@@ -1329,8 +1546,96 @@ export default function ReportsScreen() {
             <Text style={[styles.statValue, { color: theme.textPrimary }]}>{revenueData.totalOrders}</Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>营收订单数</Text>
           </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, profitData.totalProfit >= 0 ? styles.profitText : styles.lossText]}>{profitData.totalProfit.toFixed(2)}元</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总毛利</Text>
+          </View>
         </View>
       </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>SKU毛利润排行</Text>
+        {profitData.profitByProduct.length > 0 ? (
+          <BarChart
+            horizontal
+            data={profitData.profitByProduct.slice(0, 10).map((item, index) => ({
+              value: item.profit,
+              label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
+              frontColor: item.profit >= 0 ? CHART_COLORS[index % CHART_COLORS.length] : Colors.danger,
+              topLabelComponent: () => (
+                <Text style={{ fontSize: 10, color: theme.textSecondary, marginLeft: 4 }}>
+                  {item.profit.toFixed(0)}
+                </Text>
+              ),
+            }))}
+            barWidth={20}
+            spacing={15}
+            roundedTop
+            roundedBottom
+            hideRules
+            xAxisThickness={1}
+            xAxisColor={theme.divider}
+            yAxisThickness={0}
+            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
+            noOfSections={4}
+            isAnimated
+            animationDuration={500}
+            height={250}
+            shiftY={0}
+          />
+        ) : (
+          <View style={styles.emptyChartContainer}>
+            <TrendingUp size={40} color={theme.textTertiary} strokeWidth={1.5} />
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无利润数据</Text>
+          </View>
+        )}
+      </View>
+
+      {selectedStoreId && (
+        <View style={[styles.card, { backgroundColor: theme.surface }] }>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>店铺毛利与毛利率趋势</Text>
+          {revenueData.profitTrend.length > 0 ? (
+            <LineChart
+              data={revenueData.profitTrend.map(item => ({
+                value: item.profit,
+                label: item.label,
+                dataPointText: item.profit.toFixed(0),
+              }))}
+              secondaryData={revenueData.profitTrend.map(item => ({
+                value: item.margin,
+                dataPointText: item.margin.toFixed(1) + '%',
+              }))}
+              secondaryYAxis={{
+                yAxisColor: Colors.pink,
+                yAxisTextStyle: { color: Colors.pink, fontSize: 10 },
+                yAxisLabelSuffix: '%',
+              }}
+              color={Colors.blue}
+              secondaryLineConfig={{
+                color: Colors.pink,
+                dataPointsColor: Colors.pink,
+                textColor: Colors.pink,
+              }}
+              dataPointsColor={Colors.blue}
+              textColor={Colors.blue}
+              textFontSize={10}
+              thickness={2}
+              spacing={60}
+              hideRules
+              xAxisColor={theme.divider}
+              yAxisColor={theme.divider}
+              yAxisTextStyle={{ color: theme.textTertiary, fontSize: 10 }}
+              isAnimated
+              height={200}
+            />
+          ) : (
+            <View style={styles.emptyChartContainer}>
+              <TrendingUp size={40} color={theme.textTertiary} strokeWidth={1.5} />
+              <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无趋势数据</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>营收趋势</Text>
@@ -1468,20 +1773,44 @@ export default function ReportsScreen() {
             <Text style={[styles.statValue, financeData.netIncome >= 0 ? styles.profitText : styles.lossText]}>{financeData.netIncome.toFixed(2)}元</Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>净收入</Text>
           </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{(balance?.balance || 0).toFixed(2)}元</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>现金余额</Text>
+          </View>
         </View>
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>收入分类排行</Text>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>收入分类占比</Text>
         {financeData.topIncomeCategories.length > 0 ? (
-          financeData.topIncomeCategories.map((item, index) => (
-            <View key={item.name} style={[styles.rankListRow, { borderBottomColor: theme.divider }]}>
-              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-                {index + 1}. {item.name}
-              </Text>
-              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.amount.toFixed(2)}元</Text>
+          <View style={styles.pieContainer}>
+            <PieChart
+              data={financeData.topIncomeCategories.map((item, index) => ({
+                value: item.amount,
+                color: CHART_COLORS[index % CHART_COLORS.length],
+              }))}
+              donut
+              radius={70}
+              innerRadius={40}
+              innerCircleColor={theme.surface}
+              centerLabelComponent={() => (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
+                    {financeData.totalIncome.toFixed(0)}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: theme.textSecondary }}>收入</Text>
+                </View>
+              )}
+            />
+            <View style={styles.legendContainer}>
+              {financeData.topIncomeCategories.map((item, index) => (
+                <View key={item.name} style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
+                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.name}: {item.amount.toFixed(0)}元</Text>
+                </View>
+              ))}
             </View>
-          ))
+          </View>
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -1491,16 +1820,36 @@ export default function ReportsScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>支出分类排行</Text>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>支出分类占比</Text>
         {financeData.topExpenseCategories.length > 0 ? (
-          financeData.topExpenseCategories.map((item, index) => (
-            <View key={item.name} style={[styles.rankListRow, { borderBottomColor: theme.divider }]}>
-              <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-                {index + 1}. {item.name}
-              </Text>
-              <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.amount.toFixed(2)}元</Text>
+          <View style={styles.pieContainer}>
+            <PieChart
+              data={financeData.topExpenseCategories.map((item, index) => ({
+                value: item.amount,
+                color: CHART_COLORS[index % CHART_COLORS.length],
+              }))}
+              donut
+              radius={70}
+              innerRadius={40}
+              innerCircleColor={theme.surface}
+              centerLabelComponent={() => (
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.textPrimary }}>
+                    {financeData.totalExpense.toFixed(0)}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: theme.textSecondary }}>支出</Text>
+                </View>
+              )}
+            />
+            <View style={styles.legendContainer}>
+              {financeData.topExpenseCategories.map((item, index) => (
+                <View key={item.name} style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }]} />
+                  <Text style={[styles.legendText, { color: theme.textSecondary }]}>{item.name}: {item.amount.toFixed(0)}元</Text>
+                </View>
+              ))}
             </View>
-          ))
+          </View>
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -1529,7 +1878,7 @@ export default function ReportsScreen() {
         </TouchableOpacity>
       </View>
 
-      {(selectedProvinceId || selectedCityId || selectedStoreId || selectedMonth !== 'all' || reportType !== 'sales') && (
+      {(selectedProvinceId || selectedCityId || selectedStoreId || selectedMonth !== 'all' || reportType !== (isDistributor ? 'supply' : 'finance')) && (
         <View style={styles.activeFiltersWrap}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
             {selectedProvinceId && (
@@ -1552,8 +1901,8 @@ export default function ReportsScreen() {
                 <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>时间: {selectedMonth} ×</Text>
               </TouchableOpacity>
             )}
-            {reportType !== 'sales' && (
-              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setReportType('sales')}>
+            {reportType !== (isDistributor ? 'supply' : 'finance') && (
+              <TouchableOpacity style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]} onPress={() => setReportType(isDistributor ? 'supply' : 'finance')}>
                 <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>类型: {reportTypeLabel} ×</Text>
               </TouchableOpacity>
             )}
@@ -1562,20 +1911,23 @@ export default function ReportsScreen() {
       )}
 
       <View style={[styles.tabBar, { backgroundColor: theme.surface }]}> 
-        {renderTabButton('sales', '销售报表')}
-        {!isDistributor && renderTabButton('revenue', '营收报表')}
-        {!isDistributor && renderTabButton('supply', '供货统计')}
-        {!isDistributor && renderTabButton('inventory', '库存报表')}
-        {!isDistributor && renderTabButton('profit', '利润报表')}
-        {!isDistributor && renderTabButton('finance', '财务报表')}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRowContent}>
+          {reportTabs.map((item) => renderTabButton(item.key, item.label))}
+        </ScrollView>
+        <TouchableOpacity
+          style={[styles.filterEntryButton, { backgroundColor: theme.surfaceSecondary, borderColor: theme.border }]}
+          activeOpacity={0.85}
+          onPress={exportBusinessData}
+        >
+          <Text style={[styles.filterEntryText, { color: theme.textPrimary }]}>导出经营数据</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.content, { backgroundColor: theme.background }]}> 
         {reportType === 'sales' && renderSalesReport()}
         {!isDistributor && reportType === 'revenue' && renderRevenueReport()}
-        {!isDistributor && reportType === 'supply' && renderSupplyReport()}
-        {!isDistributor && reportType === 'inventory' && renderInventoryReport()}
-        {!isDistributor && reportType === 'profit' && renderProfitReport()}
+        {reportType === 'supply' && renderSupplyReport()}
+        {!isDistributor && reportType === 'inventory_turnover' && renderInventoryReport()}
         {!isDistributor && reportType === 'finance' && renderFinanceReport()}
       </View>
 
@@ -1653,14 +2005,7 @@ export default function ReportsScreen() {
             <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
               <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>报表类型</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                {[
-                  { key: 'sales', label: '销售报表' },
-                  { key: 'revenue', label: '营收报表' },
-                  { key: 'supply', label: '供货统计' },
-                  { key: 'inventory', label: '库存报表' },
-                  { key: 'profit', label: '利润报表' },
-                  { key: 'finance', label: '财务报表' },
-                ].filter((item) => !isDistributor || item.key === 'sales').map((item) => (
+                {reportTabs.map((item) => (
                   <TouchableOpacity
                     key={item.key}
                     style={[styles.filterChip, { backgroundColor: theme.surfaceSecondary }, reportType === item.key && styles.filterChipActive]}
@@ -1682,7 +2027,7 @@ export default function ReportsScreen() {
                   setSelectedCityId(null);
                   setSelectedStoreId(null);
                   setSelectedMonth('all');
-                  setReportType('sales');
+                  setReportType(isDistributor ? 'supply' : 'finance');
                 }}
               >
                 <Text style={[styles.clearButtonText, { color: theme.textSecondary }]}>重置筛选</Text>

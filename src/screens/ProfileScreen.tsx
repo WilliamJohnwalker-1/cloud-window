@@ -31,7 +31,14 @@ import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
 import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
 import type { FinancialTransaction, Notification, Store, Supplier } from '../types';
-import { canEditFinance, canEditProductSeries, canEditSuppliers, canViewFinance, canViewSuppliers } from '../utils/permissions';
+import {
+  canEditFinance,
+  canEditFinanceInitialBalance,
+  canEditProductSeries,
+  canEditSuppliers,
+  canViewFinance,
+  canViewSuppliers,
+} from '../utils/permissions';
 import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 export default function ProfileScreen() {
@@ -109,7 +116,7 @@ export default function ProfileScreen() {
     fetchBalance,
     addTransaction,
     updateTransaction,
-    updateBalance,
+    setInitialBalance,
     deleteTransaction,
     fetchCategories,
   } = useFinanceStore(
@@ -123,7 +130,7 @@ export default function ProfileScreen() {
       fetchBalance: state.fetchBalance,
       addTransaction: state.addTransaction,
       updateTransaction: state.updateTransaction,
-      updateBalance: state.updateBalance,
+      setInitialBalance: state.setInitialBalance,
       deleteTransaction: state.deleteTransaction,
       fetchCategories: state.fetchCategories,
     })),
@@ -249,9 +256,14 @@ export default function ProfileScreen() {
   const canManageProductSeries = canEditProductSeries(user?.role);
   const canViewFinanceManagement = canViewFinance(user?.role);
   const canEditFinanceManagement = canEditFinance(user?.role);
+  const canEditFinanceInitialBalanceManagement = canEditFinanceInitialBalance(user?.role);
   const canViewSupplierManagement = canViewSuppliers(user?.role);
   const canEditSupplierManagement = canEditSuppliers(user?.role);
-  const financeEntryLabel = canEditFinanceManagement ? '余额总览' : '余额总览（只读）';
+  const financeEntryLabel = canEditFinanceManagement
+    ? '余额总览'
+    : canEditFinanceInitialBalanceManagement
+      ? '余额总览（可调期初余额）'
+      : '余额总览（只读）';
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   const formatCurrency = (amount: number): string => amount.toLocaleString('zh-CN', {
@@ -365,7 +377,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    setBalanceDraft(balance ? String(balance.balance) : '');
+    setBalanceDraft(balance ? String(balance.initial_balance) : '');
   }, [balance, isEditingBalance]);
 
   useEffect(() => {
@@ -524,7 +536,7 @@ export default function ProfileScreen() {
 
   const resetBalanceEditor = () => {
     setIsEditingBalance(false);
-    setBalanceDraft(balance ? String(balance.balance) : '');
+    setBalanceDraft(balance ? String(balance.initial_balance) : '');
   };
 
   const handleOpenFinanceOverview = () => {
@@ -539,18 +551,18 @@ export default function ProfileScreen() {
   };
 
   const openBalanceEditor = () => {
-    if (!canEditFinanceManagement) {
-      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可更新余额' });
+    if (!canEditFinanceInitialBalanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员或财务可更新期初余额' });
       return;
     }
 
     setIsEditingBalance(true);
-    setBalanceDraft(balance ? String(balance.balance) : '');
+    setBalanceDraft(balance ? String(balance.initial_balance) : '');
   };
 
   const handleSaveBalance = async () => {
-    if (!canEditFinanceManagement) {
-      Toast.show({ type: 'error', text1: '无权限', text2: '仅财务可更新余额' });
+    if (!canEditFinanceInitialBalanceManagement) {
+      Toast.show({ type: 'error', text1: '无权限', text2: '仅管理员或财务可更新期初余额' });
       return;
     }
 
@@ -560,7 +572,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    const { error } = await updateBalance(nextBalance);
+    const { error } = await setInitialBalance(nextBalance);
     if (error) {
       Toast.show({ type: 'error', text1: '错误', text2: error.message });
       return;
@@ -1266,6 +1278,7 @@ export default function ProfileScreen() {
   const renderNotification = ({ item }: { item: Notification }) => {
     const isNewOrder = item.type === 'new_order';
     const isInventoryAlert = item.type === 'inventory_alert';
+    const isSlowMovingAlert = item.type === 'inventory_slow_moving_alert';
     const isOrderAccepted = item.type === 'order_accepted';
     const isRefundNotification = item.type === 'refund_requested'
       || item.type === 'refund_approved'
@@ -1280,7 +1293,7 @@ export default function ProfileScreen() {
         <View style={[styles.notifIcon, { backgroundColor: theme.surfaceSecondary }]}> 
           {isNewOrder ? (
             <PackagePlus size={18} color={theme.pink} />
-          ) : isInventoryAlert ? (
+          ) : isInventoryAlert || isSlowMovingAlert ? (
             <Bell size={18} color={theme.warning} />
           ) : isRefundNotification ? (
             <Bell size={18} color={theme.warning} />
@@ -1313,6 +1326,11 @@ export default function ProfileScreen() {
         {isInventoryAlert && (
           <View style={[styles.acceptedBadge, { backgroundColor: theme.warningBg }]}> 
             <Text style={[styles.acceptedBadgeText, { color: theme.warning }]}>库存告警</Text>
+          </View>
+        )}
+        {isSlowMovingAlert && (
+          <View style={[styles.acceptedBadge, { backgroundColor: theme.warningBg }]}> 
+            <Text style={[styles.acceptedBadgeText, { color: theme.warning }]}>滞销告警</Text>
           </View>
         )}
         {isRefundNotification && (

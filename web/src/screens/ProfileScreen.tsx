@@ -150,6 +150,8 @@ export const ProfileScreen: React.FC = () => {
         return { label: '订单已接单', badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' };
       case 'inventory_alert':
         return { label: '库存告警', badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-400/30' };
+      case 'inventory_slow_moving_alert':
+        return { label: '滞销告警', badgeClass: 'bg-red-500/15 text-red-300 border-red-400/30' };
       case 'refund_requested':
         return { label: '退款申请', badgeClass: 'bg-purple-500/15 text-purple-300 border-purple-400/30' };
       case 'refund_approved':

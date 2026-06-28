@@ -3,6 +3,7 @@ import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, ShoppingC
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
+import { useSupplierStore } from '../store/useSupplierStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const InventoryScreen: React.FC = () => {
@@ -28,6 +29,7 @@ export const InventoryScreen: React.FC = () => {
   const [editingThresholdText, setEditingThresholdText] = React.useState('');
   const [showPurchaseModal, setShowPurchaseModal] = React.useState(false);
   const [purchaseStoreId, setPurchaseStoreId] = React.useState<string | null>(null);
+  const [purchaseSupplierId, setPurchaseSupplierId] = React.useState<string | null>(null);
   const [purchaseSearchKeyword, setPurchaseSearchKeyword] = React.useState('');
   const [purchaseCart, setPurchaseCart] = React.useState<Map<string, number>>(new Map());
   const [submittingPurchase, setSubmittingPurchase] = React.useState(false);
@@ -35,6 +37,16 @@ export const InventoryScreen: React.FC = () => {
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const isSuperAdmin = user?.role === 'super_admin';
   const canPurchase = user?.role === 'admin' || user?.role === 'super_admin';
+  const getInventoryLogActionLabel = (action: string): string => {
+    if (action === 'breakage') return '报损';
+    if (action === 'purchase_receive') return '采购入库';
+    if (action === 'inbound') return '扫码入库';
+    if (action === 'manual_adjust') return '手工调整';
+    if (action === 'quick_add') return '快捷加库存';
+    if (action === 'quick_reduce') return '快捷减库存';
+    return action;
+  };
+  const { suppliers, fetchSuppliers } = useSupplierStore();
 
   React.useEffect(() => {
     if (isAdminOrManager) {
@@ -47,6 +59,11 @@ export const InventoryScreen: React.FC = () => {
       fetchStoreInventory(selectedStoreId);
     }
   }, [viewMode, selectedStoreId, fetchStoreInventory]);
+
+  React.useEffect(() => {
+    if (!showPurchaseModal || !canPurchase) return;
+    void fetchSuppliers();
+  }, [canPurchase, fetchSuppliers, showPurchaseModal]);
 
   const storeFilterCities = React.useMemo(
     () => cities.filter((city) => stores.some((store) => store.city_id === city.id)),
@@ -190,10 +207,11 @@ export const InventoryScreen: React.FC = () => {
       return;
     }
 
-    const grouped = purchaseCartItems.reduce<Map<string, { store_id: string; city_id: string; products: Array<{ productId: string; quantity: number }> }>>((acc, item) => {
+    const grouped = purchaseCartItems.reduce<Map<string, { store_id: string; city_id: string; supplier_id: string | null; products: Array<{ productId: string; quantity: number }> }>>((acc, item) => {
       const existing = acc.get(item.store.id) || {
         store_id: item.store.id,
         city_id: item.store.city_id,
+        supplier_id: purchaseSupplierId ?? null,
         products: [],
       };
       existing.products.push({ productId: item.product.id, quantity: item.quantity });
@@ -212,6 +230,7 @@ export const InventoryScreen: React.FC = () => {
     setPurchaseCart(new Map());
     setPurchaseSearchKeyword('');
     setPurchaseStoreId(null);
+    setPurchaseSupplierId(null);
     setShowPurchaseModal(false);
     setPageNotice({ type: 'success', text: '进货单已创建，等待确认到货' });
   };
@@ -703,7 +722,7 @@ export const InventoryScreen: React.FC = () => {
                     <tr key={log.id} className="border-b border-white/5">
                       <td className="px-4 py-3 text-xs text-white/70">{new Date(log.created_at).toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm">{log.product_name || log.product_id}</td>
-                      <td className="px-4 py-3 text-xs uppercase text-white/60">{log.action}</td>
+                      <td className="px-4 py-3 text-xs text-white/60">{getInventoryLogActionLabel(log.action)}</td>
                       <td className={`px-4 py-3 text-right font-bold ${log.delta_quantity >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {log.delta_quantity >= 0 ? '+' : ''}{log.delta_quantity}
                       </td>
@@ -783,6 +802,7 @@ export const InventoryScreen: React.FC = () => {
                 onClick={() => {
                   setShowPurchaseModal(false);
                   setPurchaseStoreId(null);
+                  setPurchaseSupplierId(null);
                   setPurchaseSearchKeyword('');
                 }}
                 className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
@@ -808,6 +828,18 @@ export const InventoryScreen: React.FC = () => {
                       {store.name} ({store.city_name})
                     </option>
                   ))}
+              </select>
+              <select
+                value={purchaseSupplierId || ''}
+                onChange={(event) => setPurchaseSupplierId(event.target.value || null)}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
+              >
+                <option value="" className="bg-[#121217]">-- 不关联供应商 --</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id} className="bg-[#121217]">
+                    {supplier.company_name}
+                  </option>
+                ))}
               </select>
               <input
                 value={purchaseSearchKeyword}
