@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { useFinanceStore } from './useFinanceStore';
 import { generateEAN13 } from '../utils/barcode';
 import { applyOrdersDateFilters } from '../utils/fetchOrdersDateParams';
 import { resolvePrice } from '../utils/priceResolver';
@@ -37,7 +38,15 @@ interface StoreRetailCreateItem {
 interface PurchaseOrderCreateItem {
   store_id: string;
   city_id: string;
+  supplier_id?: string | null;
   products: Array<{ product_id: string; quantity: number }>;
+}
+
+interface SlowMovingAlertNotificationInput {
+  scopeLabel: string;
+  slowMovingRatio: number;
+  slowMovingCost: number;
+  totalInventoryCost: number;
 }
 
 interface ProfileRow {
@@ -79,6 +88,7 @@ interface OrderRow {
   store_id?: string | null;
   stores?: { name?: string | null } | Array<{ name?: string | null }> | null;
   city_id?: string | null;
+  supplier_id?: string | null;
   cities?: { name: string } | Array<{ name: string }> | null;
   status?: Order['status'];
   order_kind?: Order['order_kind'] | null;
@@ -407,6 +417,7 @@ interface AppState {
   updateOwnStoreName: (storeName: string) => Promise<{ error: Error | null }>;
   updateOwnAvatar: (avatarUrl: string) => Promise<{ error: Error | null }>;
   fetchNotifications: () => Promise<void>;
+  createSlowMovingAlertNotification: (payload: SlowMovingAlertNotificationInput) => Promise<{ error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
@@ -557,6 +568,7 @@ const mapOrder = (raw: OrderRow): Order => {
     store_name: storeData?.name ?? null,
     city_id: raw.city_id ?? undefined,
     city_name: cityData?.name,
+    supplier_id: raw.supplier_id ?? null,
     status: raw.status || 'pending',
     order_kind: coalesceOrderKind(raw.order_kind),
     payment_method: raw.payment_method ?? null,
@@ -1580,6 +1592,31 @@ export const useAppStore = create<AppState>()(
         if (!error && data) set({ notifications: data });
       },
 
+      createSlowMovingAlertNotification: async ({ scopeLabel, slowMovingRatio, slowMovingCost, totalInventoryCost }) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager')) {
+          return { error: null };
+        }
+        if (!(slowMovingRatio > 0.15) || totalInventoryCost <= 0) {
+          return { error: null };
+        }
+
+        try {
+          const { error } = await supabase.rpc('create_inventory_slow_moving_alert_notifications', {
+            p_scope_label: scopeLabel,
+            p_slow_value_ratio: slowMovingRatio,
+            p_slow_inventory_cost: slowMovingCost,
+            p_total_inventory_cost: totalInventoryCost,
+          });
+          if (error) throw error;
+          await get().fetchNotifications();
+          return { error: null };
+        } catch (error) {
+          return { error: formatSupabaseError(error) };
+        }
+      },
+
       acceptOrder: async (orderId: string) => {
         const { user } = get();
         if (!user) return { error: new Error('未登录') };
@@ -2245,6 +2282,7 @@ export const useAppStore = create<AppState>()(
               p_store_id: group.store_id,
               p_city_id: group.city_id,
               p_items: group.products,
+              p_supplier_id: group.supplier_id ?? null,
             });
             if (error) throw error;
           }
@@ -2272,7 +2310,13 @@ export const useAppStore = create<AppState>()(
           });
           if (error) throw error;
 
-          await Promise.all([get().fetchPurchaseOrders(), get().fetchProducts()]);
+          const financeStore = useFinanceStore.getState();
+          await Promise.all([
+            get().fetchPurchaseOrders(),
+            get().fetchProducts(),
+            financeStore.fetchTransactions(),
+            financeStore.fetchBalance(),
+          ]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };

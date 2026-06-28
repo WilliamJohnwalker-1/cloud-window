@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase, supabaseConfigError } from '../lib/supabase';
+import { useFinanceStore } from './useFinanceStore';
 import { applyOrdersDateFilters } from '../utils/fetchOrdersDateParams';
 import { generateEAN13 } from '../utils/barcode';
 import { calculateRetailOrderTotals, getRetailUnitPrice } from '../utils/orderPricing';
@@ -75,6 +76,7 @@ interface OrderRow {
   store_id?: string | null;
   stores?: { name?: string | null } | Array<{ name?: string | null }> | null;
   city_id?: string | null;
+  supplier_id?: string | null;
   cities?: { name: string } | Array<{ name: string }> | null;
   status: Order['status'];
   order_kind?: Order['order_kind'] | null;
@@ -192,10 +194,18 @@ interface CashierCreateItem {
 interface PurchaseOrderCreateItem {
   store_id: string;
   city_id: string;
+  supplier_id?: string | null;
   products: Array<{
     productId: string;
     quantity: number;
   }>;
+}
+
+interface SlowMovingAlertNotificationInput {
+  scopeLabel: string;
+  slowMovingRatio: number;
+  slowMovingCost: number;
+  totalInventoryCost: number;
 }
 
 interface RpcErrorLike {
@@ -309,6 +319,7 @@ interface AppState {
   fetchAllStoreInventory: () => Promise<void>;
   fetchStoreProductPrices: (storeId: string) => Promise<void>;
   fetchNotifications: () => Promise<void>;
+  createSlowMovingAlertNotification: (payload: SlowMovingAlertNotificationInput) => Promise<{ error: Error | null }>;
   fetchInventoryLogs: () => Promise<void>;
   fetchOrderDetail: (orderId: string) => Promise<Order | null>;
   fetchAllData: () => Promise<void>;
@@ -524,6 +535,7 @@ const mapOrder = (row: OrderRow): Order => {
     store_name: storeData?.name ?? null,
     city_id: row.city_id ?? undefined,
     city_name: cityData?.name,
+    supplier_id: row.supplier_id ?? null,
     status: row.status,
     order_kind: row.order_kind || 'distribution',
     total_retail_amount: Number(row.total_retail_amount || 0),
@@ -1214,6 +1226,31 @@ export const useAppStore = create<AppState>()(
           .order('created_at', { ascending: false })
           .limit(50);
         if (!error && data) set({ notifications: data as Notification[] });
+      },
+
+      createSlowMovingAlertNotification: async ({ scopeLabel, slowMovingRatio, slowMovingCost, totalInventoryCost }) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager')) {
+          return { error: null };
+        }
+        if (!(slowMovingRatio > 0.15) || totalInventoryCost <= 0) {
+          return { error: null };
+        }
+
+        try {
+          const { error } = await supabase.rpc('create_inventory_slow_moving_alert_notifications', {
+            p_scope_label: scopeLabel,
+            p_slow_value_ratio: slowMovingRatio,
+            p_slow_inventory_cost: slowMovingCost,
+            p_total_inventory_cost: totalInventoryCost,
+          });
+          if (error) throw error;
+          await get().fetchNotifications();
+          return { error: null };
+        } catch (error) {
+          return { error: error instanceof Error ? error : new Error('滞销告警通知创建失败') };
+        }
       },
 
       fetchInventoryLogs: async () => {
@@ -2122,6 +2159,7 @@ export const useAppStore = create<AppState>()(
               p_store_id: group.store_id,
               p_city_id: group.city_id,
               p_items: payload,
+              p_supplier_id: group.supplier_id ?? null,
             });
             if (error) throw error;
             if (orderId) orderIds.push(String(orderId));
@@ -2147,9 +2185,12 @@ export const useAppStore = create<AppState>()(
           });
           if (error) throw error;
 
+          const financeStore = useFinanceStore.getState();
           const refreshTasks: Array<Promise<void>> = [
             get().fetchOrders(),
             get().fetchProducts(),
+            financeStore.fetchTransactions(),
+            financeStore.fetchBalance(),
           ];
           if (targetOrder?.store_id) {
             refreshTasks.push(get().fetchStoreInventory(targetOrder.store_id));
