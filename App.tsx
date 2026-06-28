@@ -188,17 +188,6 @@ const toastConfig: ToastConfig = {
   ),
 };
 
-const toastAnimationConfig = {
-  //
-  // Automatically configure Toast message animations with a subtle spring bounce
-  // for entrance and a smooth fade for exit, creating a playful yet professional feel.
-  // This draws attention to the message without being jarring.
-  //
-  velocity: 1000, // Speed of the bounce
-  tension: 68,     // Tension for bounciness (higher = more bounce)
-  friction: 12,    // Friction to slow down (higher = slower)
-};
-
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [launchUpdateVisible, setLaunchUpdateVisible] = useState(false);

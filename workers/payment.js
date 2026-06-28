@@ -1,4 +1,4 @@
-/* global Response, URL */
+/* global Response, URL, TextEncoder, TextDecoder, atob, btoa, crypto, fetch, URLSearchParams */
 
 /**
  * Cloudflare Worker payment API (skeleton with mock mode).
@@ -140,7 +140,7 @@ async function postWechatRequest(env, method, pathWithQuery, payload = null) {
   const safeMchId = mchId.replace(/"/g, '');
   const safeSerialNo = serialNo.replace(/"/g, '');
   const safeSignature = String(signature || '').replace(/[\r\n"]/g, '');
-  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid=\"${safeMchId}\",nonce_str=\"${nonce}\",timestamp=\"${timestamp}\",serial_no=\"${safeSerialNo}\",signature=\"${safeSignature}\"`;
+  const authorization = `WECHATPAY2-SHA256-RSA2048 mchid="${safeMchId}",nonce_str="${nonce}",timestamp="${timestamp}",serial_no="${safeSerialNo}",signature="${safeSignature}"`;
 
   const response = await fetch(`${gateway}${pathWithQuery}`, {
     method,
@@ -516,40 +516,6 @@ async function increaseInventoryByProduct(env, productId, deltaQuantity) {
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({
       quantity: currentQuantity + Number(deltaQuantity || 0),
-      updated_at: new Date().toISOString(),
-    }),
-  });
-}
-
-async function increaseStoreInventoryByProduct(env, storeId, productId, deltaQuantity) {
-  const rows = await supabaseRequest(
-    env,
-    `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}&select=store_id,product_id,quantity&limit=1`,
-  );
-  if (Array.isArray(rows) && rows.length > 0) {
-    const currentQuantity = Number(rows[0]?.quantity || 0);
-    await supabaseRequest(
-      env,
-      `/store_inventory?store_id=eq.${encodeURIComponent(storeId)}&product_id=eq.${encodeURIComponent(productId)}`,
-      {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          quantity: currentQuantity + Number(deltaQuantity || 0),
-          updated_at: new Date().toISOString(),
-        }),
-      },
-    );
-    return;
-  }
-
-  await supabaseRequest(env, '/store_inventory', {
-    method: 'POST',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({
-      store_id: storeId,
-      product_id: productId,
-      quantity: Number(deltaQuantity || 0),
       updated_at: new Date().toISOString(),
     }),
   });
@@ -1573,8 +1539,6 @@ export default {
       if (!order) {
         return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
       }
-      const merchantUserId = await resolveRefundApproverUserId(env, order);
-
       if (String(order.order_kind || '').toLowerCase() !== 'retail') {
         return json({ success: false, status: 'failed', error: '仅零售订单支持退款申请' }, { status: 400 });
       }
@@ -1589,8 +1553,6 @@ export default {
       if (selectedItems.length !== orderItemIds.length) {
         return json({ success: false, status: 'failed', error: '存在无效退款商品行' }, { status: 400 });
       }
-      const refundedItemsSnapshot = buildRefundedItemsSnapshot(selectedItems);
-
       const requestedAmount = Number(
         selectedItems
           .reduce((sum, item) => sum + Number(item.discount_price || 0) * Number(item.quantity || 0), 0)
