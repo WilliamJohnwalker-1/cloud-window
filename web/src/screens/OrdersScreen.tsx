@@ -284,6 +284,13 @@ export const OrdersScreen: React.FC = () => {
     }
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
+  const revenueTypeLabel = useMemo(() => {
+    if (selectedOrderKind === 'distribution') return '供货';
+    if (selectedOrderKind === 'purchase') return '进货';
+    if (selectedOrderKind === 'retail' || selectedOrderKind === 'settlement') return '营收';
+    return '营收';
+  }, [selectedOrderKind]);
+
   const statsCopy = useMemo(() => {
     if (refundViewFilter === 'refunded') {
       return {
@@ -306,13 +313,13 @@ export const OrdersScreen: React.FC = () => {
     }
 
     return {
-      orderCountLabel: `${rangeLabel}供货订单数`,
-      retailLabel: `${rangeLabel}供货零售总价`,
-      discountLabel: `${rangeLabel}供货折扣总价`,
+      orderCountLabel: `${rangeLabel}${revenueTypeLabel}订单数`,
+      retailLabel: `${rangeLabel}${revenueTypeLabel}零售总价`,
+      discountLabel: `${rangeLabel}${revenueTypeLabel}折扣总价`,
       retailValue: totalRetail,
       discountValue: totalDiscount,
     };
-  }, [filteredDiscountTotal, filteredRetailTotal, rangeLabel, refundViewFilter, totalDiscount, totalRetail]);
+  }, [filteredDiscountTotal, filteredRetailTotal, rangeLabel, refundViewFilter, revenueTypeLabel, totalDiscount, totalRetail]);
 
   const filteredProducts = useMemo(() => {
     let result = products;
@@ -1132,7 +1139,7 @@ export const OrdersScreen: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2">
             {[
-              { key: 'revenue', label: '供货订单' },
+              { key: 'revenue', label: `${revenueTypeLabel}订单` },
               { key: 'refunded', label: '退款订单' },
               { key: 'all', label: '全部支付状态' },
             ].map((item) => (

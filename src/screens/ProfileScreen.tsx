@@ -29,7 +29,7 @@ import { useProductSeriesStore } from '../store/useProductSeriesStore';
 import { useSupplierStore } from '../store/useSupplierStore';
 import AppConfirmModal from '../components/AppConfirmModal';
 import { avatarLibrary } from '../constants/avatarLibrary';
-import { Colors, LightColors, DarkColors, Radius, Shadow } from '../theme';
+import { Colors, LightColors, DarkColors, Radius, Shadow, Spacing } from '../theme';
 import type { FinancialTransaction, Notification, Store, Supplier } from '../types';
 import {
   canEditFinance,
@@ -2213,6 +2213,7 @@ export default function ProfileScreen() {
               renderItem={renderNotification}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无通知</Text>}
               style={styles.cityList}
+              contentContainerStyle={notifications.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
             />
           </View>
         </View>
@@ -2988,7 +2989,7 @@ const styles = StyleSheet.create({
   addCityButton: { width: 70, height: 48, justifyContent: 'center', alignItems: 'center', borderRadius: Radius.md },
   addCityButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cityList: { flex: 1 },
-  cityListContent: { paddingBottom: 12 },
+  cityListContent: { paddingBottom: Spacing.xxxl },
   cityListEmptyContent: { flexGrow: 1, justifyContent: 'center' },
   storeEditorScroll: {
     maxHeight: 430,

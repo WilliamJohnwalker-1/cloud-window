@@ -44,6 +44,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v6.3-finance-integration.sql`: product/order linkage, RLS fixes, cash balance function.
 - `migrate-v6.4-financial-backfill.sql`: historical financial backfill for retail/settlement orders.
 - `migrate-v6.5-inventory-slow-moving-alert.sql`: slow-moving inventory alert notifications.
+- `migrate-v6.6-inventory-log-completion.sql`: complete inventory_logs coverage for outbound/sell/refund_restore flows.
+- `migrate-v6.7-refund-reversal-backfill.sql`: net-only refund reversal backfill and legacy correction.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -87,7 +89,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 36. `migrate-v6.3-finance-integration.sql`
 37. `migrate-v6.4-financial-backfill.sql`
 38. `migrate-v6.5-inventory-slow-moving-alert.sql`
-32. `storage-policies.sql`
+39. `migrate-v6.6-inventory-log-completion.sql`
+40. `migrate-v6.7-refund-reversal-backfill.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -128,7 +131,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 36. `migrate-v6.3-finance-integration.sql`
 37. `migrate-v6.4-financial-backfill.sql`
 38. `migrate-v6.5-inventory-slow-moving-alert.sql`
-32. `storage-policies.sql`
+39. `migrate-v6.6-inventory-log-completion.sql`
+40. `migrate-v6.7-refund-reversal-backfill.sql`
 
 ## TABLES
 

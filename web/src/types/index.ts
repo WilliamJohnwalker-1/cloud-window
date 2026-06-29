@@ -150,7 +150,7 @@ export interface InventoryLog {
   product_id: string;
   product_name?: string;
   operator_id: string;
-  action: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce' | 'breakage' | 'purchase_receive';
+  action: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce' | 'breakage' | 'purchase_receive' | 'sell' | 'refund_restore' | 'outbound';
   delta_quantity: number;
   before_quantity: number;
   after_quantity: number;

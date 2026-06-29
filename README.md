@@ -144,6 +144,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 44. 执行 `supabase/migrate-v6.3-finance-integration.sql`
 45. 执行 `supabase/migrate-v6.4-financial-backfill.sql`
 46. 执行 `supabase/migrate-v6.5-inventory-slow-moving-alert.sql`
+47. 执行 `supabase/migrate-v6.6-inventory-log-completion.sql`
+48. 执行 `supabase/migrate-v6.7-refund-reversal-backfill.sql`
+49. 执行 `supabase/migrate-v6.8-retail-income-category-normalization.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -193,6 +196,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 44. 执行 `supabase/migrate-v6.3-finance-integration.sql`
 45. 执行 `supabase/migrate-v6.4-financial-backfill.sql`
 46. 执行 `supabase/migrate-v6.5-inventory-slow-moving-alert.sql`
+47. 执行 `supabase/migrate-v6.6-inventory-log-completion.sql`
+48. 执行 `supabase/migrate-v6.7-refund-reversal-backfill.sql`
+49. 执行 `supabase/migrate-v6.8-retail-income-category-normalization.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -208,7 +214,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.2）
+### 5. 启动 Web 端（v1.3.3）
 
 ```bash
 npm run web:v2
@@ -402,6 +408,31 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
+### Mobile v2.2.3 (2026-06-29) - post-v6-polish 全量修复收口（报表 + 财务 + 退款 + 日志）
+
+- 库存周转公式重构：由“距上次售出天数”升级为“库存可售天数 = 当前库存 ÷ 日均出库量”，并在图表中补充日均出库展示
+- 修复库存周转在省/市维度下的库存口径：统一为“总仓 + 当前维度店铺库存”，云窗（郴州）去重一次避免双计
+- 修复“城市筛选 -> 店铺维度动销”云窗分母为 0：云窗店铺分母改为城市总库存口径，不再只取单店库存
+- 修复退款单对营收/周转的污染：报表排除 `payment_status` 退款态与 `refunded_items` 证据单
+- 移动端订单映射新增零售退款投影：基于剩余正数量行重算零售单金额，并联动 `partial_refunded/refunded` 展示状态
+- 回款对账口径升级：`generatePaymentReport(transactions)` 落地实付金额、未结欠款联动，报表列由“城市渠道”拆为“城市 + 渠道门店”
+- 城市分级口径升级：由静态店铺等级改为按月营收自动分级（S/A/B）
+- 库存日志动作补齐对齐（sell/refund_restore/outbound）与退款恢复链路对应展示
+- 体验层修复：库存页文案统一为“库存成本/结算总额”，通知列表底部留白与报表图表可读性/点击详情交互补齐
+
+### Web v1.3.3 (2026-06-29) - post-v6-polish 全量修复收口（报表 + 财务 + 退款 + 日志）
+
+- 与移动端对齐库存周转公式：改为“库存可售天数 = 当前库存 ÷ 日均出库量”，并统一下钻统计口径
+- 修复省/市维度库存口径：采用“总仓 + 当前维度店铺库存”，云窗（郴州）去重一次，避免重复计算
+- 修复“城市筛选 -> 店铺维度动销”云窗分母异常：改为城市总库存口径
+- 报表筛选数据完整性修复：库存周转 tab 在未选店铺时补拉全店铺库存，避免城市/省份维度缺样本
+- 退款影响口径对齐：报表排除退款状态与退款明细证据单，营收/周转结果与移动端一致
+- 回款对账升级：`generatePaymentReport(transactions)` 启用实收金额计算，输出结构改为“城市 + 渠道门店 + 应收/已回款/未结欠款”
+- 城市分级改为按月营收自动分级（S/A/B），不再依赖静态等级字段
+- Web 库存日志动作补齐：新增 `sell/refund_restore/outbound` 展示与类型声明，库存日志文案和动作语义一致
+- 财务与退款链路对齐：Worker 侧零售退款优先走原子 RPC，退款冲减改为净额（实收-0.6%），历史补录脚本同步校正
+- 交互可读性增强：饼图 tooltip/legend 深色可读、库存成本饼图中心总值、周转散点 tooltip 信息增强；移除过渡文案“目标四报表（本轮重点）”
+
 ### Mobile v2.2.2 (2026-06-28) - 财务与报表细化计划收口
 
 - 完成财务与业务联动收口：报损、采购到货、零售收款、退款冲减、手续费等自动财务记录链路全量落地
@@ -415,7 +446,7 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - Web 财务页与财务 Store 对齐移动端口径：余额自动计算、交易筛选、权限边界一致
 - Web 报表页完成 5 Tab 收口，库存周转/营收/供货/销售视图与移动端指标口径一致
 - 滞销告警通知类型与展示文案完成双端统一（含 Profile 通知标签）
-- 迁移链文档更新至 v6.5，补齐 finance-report-refinement 相关发布记录
+- 迁移链文档更新至 v6.7，补齐 `migrate-v6.6-inventory-log-completion.sql` / `migrate-v6.7-refund-reversal-backfill.sql` 与 finance-report-refinement / post-v6-polish 相关发布记录
 
 ### Mobile v2.2.1 (2026-06-26) - v6 升级收口 + 验收修复
 

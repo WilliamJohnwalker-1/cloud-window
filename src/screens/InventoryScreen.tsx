@@ -741,11 +741,11 @@ export default function InventoryScreen() {
           <View style={[styles.summary, { backgroundColor: theme.surface, borderTopWidth: 0, paddingTop: 0 }] }>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryValue}>¥{totalCostValue.toFixed(2)}</Text>
-              <Text style={styles.summaryLabel}>库存价值(成本)</Text>
+              <Text style={styles.summaryLabel}>库存成本</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryValue}>¥{totalSettlementValue.toFixed(2)}</Text>
-              <Text style={styles.summaryLabel}>库存价值(结算)</Text>
+              <Text style={styles.summaryLabel}>结算总额</Text>
             </View>
           </View>
 
@@ -798,11 +798,11 @@ export default function InventoryScreen() {
           <View style={[styles.summary, { backgroundColor: theme.surface, borderTopWidth: 0, paddingTop: 0 }] }>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryValue}>¥{totalCostValue.toFixed(2)}</Text>
-              <Text style={styles.summaryLabel}>库存价值(成本)</Text>
+              <Text style={styles.summaryLabel}>库存成本</Text>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryValue}>¥{totalSettlementValue.toFixed(2)}</Text>
-              <Text style={styles.summaryLabel}>库存价值(结算)</Text>
+              <Text style={styles.summaryLabel}>结算总额</Text>
             </View>
           </View>
           <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary, marginTop: 10 }] }>

@@ -40,6 +40,9 @@ export const InventoryScreen: React.FC = () => {
   const getInventoryLogActionLabel = (action: string): string => {
     if (action === 'breakage') return '报损';
     if (action === 'purchase_receive') return '采购入库';
+    if (action === 'sell') return '销售出库';
+    if (action === 'refund_restore') return '退款恢复';
+    if (action === 'outbound') return '出库/供货';
     if (action === 'inbound') return '扫码入库';
     if (action === 'manual_adjust') return '手工调整';
     if (action === 'quick_add') return '快捷加库存';
@@ -382,11 +385,11 @@ export const InventoryScreen: React.FC = () => {
           <p className="text-2xl font-bold">{currentTotalStock}</p>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-          <p className="text-sm text-white/60 mb-1">库存价值(成本)</p>
+          <p className="text-sm text-white/60 mb-1">库存成本</p>
           <p className="text-2xl font-bold text-accent">¥{totalCostValue.toFixed(2)}</p>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-          <p className="text-sm text-white/60 mb-1">库存价值(结算)</p>
+          <p className="text-sm text-white/60 mb-1">结算总额</p>
           <p className="text-2xl font-bold text-accent">¥{totalSettlementValue.toFixed(2)}</p>
         </div>
       </div>
