@@ -521,9 +521,34 @@ async function increaseInventoryByProduct(env, productId, deltaQuantity) {
   });
 }
 
-async function applyRetailRefundItemsFallback(env, order, refundItemIds) {
+async function applyRetailRefundItemsFallback(env, order, refundItemIds, operatorUserId = null) {
   const orderId = String(order?.id || '').trim();
   if (!orderId) throw new Error('fallback missing order id');
+
+  try {
+    const rpcResult = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({
+        p_order_id: orderId,
+        p_order_item_ids: refundItemIds,
+        p_operator_id: operatorUserId || order?.distributor_id || null,
+      }),
+    });
+
+    if (rpcResult && typeof rpcResult === 'object' && !Array.isArray(rpcResult)) {
+      return rpcResult;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '');
+    const missingRpc = message.includes('apply_retail_refund_items_atomic')
+      || message.includes('PGRST202')
+      || message.toLowerCase().includes('could not find the function');
+
+    if (!missingRpc) {
+      throw error;
+    }
+  }
 
   const orderItems = Array.isArray(order?.items) ? order.items : [];
   const targetItems = orderItems.filter((item) => refundItemIds.includes(String(item.id || '')));
@@ -691,9 +716,19 @@ async function resolveFinanceCreatedByUserId(env, order) {
 async function listFinanceTransactionsByOrder(env, orderId) {
   const rows = await supabaseRequest(
     env,
-    `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&select=id,transaction_type,category_id,amount,description`,
+    `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&select=id,transaction_type,category_id,amount,channel_name,description`,
   );
   return Array.isArray(rows) ? rows : [];
+}
+
+async function resolveRetailFinanceMode(env, order, paymentMethodInput) {
+  const paymentMethod = String(paymentMethodInput || order?.payment_method || '').trim().toLowerCase();
+  return {
+    incomeCategoryName: '线下店铺回款',
+    shouldCreateOnlineFee: true,
+    incomeChannelName: 'offline_store_retail',
+    feeChannelName: paymentMethod || 'offline_store_retail',
+  };
 }
 
 async function ensureRetailPaymentFinanceRecords(env, order, {
@@ -725,6 +760,8 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
     throw new Error(`finance invalid payment amount for order ${orderId}`);
   }
 
+  const financeMode = await resolveRetailFinanceMode(env, order, paymentMethod);
+
   try {
     const existingFinanceEvent = await getPaymentEventByKey(env, financeEventKey);
     if (existingFinanceEvent?.processed) {
@@ -735,48 +772,81 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
     const feeAmount = roundMoney(paymentAmount * 0.006);
     const transactionDate = String(paymentPaidAt || order?.payment_paid_at || new Date().toISOString()).slice(0, 10);
     const [incomeCategoryId, expenseCategoryId, existingRows] = await Promise.all([
-      getFinanceCategoryId(env, { name: '线上渠道收入', type: 'income' }),
-      getFinanceCategoryId(env, { name: '线上佣金', type: 'expense' }),
+      getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' }),
+      financeMode.shouldCreateOnlineFee ? getFinanceCategoryId(env, { name: '线上佣金', type: 'expense' }) : Promise.resolve(null),
       listFinanceTransactionsByOrder(env, orderId),
     ]);
 
     const incomeDescription = `零售支付自动记账-收入-${orderId}`;
     const expenseDescription = `零售支付自动记账-佣金-${orderId}`;
-    const existingDescriptions = new Set(
-      existingRows
-        .map((row) => String(row?.description || '').trim())
-        .filter(Boolean),
-    );
+    const incomeRow = existingRows.find((row) => String(row?.description || '').trim() === incomeDescription && String(row?.transaction_type || '').trim() === 'income');
+    const expenseRow = existingRows.find((row) => String(row?.description || '').trim() === expenseDescription && String(row?.transaction_type || '').trim() === 'expense');
     const insertRows = [];
 
-    if (!existingDescriptions.has(incomeDescription)) {
+    if (!incomeRow) {
       insertRows.push({
         transaction_type: 'income',
         category_id: incomeCategoryId,
         amount: paymentAmount,
         transaction_date: transactionDate,
         store_id: order?.store_id || null,
-        channel_name: paymentMethod,
+        channel_name: financeMode.incomeChannelName,
         description: incomeDescription,
         is_recurring: false,
         created_by: createdBy,
         source_order_id: orderId,
       });
+    } else {
+      const needUpdateIncome = String(incomeRow?.category_id || '').trim() !== incomeCategoryId
+        || !almostEqualAmount(Number(incomeRow?.amount || 0), paymentAmount)
+        || String(incomeRow?.channel_name || '').trim() !== financeMode.incomeChannelName;
+      if (needUpdateIncome) {
+        await supabaseRequest(env, `/financial_transactions?id=eq.${encodeURIComponent(String(incomeRow.id || ''))}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            category_id: incomeCategoryId,
+            amount: paymentAmount,
+            channel_name: financeMode.incomeChannelName,
+            transaction_date: transactionDate,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      }
     }
 
-    if (!existingDescriptions.has(expenseDescription)) {
-      insertRows.push({
-        transaction_type: 'expense',
-        category_id: expenseCategoryId,
-        amount: feeAmount,
-        transaction_date: transactionDate,
-        store_id: order?.store_id || null,
-        channel_name: paymentMethod,
-        description: expenseDescription,
-        is_recurring: false,
-        created_by: createdBy,
-        source_order_id: orderId,
-      });
+    if (financeMode.shouldCreateOnlineFee && expenseCategoryId) {
+      if (!expenseRow) {
+        insertRows.push({
+          transaction_type: 'expense',
+          category_id: expenseCategoryId,
+          amount: feeAmount,
+          transaction_date: transactionDate,
+          store_id: order?.store_id || null,
+          channel_name: financeMode.feeChannelName,
+          description: expenseDescription,
+          is_recurring: false,
+          created_by: createdBy,
+          source_order_id: orderId,
+        });
+      } else {
+        const needUpdateExpense = String(expenseRow?.category_id || '').trim() !== expenseCategoryId
+          || !almostEqualAmount(Number(expenseRow?.amount || 0), feeAmount)
+          || String(expenseRow?.channel_name || '').trim() !== financeMode.feeChannelName;
+        if (needUpdateExpense) {
+          await supabaseRequest(env, `/financial_transactions?id=eq.${encodeURIComponent(String(expenseRow.id || ''))}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              category_id: expenseCategoryId,
+              amount: feeAmount,
+              channel_name: financeMode.feeChannelName,
+              transaction_date: transactionDate,
+              updated_at: new Date().toISOString(),
+            }),
+          });
+        }
+      }
     }
 
     if (insertRows.length > 0) {
@@ -800,6 +870,7 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
       payload: {
         orderId,
         storeId: order?.store_id || null,
+        financeMode,
         createdBy,
         incomeDescription,
         expenseDescription,
@@ -859,7 +930,10 @@ async function ensureRetailRefundFinanceRecords(env, order, {
     tradeNo: null,
   });
 
-  const amount = -Math.abs(roundMoney(refundAmount));
+  const grossRefundAmount = Math.abs(roundMoney(refundAmount));
+  const financeMode = await resolveRetailFinanceMode(env, order, paymentMethod);
+  const feeAmount = financeMode.shouldCreateOnlineFee ? roundMoney(grossRefundAmount * 0.006) : 0;
+  const amount = -Math.abs(roundMoney(grossRefundAmount - feeAmount));
   if (!Number.isFinite(amount) || amount >= 0) {
     throw new Error(`finance invalid refund amount for order ${orderId}`);
   }
@@ -872,14 +946,14 @@ async function ensureRetailRefundFinanceRecords(env, order, {
 
     const createdBy = await resolveFinanceCreatedByUserId(env, order);
     const transactionDate = String(refundAt || new Date().toISOString()).slice(0, 10);
-    const incomeCategoryId = await getFinanceCategoryId(env, { name: '线上渠道收入', type: 'income' });
+    const incomeCategoryId = await getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' });
     const description = normalizedRefundNo
       ? `零售退款自动冲减-收入-${orderId}-${normalizedRefundNo}`
       : `零售退款自动冲减-收入-${orderId}`;
 
     const existingRows = await supabaseRequest(
       env,
-      `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&description=eq.${encodeURIComponent(description)}&select=id&limit=1`,
+      `/financial_transactions?source_order_id=eq.${encodeURIComponent(orderId)}&description=eq.${encodeURIComponent(description)}&select=id,amount,category_id,channel_name&limit=1`,
     );
 
     if (!Array.isArray(existingRows) || existingRows.length === 0) {
@@ -892,13 +966,31 @@ async function ensureRetailRefundFinanceRecords(env, order, {
           amount,
           transaction_date: transactionDate,
           store_id: order?.store_id || null,
-          channel_name: paymentMethod,
+          channel_name: financeMode.incomeChannelName,
           description,
           is_recurring: false,
           created_by: createdBy,
           source_order_id: orderId,
         }),
       });
+    } else {
+      const existingRow = existingRows[0] || {};
+      const needUpdateRefundIncome = String(existingRow?.category_id || '').trim() !== incomeCategoryId
+        || !almostEqualAmount(Number(existingRow?.amount || 0), amount)
+        || String(existingRow?.channel_name || '').trim() !== financeMode.incomeChannelName;
+      if (needUpdateRefundIncome) {
+        await supabaseRequest(env, `/financial_transactions?id=eq.${encodeURIComponent(String(existingRow.id || ''))}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            category_id: incomeCategoryId,
+            amount,
+            channel_name: financeMode.incomeChannelName,
+            transaction_date: transactionDate,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      }
     }
 
     await upsertPaymentEvent(env, {
@@ -914,7 +1006,10 @@ async function ensureRetailRefundFinanceRecords(env, order, {
       payload: {
         orderId,
         storeId: order?.store_id || null,
+        financeMode,
         createdBy,
+        grossRefundAmount,
+        feeAmount,
         description,
       },
     });
@@ -2188,7 +2283,7 @@ export default {
       let remainingDiscountAmount = Number(order.total_discount_amount || 0);
       if (isRefundSuccess) {
         try {
-          const mutationResult = await applyRetailRefundItemsFallback(env, order, orderItemIds);
+          const mutationResult = await applyRetailRefundItemsFallback(env, order, orderItemIds, requesterUserId || merchantUserId || null);
           orderDeleted = Boolean(mutationResult?.order_deleted);
           const syncedOrderState = await syncRetailRefundOrderState(env, orderId);
           remainingDiscountAmount = Number(syncedOrderState?.remaining_discount_amount || mutationResult?.remaining_discount_amount || 0);

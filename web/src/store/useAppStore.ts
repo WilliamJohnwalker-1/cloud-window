@@ -8,6 +8,7 @@ import { calculateRetailOrderTotals, getRetailUnitPrice } from '../utils/orderPr
 import { resolvePrice } from '../utils/priceResolver';
 import type {
   City,
+  FinancialTransaction,
   InventoryLog,
   Notification,
   Order,
@@ -325,7 +326,7 @@ interface AppState {
   fetchAllData: () => Promise<void>;
   generateCityChannelReport: () => CityChannelReportRow[];
   generateProductDetailReport: () => ProductDetailReportRow[];
-  generatePaymentReport: () => PaymentReportRow[];
+  generatePaymentReport: (transactions?: FinancialTransaction[]) => PaymentReportRow[];
 
   addStore: (store: StoreCreateInput) => Promise<{ error: Error | null }>;
   updateStore: (id: string, updates: StoreUpdateInput) => Promise<{ error: Error | null }>;
@@ -591,10 +592,11 @@ export interface ProductDetailReportRow {
 
 export interface PaymentReportRow {
   序号: number;
-  城市渠道: string;
+  城市: string;
+  渠道门店: string;
   对账周期: string;
   应收货款: number;
-  已回款金额: null;
+  已回款金额: number;
   未结欠款: number;
   逾期天数: number;
   渠道扣点费用: null;
@@ -607,6 +609,7 @@ interface BusinessReportInput {
   stores: Store[];
   products: ProductWithDetails[];
   storeInventory: StoreInventory[];
+  transactions?: FinancialTransaction[];
   now?: Date;
 }
 
@@ -652,6 +655,12 @@ const getCooperationModeLabel = (mode: Store['cooperation_mode'] | null | undefi
   return '';
 };
 
+const getCityGradeByRevenue = (cityRevenue: number): string => {
+  if (cityRevenue > 100000) return 'S级';
+  if (cityRevenue >= 30000) return 'A级';
+  return 'B级';
+};
+
 const getRevenueOrdersForStore = (orders: Order[], storeName: string): Order[] => {
   if (storeName === '云窗') {
     return orders.filter((order) => order.order_kind === 'retail' && (order.store_name || '未指定店铺') === storeName);
@@ -667,11 +676,24 @@ export const buildCityChannelReport = ({
   now = new Date(),
 }: BusinessReportInput): CityChannelReportRow[] => {
   const month = getMonthContext(now);
+  const activeStores = stores.filter((store) => store.status === 'active');
+  const cityRevenueMap = new Map<string, number>();
 
-  return stores
-    .filter((store) => store.status === 'active')
+  activeStores.forEach((store) => {
+    const storeName = store.name || '未指定店铺';
+    const cityName = store.city_name || '未知城市';
+    const revenueOrders = getRevenueOrdersForStore(orders, storeName);
+    const monthRevenue = revenueOrders.reduce((sum, order) => {
+      if (!isSameMonth(order.created_at, month.year, month.monthIndex)) return sum;
+      return sum + Number(order.total_discount_amount || 0);
+    }, 0);
+    cityRevenueMap.set(cityName, (cityRevenueMap.get(cityName) || 0) + monthRevenue);
+  });
+
+  return activeStores
     .map((store, index) => {
       const storeName = store.name || '未指定店铺';
+      const cityName = store.city_name || '未知城市';
       const revenueOrders = getRevenueOrdersForStore(orders, storeName);
 
       let monthSalesQty = 0;
@@ -716,8 +738,8 @@ export const buildCityChannelReport = ({
 
       return {
         序号: index + 1,
-        城市: store.city_name || '未知城市',
-        城市分级: store.grade || '未分级',
+        城市: cityName,
+        城市分级: getCityGradeByRevenue(cityRevenueMap.get(cityName) || 0),
         渠道门店名称: storeName,
         合作模式: getCooperationModeLabel(store.cooperation_mode),
         月总销售件数: monthSalesQty,
@@ -821,6 +843,7 @@ export const buildProductDetailReport = ({
 export const buildPaymentReport = ({
   orders,
   stores,
+  transactions = [],
   now = new Date(),
 }: Omit<BusinessReportInput, 'products' | 'storeInventory'>): PaymentReportRow[] => {
   const month = getMonthContext(now);
@@ -833,16 +856,24 @@ export const buildPaymentReport = ({
         .filter((order) => isSameMonth(order.created_at, month.year, month.monthIndex))
         .reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
 
-      const outstanding = round2(receivable);
+      const paidAmount = transactions
+        .filter((transaction) => transaction.transaction_type === 'income')
+        .filter((transaction) => transaction.store_id === store.id)
+        .filter((transaction) => transaction.category === '线下店铺回款')
+        .filter((transaction) => isSameMonth(transaction.transaction_date, month.year, month.monthIndex))
+        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
+      const outstanding = round2(receivable - paidAmount);
       const overdueDays = calculateStoreOverdueDays(store.settlement_day ?? null, now);
       const status = outstanding <= 0 ? '已结清' : (overdueDays > 0 ? '逾期' : '未到期');
 
       return {
         序号: index + 1,
-        城市渠道: `${store.city_name || '未知城市'}-${store.name || '未指定店铺'}`,
+        城市: store.city_name || '未知城市',
+        渠道门店: store.name || '未指定店铺',
         对账周期: month.period,
         应收货款: round2(receivable),
-        已回款金额: null,
+        已回款金额: round2(paidAmount),
         未结欠款: outstanding,
         逾期天数: overdueDays,
         渠道扣点费用: null,
@@ -1474,9 +1505,9 @@ export const useAppStore = create<AppState>()(
         return buildProductDetailReport({ orders, stores, products, storeInventory });
       },
 
-      generatePaymentReport: () => {
+      generatePaymentReport: (transactions = []) => {
         const { orders, stores } = get();
-        return buildPaymentReport({ orders, stores });
+        return buildPaymentReport({ orders, stores, transactions });
       },
 
       addStore: async (store) => {
