@@ -12,6 +12,39 @@ import type { City, FinanceReportType } from '../types';
 const colors = ['#FF6B9D', '#5B8DEF', '#82ca9d', '#ffc658', '#bb86fc'];
 type ReportType = FinanceReportType;
 
+const renderTurnoverScatterTooltip = (context: unknown): React.ReactNode => {
+  const tooltip = context as {
+    active?: boolean;
+    payload?: Array<{
+      payload?: {
+        name?: string;
+        cost?: number;
+        turnoverDays?: number;
+        dailySales?: number;
+        category?: string;
+      };
+    }>;
+  };
+
+  if (!tooltip?.active || !Array.isArray(tooltip.payload) || tooltip.payload.length === 0) {
+    return null;
+  }
+
+  const point = tooltip.payload.find((entry) => entry?.payload)?.payload;
+  if (!point) return null;
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#1a1a1c] px-3 py-2 text-white shadow-lg">
+      <div className="text-sm font-semibold">
+        {point.name || '未知商品'} ({point.category || '常规款'})
+      </div>
+      <div className="mt-1 text-xs text-white/80">
+        成本¥{Number(point.cost || 0).toFixed(2)} / 可售{Number(point.turnoverDays || 0)}天 / 日均出库{Number(point.dailySales || 0).toFixed(2)}
+      </div>
+    </div>
+  );
+};
+
 export const ReportsScreen: React.FC = () => {
   const {
     orders,
@@ -38,6 +71,7 @@ export const ReportsScreen: React.FC = () => {
   const [allModeMonthOptions, setAllModeMonthOptions] = useState<string[]>([]);
   const selectedStore = useMemo(() => stores.find((store) => store.id === selectedStoreId) || null, [stores, selectedStoreId]);
   const slowMovingAlertScopeRef = useRef<string | null>(null);
+  const slowMovingAlertTriggeredRef = useRef(false);
   const reportTabs = useMemo<Array<{ key: ReportType; label: string }>>(() => {
     if (isDistributor) {
       return [
@@ -57,6 +91,12 @@ export const ReportsScreen: React.FC = () => {
     if (order.city_id) return order.city_id;
     const fallbackName = String(order.city_name || '').trim();
     return fallbackName ? `name:${fallbackName}` : '';
+  };
+  const isRefundLikeOrder = (order: { payment_status?: string | null; refunded_items?: unknown }): boolean => {
+    const paymentStatus = String(order.payment_status || '').toLowerCase();
+    if (paymentStatus.includes('refund')) return true;
+    const refundedItems = Array.isArray(order.refunded_items) ? order.refunded_items : [];
+    return refundedItems.length > 0;
   };
   const monthOptions = useMemo(() => {
     const runtimeOptions = buildMonthOptions(orders);
@@ -170,6 +210,12 @@ export const ReportsScreen: React.FC = () => {
   }, [selectedStoreId, fetchStoreInventory]);
 
   useEffect(() => {
+    if (reportType !== 'inventory_turnover') return;
+    if (selectedStoreId) return;
+    void fetchAllStoreInventory();
+  }, [fetchAllStoreInventory, reportType, selectedStoreId]);
+
+  useEffect(() => {
     if (!selectedStoreId) return;
     if (!filteredStores.some((store) => store.id === selectedStoreId)) {
       setSelectedStoreId(null);
@@ -199,9 +245,7 @@ export const ReportsScreen: React.FC = () => {
     const revenueOrders = scopedOrders.filter((order) => {
       const isRevenueKind = order.order_kind === 'settlement' || order.order_kind === 'retail';
       if (!isRevenueKind) return false;
-      const paymentStatus = String(order.payment_status || '').toLowerCase();
-      return paymentStatus !== 'refunded'
-        && paymentStatus !== 'refund_pending';
+      return !isRefundLikeOrder(order);
     });
     const totalRetail = revenueOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = revenueOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
@@ -433,89 +477,193 @@ export const ReportsScreen: React.FC = () => {
       .slice(0, 10)
       .map(([name, value]) => ({ name, value }));
 
-    const soldOrders = scopedOrders.filter((order) => order.order_kind !== 'purchase');
-    
+    const turnoverOrders = scopedOrders.filter((order) => {
+      const isTurnoverKind = order.order_kind === 'retail' || order.order_kind === 'settlement';
+      return isTurnoverKind && !isRefundLikeOrder(order);
+    });
+
     let periodDays = 30;
     if (selectedMonth !== 'all') {
       const [year, month] = selectedMonth.split('-');
       periodDays = new Date(Number(year), Number(month), 0).getDate();
-    } else if (soldOrders.length > 0) {
-      const earliest = Math.min(...soldOrders.map(o => new Date(o.created_at).getTime()));
-      const latest = Math.max(...soldOrders.map(o => new Date(o.created_at).getTime()));
+    } else if (turnoverOrders.length > 0) {
+      const earliest = Math.min(...turnoverOrders.map((order) => new Date(order.created_at).getTime()));
+      const latest = Math.max(...turnoverOrders.map((order) => new Date(order.created_at).getTime()));
       periodDays = Math.max(1, Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24)));
     }
 
-    const productOrderCount: Record<string, number> = {};
+    const nowMs = Date.now();
+    const threeMonthsAgo = nowMs - 90 * 24 * 60 * 60 * 1000;
     const productSalesVolume: Record<string, number> = {};
-    
-    soldOrders.forEach((order) => {
-      const seenProducts = new Set<string>();
+    const productRecentSalesVolume: Record<string, number> = {};
+
+    turnoverOrders.forEach((order) => {
+      const soldAt = new Date(order.created_at).getTime();
       order.items.forEach((item) => {
         if (item.is_sample || Number(item.quantity || 0) <= 0) return;
-        const pid = item.product_id;
-        if (!seenProducts.has(pid)) {
-          seenProducts.add(pid);
-          productOrderCount[pid] = (productOrderCount[pid] || 0) + 1;
+        const productId = item.product_id;
+        const quantity = Number(item.quantity || 0);
+        productSalesVolume[productId] = (productSalesVolume[productId] || 0) + quantity;
+        if (soldAt >= threeMonthsAgo) {
+          productRecentSalesVolume[productId] = (productRecentSalesVolume[productId] || 0) + quantity;
         }
-        productSalesVolume[pid] = (productSalesVolume[pid] || 0) + Number(item.quantity || 0);
       });
     });
-    
-    const targetProducts = selectedStoreId 
-      ? storeInventory.map(p => ({ id: p.product_id, name: p.product_name || '未知', cost: products.find(x => x.id === p.product_id)?.cost || 0, series: products.find(x => x.id === p.product_id)?.series_name || '未知', inventoryQty: Number(p.quantity || 0) }))
-      : products.map(p => ({ id: p.id, name: p.name, cost: p.cost || 0, series: p.series_name || '未知', inventoryQty: storeInventory.filter(inv => inv.product_id === p.id).reduce((sum, inv) => sum + Number(inv.quantity || 0), 0) }));
 
-    const uniqueProducts = Array.from(new Map(targetProducts.map(p => [p.id, p])).values());
+    const cityNameByKey = new Map<string, string>();
+    reportCities.forEach((city) => cityNameByKey.set(city.id, city.name));
 
-    const sortedByVolume = [...uniqueProducts].sort((a, b) => (productSalesVolume[b.id] || 0) - (productSalesVolume[a.id] || 0));
+    const getStoreProvince = (store: typeof stores[number]): string | null => {
+      const province = reportCityProvinceMap.get(store.city_id) || getProvinceForCity(store.city_name || '');
+      return province || null;
+    };
+
+    const getStoreCityName = (store: typeof stores[number]): string => {
+      return store.city_name || cityNameByKey.get(store.city_id) || '未知城市';
+    };
+
+    const scopedStoreIds = new Set(filteredStores.map((store) => store.id));
+
+    const isYunchuangStoreSelected = Boolean(selectedStoreId && (selectedStore?.name || '').includes('云窗'));
+
+    const storeInventoryQtyByProduct: Record<string, number> = {};
+    storeInventory.forEach((item) => {
+      if (!scopedStoreIds.has(item.store_id)) return;
+      const productId = item.product_id;
+      storeInventoryQtyByProduct[productId] = (storeInventoryQtyByProduct[productId] || 0) + Number(item.quantity || 0);
+    });
+
+    const yunchuangStoreIds = new Set(
+      filteredStores
+        .filter((store) => scopedStoreIds.has(store.id))
+        .filter((store) => {
+          const cityName = getStoreCityName(store);
+          return cityName.includes('郴州') && store.name.includes('云窗');
+        })
+        .map((store) => store.id),
+    );
+    const yunchuangQtyByProduct: Record<string, number> = {};
+    storeInventory.forEach((item) => {
+      if (!yunchuangStoreIds.has(item.store_id)) return;
+      const productId = item.product_id;
+      yunchuangQtyByProduct[productId] = (yunchuangQtyByProduct[productId] || 0) + Number(item.quantity || 0);
+    });
+
+    const useWarehouseScope = !selectedStoreId || isYunchuangStoreSelected;
+    const warehouseQtyByProduct: Record<string, number> = {};
+    if (useWarehouseScope) {
+      products.forEach((product) => {
+        const cityKey = product.city_id || '';
+        const cityName = product.city_name || cityNameByKey.get(cityKey) || '未知城市';
+        const province = reportCityProvinceMap.get(cityKey) || getProvinceForCity(cityName);
+
+        const cityInScope = selectedCityId
+          ? (selectedCityId.startsWith('name:')
+              ? cityName === selectedCityId.replace('name:', '')
+              : cityKey === selectedCityId)
+          : true;
+
+        const provinceInScope = selectedProvinceId
+          ? (selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId)
+          : true;
+
+        const yunchuangStoreScopePass = !isYunchuangStoreSelected || cityName.includes('郴州');
+
+        if (!cityInScope || !provinceInScope || !yunchuangStoreScopePass) return;
+
+        warehouseQtyByProduct[product.id] = Number(product.quantity || 0);
+      });
+    }
+
+    const productIds = new Set<string>([
+      ...products.map((product) => product.id),
+      ...Object.keys(storeInventoryQtyByProduct),
+      ...Object.keys(productSalesVolume),
+    ]);
+
+    const uniqueProducts = Array.from(productIds).map((productId) => {
+      const product = products.find((row) => row.id === productId);
+      const rawWarehouseQty = Number(warehouseQtyByProduct[productId] || 0);
+      const scopedStoreQty = Number(storeInventoryQtyByProduct[productId] || 0);
+      const yunchuangStoreQty = Number(yunchuangQtyByProduct[productId] || 0);
+      const dedupeQty = yunchuangStoreQty;
+
+      let inventoryQty = 0;
+      if (selectedStoreId && !isYunchuangStoreSelected) {
+        inventoryQty = scopedStoreQty;
+      } else {
+        inventoryQty = Math.max(rawWarehouseQty - dedupeQty, 0) + scopedStoreQty;
+      }
+
+      return {
+        id: productId,
+        name: product?.name || storeInventory.find((item) => item.product_id === productId)?.product_name || '未知',
+        cost: Number(product?.cost || 0),
+        series: product?.series_name || '未知',
+        inventoryQty,
+      };
+    });
+
+    const sortedByVolume = [...uniqueProducts].sort(
+      (a, b) => (productSalesVolume[b.id] || 0) - (productSalesVolume[a.id] || 0),
+    );
     const top10PercentCount = Math.max(1, Math.floor(uniqueProducts.length * 0.1));
-    const hotProductIds = new Set(sortedByVolume.slice(0, top10PercentCount).map(p => p.id));
+    const hotProductIds = new Set(sortedByVolume.slice(0, top10PercentCount).map((product) => product.id));
 
     let slowMovingCost = 0;
     let totalInventoryCost = 0;
     let hotCost = 0;
     let regularCost = 0;
 
-    const scatterData: any[] = [];
+    const scatterData: Array<{
+      id: string;
+      name: string;
+      cost: number;
+      turnoverDays: number;
+      category: string;
+      dailySales: number;
+    }> = [];
     const seriesTurnover: Record<string, { totalDays: number; count: number }> = {};
     let totalTurnoverDays = 0;
     let validTurnoverCount = 0;
 
-    uniqueProducts.forEach(p => {
-      const orderCount = productOrderCount[p.id] || 0;
-      const volume = productSalesVolume[p.id] || 0;
-      const turnoverDays = orderCount > 0 ? Math.round(periodDays / orderCount) : 999;
-      
+    uniqueProducts.forEach((product) => {
+      const volume = Number(productSalesVolume[product.id] || 0);
+      const recentSales = Number(productRecentSalesVolume[product.id] || 0);
+      const dailySales = periodDays > 0 ? volume / periodDays : 0;
+      const sellableDays = dailySales > 0 ? product.inventoryQty / dailySales : Number.POSITIVE_INFINITY;
+      const turnoverDays = Number.isFinite(sellableDays) ? Math.max(1, Math.round(sellableDays)) : 999;
+
       let category = '常规款';
-      if (hotProductIds.has(p.id) && volume > 0) {
+      if (hotProductIds.has(product.id) && volume > 0) {
         category = '热销款';
-      } else if (volume < 10) {
+      } else if (recentSales < 10) {
         category = '滞销款';
       }
 
-      const invCost = p.inventoryQty * Number(p.cost);
-      totalInventoryCost += invCost;
-
-      if (category === '滞销款') slowMovingCost += invCost;
-      else if (category === '热销款') hotCost += invCost;
-      else regularCost += invCost;
+      const inventoryCost = product.inventoryQty * Number(product.cost || 0);
+      totalInventoryCost += inventoryCost;
+      if (category === '滞销款') slowMovingCost += inventoryCost;
+      else if (category === '热销款') hotCost += inventoryCost;
+      else regularCost += inventoryCost;
 
       if (turnoverDays !== 999) {
         scatterData.push({
-          id: p.id,
-          name: p.name,
-          cost: Number(p.cost),
+          id: product.id,
+          name: product.name,
+          cost: Number(product.cost || 0),
           turnoverDays,
-          category
+          category,
+          dailySales,
         });
         totalTurnoverDays += turnoverDays;
-        validTurnoverCount++;
+        validTurnoverCount += 1;
 
-        if (!seriesTurnover[p.series]) {
-          seriesTurnover[p.series] = { totalDays: 0, count: 0 };
+        if (!seriesTurnover[product.series]) {
+          seriesTurnover[product.series] = { totalDays: 0, count: 0 };
         }
-        seriesTurnover[p.series].totalDays += turnoverDays;
-        seriesTurnover[p.series].count++;
+        seriesTurnover[product.series].totalDays += turnoverDays;
+        seriesTurnover[product.series].count += 1;
       }
     });
 
@@ -534,25 +682,67 @@ export const ReportsScreen: React.FC = () => {
     const slowMovingRatio = totalInventoryCost > 0 ? slowMovingCost / totalInventoryCost : 0;
     const isSlowMovingAlert = slowMovingRatio > 0.15;
 
-    let drillDownData: any[] = [];
+    const storeCityIdMap = new Map<string, string>();
+    filteredStores.forEach((store) => {
+      storeCityIdMap.set(store.id, store.city_id);
+    });
+
+    const cityInventorySkuMap = new Map<string, Set<string>>();
+    products.forEach((product) => {
+      if (Number(product.quantity || 0) <= 0) return;
+      const cityKey = product.city_id || (product.city_name ? `name:${product.city_name}` : '');
+      if (!cityKey) return;
+      if (!cityInventorySkuMap.has(cityKey)) cityInventorySkuMap.set(cityKey, new Set<string>());
+      cityInventorySkuMap.get(cityKey)!.add(product.id);
+    });
+    storeInventory.forEach((item) => {
+      if (Number(item.quantity || 0) <= 0) return;
+      const cityKey = storeCityIdMap.get(item.store_id);
+      if (!cityKey) return;
+      if (!cityInventorySkuMap.has(cityKey)) cityInventorySkuMap.set(cityKey, new Set<string>());
+      cityInventorySkuMap.get(cityKey)!.add(item.product_id);
+    });
+
+    const provinceInventorySkuMap = new Map<string, Set<string>>();
+    cityInventorySkuMap.forEach((skuSet, cityKey) => {
+      const cityName = cityNameByKey.get(cityKey) || cityKey.replace('name:', '');
+      const province = reportCityProvinceMap.get(cityKey) || getProvinceForCity(cityName) || '未知省份';
+      if (!provinceInventorySkuMap.has(province)) provinceInventorySkuMap.set(province, new Set<string>());
+      skuSet.forEach((sku) => provinceInventorySkuMap.get(province)!.add(sku));
+    });
+
+    let drillDownData: Array<{ name: string; rate: number }> = [];
     let drillDownLevel = 'province';
 
     if (selectedStoreId) {
       drillDownLevel = 'product';
-      drillDownData = uniqueProducts.map(p => ({
-        name: p.name,
-        rate: (productSalesVolume[p.id] || 0) > 0 ? 100 : 0
-      })).sort((a, b) => b.rate - a.rate).slice(0, 10);
+      drillDownData = uniqueProducts.map((product) => {
+        const salesQty = Number(productSalesVolume[product.id] || 0);
+        const inventoryQty = Number(product.inventoryQty || 0);
+        const rate = inventoryQty > 0 ? Math.round((salesQty / inventoryQty) * 100) : 0;
+        return {
+          name: product.name,
+          rate,
+        };
+      }).sort((a, b) => b.rate - a.rate).slice(0, 10);
     } else if (selectedCityId) {
       drillDownLevel = 'store';
-      const storesInCity = filteredStores.filter(s => s.city_id === selectedCityId);
-      drillDownData = storesInCity.map(s => {
-        const storeOrders = cityScopedOrders.filter(o => o.store_id === s.id);
-        const storeActiveSkus = new Set();
-        storeOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) storeActiveSkus.add(i.product_id); }));
-        const storeTotalSkus = storeInventory.filter(inv => inv.store_id === s.id).length || products.length;
+      const storesInCity = filteredStores.filter((store) => store.city_id === selectedCityId);
+      const cityScopedTotalSkus = uniqueProducts.filter((product) => Number(product.inventoryQty || 0) > 0).length;
+      drillDownData = storesInCity.map((store) => {
+        const storeOrders = cityScopedOrders.filter((order) => order.store_id === store.id);
+        const storeActiveSkus = new Set<string>();
+        storeOrders.forEach((order) =>
+          order.items.forEach((item) => {
+            if (!item.is_sample && Number(item.quantity || 0) > 0) storeActiveSkus.add(item.product_id);
+          }),
+        );
+        const isYunchuangStore = store.name.includes('云窗') && getStoreCityName(store).includes('郴州');
+        const storeTotalSkus = isYunchuangStore
+          ? cityScopedTotalSkus
+          : storeInventory.filter((inventory) => inventory.store_id === store.id && Number(inventory.quantity || 0) > 0).length;
         return {
-          name: s.name,
+          name: store.name,
           rate: storeTotalSkus > 0 ? Math.round((storeActiveSkus.size / storeTotalSkus) * 100) : 0
         };
       }).sort((a, b) => b.rate - a.rate);
@@ -563,9 +753,10 @@ export const ReportsScreen: React.FC = () => {
         const cityOrders = provinceScopedOrders.filter(o => getOrderCityKey(o) === c.id);
         const cityActiveSkus = new Set();
         cityOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) cityActiveSkus.add(i.product_id); }));
+        const cityTotalSkus = cityInventorySkuMap.get(c.id)?.size || 0;
         return {
           name: c.name,
-          rate: products.length > 0 ? Math.round((cityActiveSkus.size / products.length) * 100) : 0
+          rate: cityTotalSkus > 0 ? Math.round((cityActiveSkus.size / cityTotalSkus) * 100) : 0
         };
       }).sort((a, b) => b.rate - a.rate);
     } else {
@@ -578,9 +769,10 @@ export const ReportsScreen: React.FC = () => {
         });
         const provActiveSkus = new Set();
         provOrders.forEach(o => o.items.forEach(i => { if (!i.is_sample && Number(i.quantity || 0) > 0) provActiveSkus.add(i.product_id); }));
+        const provinceTotalSkus = provinceInventorySkuMap.get(prov)?.size || 0;
         return {
           name: prov,
-          rate: products.length > 0 ? Math.round((provActiveSkus.size / products.length) * 100) : 0
+          rate: provinceTotalSkus > 0 ? Math.round((provActiveSkus.size / provinceTotalSkus) * 100) : 0
         };
       }).sort((a, b) => b.rate - a.rate);
     }
@@ -638,30 +830,35 @@ export const ReportsScreen: React.FC = () => {
       turnoverData,
       salesSummary,
     };
-  }, [orders, products, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
+  }, [isRefundLikeOrder, orders, products, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
 
   useEffect(() => {
+    if (reportType !== 'inventory_turnover') {
+      slowMovingAlertTriggeredRef.current = false;
+      slowMovingAlertScopeRef.current = null;
+      return;
+    }
     if (!user || user.role === 'distributor') return;
-    if (reportType !== 'inventory_turnover') return;
+    if (slowMovingAlertTriggeredRef.current) return;
+    slowMovingAlertTriggeredRef.current = true;
     if (!turnoverData.isSlowMovingAlert || turnoverData.totalInventoryCost <= 0) return;
-    if (slowMovingAlertScopeRef.current === slowMovingAlertScopeLabel) return;
 
-    slowMovingAlertScopeRef.current = slowMovingAlertScopeLabel;
+    slowMovingAlertScopeRef.current = '全部范围';
     void (async () => {
       const { error } = await createSlowMovingAlertNotification({
-        scopeLabel: slowMovingAlertScopeLabel,
+        scopeLabel: '全部范围',
         slowMovingRatio: turnoverData.slowMovingRatio,
         slowMovingCost: turnoverData.slowMovingCost,
         totalInventoryCost: turnoverData.totalInventoryCost,
       });
       if (error) {
+        slowMovingAlertTriggeredRef.current = false;
         slowMovingAlertScopeRef.current = null;
       }
     })();
   }, [
     createSlowMovingAlertNotification,
     reportType,
-    slowMovingAlertScopeLabel,
     turnoverData.isSlowMovingAlert,
     turnoverData.slowMovingCost,
     turnoverData.slowMovingRatio,
@@ -797,9 +994,10 @@ export const ReportsScreen: React.FC = () => {
       row.单品毛利,
     ]);
 
-      const paymentRows = generatePaymentReport().map((row) => [
+      const paymentRows = generatePaymentReport(transactions).map((row) => [
       row.序号,
-      row.城市渠道,
+      row.城市,
+      row.渠道门店,
       row.对账周期,
       row.应收货款,
       row.已回款金额,
@@ -820,9 +1018,9 @@ export const ReportsScreen: React.FC = () => {
       ['序号', '城市', '渠道门店', 'SKU编号', '产品名称', '品类', '单位成本', '供货价', '终端售价', '当前实物库存', '预留库存', '总可用库存', '安全库存阈值', '本月销量', '上月销量', '库存周转天数', '滞销标记', '单品毛利'],
       detailRows,
     );
-      addSheet(
+    addSheet(
       '文创渠道回款对账表',
-      ['序号', '城市渠道', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'],
+      ['序号', '城市', '渠道门店', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'],
       paymentRows,
     );
 
@@ -969,12 +1167,6 @@ export const ReportsScreen: React.FC = () => {
       )}
 
       {reportType === 'revenue' && (
-      <div className="bg-accent/10 border border-accent/30 rounded-2xl px-4 py-3">
-        <p className="text-sm font-bold text-accent">目标四报表（本轮重点）</p>
-        <p className="text-xs text-white/60 mt-1">营收概览、供货统计、SKU动销率、商品周转天数</p>
-      </div>
-      )}
-      {reportType === 'revenue' && (
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-bold">营收概览</h3>
@@ -1103,7 +1295,8 @@ export const ReportsScreen: React.FC = () => {
                         <Cell key={entry.name} fill={colors[index % colors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff' }} formatter={(value: number, _name: string, entry: unknown) => [`¥${Number(value).toFixed(2)}`, ((entry as { payload?: { name?: string } } | undefined)?.payload?.name) || '店铺营收']} />
+                    <Legend verticalAlign="bottom" height={24} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -1120,7 +1313,8 @@ export const ReportsScreen: React.FC = () => {
                         <Cell key={entry.name} fill={colors[index % colors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff' }} formatter={(value: number, _name: string, entry: unknown) => [`¥${Number(value).toFixed(2)}`, ((entry as { payload?: { name?: string } } | undefined)?.payload?.name) || '城市营收']} />
+                    <Legend verticalAlign="bottom" height={24} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -1226,7 +1420,7 @@ export const ReportsScreen: React.FC = () => {
                   <XAxis type="number" dataKey="cost" name="商品成本" unit="元" stroke="#ffffff40" tick={{ fill: '#ffffff80' }} />
                   <YAxis type="number" dataKey="turnoverDays" name="周转天数" unit="天" stroke="#ffffff40" tick={{ fill: '#ffffff80' }} />
                   <ZAxis type="category" dataKey="name" name="商品名称" />
-                  <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} />
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }} content={renderTurnoverScatterTooltip} />
                   <Scatter name="商品" data={turnoverData.scatterData} fill="#5B8DEF">
                     {turnoverData.scatterData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.category === '滞销款' ? '#ffc658' : entry.category === '热销款' ? '#FF6B9D' : '#5B8DEF'} />
@@ -1248,8 +1442,14 @@ export const ReportsScreen: React.FC = () => {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => `¥${value.toFixed(2)}`} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} />
-                  <Legend verticalAlign="bottom" height={36} />
+                  <text x="50%" y="48%" textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize={14} fontWeight={700}>
+                    {turnoverData.pieData.reduce((sum, item) => sum + Number(item.value || 0), 0).toFixed(0)}
+                  </text>
+                  <text x="50%" y="56%" textAnchor="middle" dominantBaseline="middle" fill="#d1d5db" fontSize={11}>
+                    总成本
+                  </text>
+                  <Tooltip formatter={(value: number) => [`¥${value.toFixed(2)}`, '库存成本']} contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff' }} />
+                  <Legend verticalAlign="bottom" height={36} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -1286,7 +1486,7 @@ export const ReportsScreen: React.FC = () => {
                  turnoverData.drillDownLevel === 'store' ? '店铺维度' : '商品维度'}
               </span>
             </div>
-            <p className="text-sm text-white/50 mb-6">动销率 = 有销量SKU / 总SKU</p>
+            <p className="text-sm text-white/50 mb-6">动销率 = 有销量SKU / 总SKU（店铺商品维度为销量 / 库存）</p>
             <div className="h-[250px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={turnoverData.drillDownData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -1345,7 +1545,8 @@ export const ReportsScreen: React.FC = () => {
                         <Cell key={entry.name} fill={colors[index % colors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number) => [`¥${Number(value).toFixed(2)}`, '收入']} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number, _name: string, entry: unknown) => [`¥${Number(value).toFixed(2)}`, ((entry as { payload?: { name?: string } } | undefined)?.payload?.name) || '收入']} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff' }} />
+                    <Legend verticalAlign="bottom" height={24} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -1364,7 +1565,8 @@ export const ReportsScreen: React.FC = () => {
                         <Cell key={entry.name} fill={colors[index % colors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number) => [`¥${Number(value).toFixed(2)}`, '支出']} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} formatter={(value: number, _name: string, entry: unknown) => [`¥${Number(value).toFixed(2)}`, ((entry as { payload?: { name?: string } } | undefined)?.payload?.name) || '支出']} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff' }} />
+                    <Legend verticalAlign="bottom" height={24} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

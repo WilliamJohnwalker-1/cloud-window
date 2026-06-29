@@ -154,6 +154,7 @@ export default function ReportsScreen() {
   const [floatingProductName, setFloatingProductName] = useState('');
   const exportLocks = useRef({ profitExcel: false, profitPdf: false, business: false });
   const slowMovingAlertScopeRef = useRef<string | null>(null);
+  const slowMovingAlertTriggeredRef = useRef(false);
 
   const getOrderCityKey = (order: { city_id?: string | null; city_name?: string | null }): string => {
     if (order.city_id) return order.city_id;
@@ -351,13 +352,19 @@ export default function ReportsScreen() {
     return '销售报表';
   }, [reportType]);
 
+  const isRefundLikeOrder = (order: { payment_status?: string | null; refunded_items?: unknown }): boolean => {
+    const paymentStatus = String(order.payment_status || '').toLowerCase();
+    if (paymentStatus.includes('refund')) return true;
+    const refundedItems = Array.isArray(order.refunded_items) ? order.refunded_items : [];
+    return refundedItems.length > 0;
+  };
+
   const revenueScopedOrders = useMemo(
     () =>
       filteredOrders.filter((order) => {
         const isRevenueKind = order.order_kind === 'settlement' || order.order_kind === 'retail';
         if (!isRevenueKind) return false;
-        const paymentStatus = String(order.payment_status || '').toLowerCase();
-        return paymentStatus !== 'refunded' && paymentStatus !== 'refund_pending';
+        return !isRefundLikeOrder(order);
       }),
     [filteredOrders],
   );
@@ -535,51 +542,135 @@ export default function ReportsScreen() {
   }, [products, storeInventory, selectedStoreId]);
 
   const turnoverData = useMemo(() => {
-    const soldOrders = filteredOrders.filter((order) => order.order_kind !== 'purchase');
-    const lastSoldAt: Record<string, number> = {};
+    const soldOrders = filteredOrders.filter((order) => {
+      const isTurnoverKind = order.order_kind === 'retail' || order.order_kind === 'settlement';
+      return isTurnoverKind && !isRefundLikeOrder(order);
+    });
     
     const now = Date.now();
     const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000;
     const recentSalesQty: Record<string, number> = {};
     const totalSalesQty: Record<string, number> = {};
 
+    let periodDays = 30;
+    if (selectedMonth !== 'all') {
+      const [year, month] = selectedMonth.split('-');
+      periodDays = new Date(Number(year), Number(month), 0).getDate();
+    } else if (soldOrders.length > 0) {
+      const earliest = Math.min(...soldOrders.map((order) => new Date(order.created_at).getTime()));
+      const latest = Math.max(...soldOrders.map((order) => new Date(order.created_at).getTime()));
+      periodDays = Math.max(1, Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24)));
+    }
+
     soldOrders.forEach((order) => {
       const soldAt = new Date(order.created_at).getTime();
       if (!Number.isFinite(soldAt)) return;
       order.items.forEach((item) => {
         if (item.is_sample || Number(item.quantity || 0) <= 0) return;
-        const current = lastSoldAt[item.product_id] || 0;
-        if (soldAt > current) {
-          lastSoldAt[item.product_id] = soldAt;
-        }
-        
-        totalSalesQty[item.product_id] = (totalSalesQty[item.product_id] || 0) + item.quantity;
+        const quantity = Number(item.quantity || 0);
+        totalSalesQty[item.product_id] = (totalSalesQty[item.product_id] || 0) + quantity;
         if (soldAt >= threeMonthsAgo) {
-          recentSalesQty[item.product_id] = (recentSalesQty[item.product_id] || 0) + item.quantity;
+          recentSalesQty[item.product_id] = (recentSalesQty[item.product_id] || 0) + quantity;
         }
       });
     });
 
-    const productTurnover: { [key: string]: { name: string; turnoverDays: number; isSlow: boolean; cost: number; inventoryValue: number; seriesName: string; recentSales: number; totalSales: number } } = {};
-    
-    const targetProducts = selectedStoreId
-      ? storeInventory.map((p) => {
-          const globalP = products.find(gp => gp.id === p.product_id);
-          return { id: p.product_id, name: p.product_name || '未知', cost: globalP?.cost || 0, quantity: p.quantity || 0, seriesName: globalP?.series_name || '无系列' };
+    const cityNameByKey = new Map<string, string>();
+    reportCities.forEach((city) => cityNameByKey.set(city.id, city.name));
+
+    const getStoreCityName = (store: { city_id: string; city_name?: string | null }): string => (
+      store.city_name || cityNameByKey.get(store.city_id) || '未知城市'
+    );
+
+    const scopedStoreIds = new Set(
+      filteredStores.map((store) => store.id),
+    );
+
+    const isYunchuangStoreSelected = Boolean(selectedStoreId && (selectedReportStore?.name || '').includes('云窗'));
+
+    const scopedYunchuangStoreIds = new Set(
+      filteredStores
+        .filter((store) => scopedStoreIds.has(store.id))
+        .filter((store) => {
+          const cityName = getStoreCityName(store);
+          return cityName.includes('郴州') && store.name.includes('云窗');
         })
-      : products.map((p) => ({ id: p.id, name: p.name, cost: p.cost || 0, quantity: p.quantity || 0, seriesName: p.series_name || '无系列' }));
-      
-    const uniqueProducts = Array.from(new Map(targetProducts.map((p) => [p.id, p])).values());
-    let activeSkuCount = 0;
+        .map((store) => store.id),
+    );
+
+    const storeInventoryQtyByProduct: Record<string, number> = {};
+    storeInventory.forEach((item) => {
+      if (!scopedStoreIds.has(item.store_id)) return;
+      storeInventoryQtyByProduct[item.product_id] = (storeInventoryQtyByProduct[item.product_id] || 0) + Number(item.quantity || 0);
+    });
+
+    const yunchuangStoreQtyByProduct: Record<string, number> = {};
+    storeInventory.forEach((item) => {
+      if (!scopedYunchuangStoreIds.has(item.store_id)) return;
+      yunchuangStoreQtyByProduct[item.product_id] = (yunchuangStoreQtyByProduct[item.product_id] || 0) + Number(item.quantity || 0);
+    });
+
+    const useWarehouseScope = !selectedStoreId || isYunchuangStoreSelected;
+    const warehouseQtyByProduct: Record<string, number> = {};
+    if (useWarehouseScope) {
+      products.forEach((product) => {
+        const cityKey = product.city_id || '';
+        const cityName = product.city_name || cityNameByKey.get(cityKey) || '未知城市';
+        const province = reportCityProvinceMap.get(cityKey) || getProvinceForCity(cityName);
+
+        const cityInScope = selectedCityId
+          ? (selectedCityId.startsWith('name:')
+              ? cityName === selectedCityId.replace('name:', '')
+              : cityKey === selectedCityId)
+          : true;
+
+        const provinceInScope = selectedProvinceId
+          ? (selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId)
+          : true;
+
+        const yunchuangStoreScopePass = !isYunchuangStoreSelected || cityName.includes('郴州');
+
+        if (!cityInScope || !provinceInScope || !yunchuangStoreScopePass) return;
+        warehouseQtyByProduct[product.id] = Number(product.quantity || 0);
+      });
+    }
+
+    const productTurnover: { [key: string]: { name: string; turnoverDays: number; isSlow: boolean; cost: number; inventoryValue: number; seriesName: string; recentSales: number; totalSales: number; dailySales: number } } = {};
+
+    const productIds = new Set<string>([
+      ...products.map((product) => product.id),
+      ...Object.keys(storeInventoryQtyByProduct),
+      ...Object.keys(totalSalesQty),
+    ]);
+
+    const uniqueProducts = Array.from(productIds).map((productId) => {
+      const globalProduct = products.find((item) => item.id === productId);
+      const rawWarehouseQty = Number(warehouseQtyByProduct[productId] || 0);
+      const scopedStoreQty = Number(storeInventoryQtyByProduct[productId] || 0);
+      const yunchuangStoreQty = Number(yunchuangStoreQtyByProduct[productId] || 0);
+      const dedupeQty = yunchuangStoreQty;
+
+      let quantity = 0;
+      if (selectedStoreId && !isYunchuangStoreSelected) {
+        quantity = scopedStoreQty;
+      } else {
+        quantity = Math.max(rawWarehouseQty - dedupeQty, 0) + scopedStoreQty;
+      }
+
+      return {
+        id: productId,
+        name: globalProduct?.name || storeInventory.find((item) => item.product_id === productId)?.product_name || '未知',
+        cost: Number(globalProduct?.cost || 0),
+        quantity,
+        seriesName: globalProduct?.series_name || '无系列',
+      };
+    });
 
     uniqueProducts.forEach((p) => {
-      const soldAt = lastSoldAt[p.id];
-      const turnoverDays = soldAt
-        ? Math.max(1, Math.floor((now - soldAt) / (24 * 60 * 60 * 1000)))
-        : 999;
-      if (soldAt) {
-        activeSkuCount += 1;
-      }
+      const totalSales = totalSalesQty[p.id] || 0;
+      const dailySales = periodDays > 0 ? totalSales / periodDays : 0;
+      const sellableDays = dailySales > 0 ? p.quantity / dailySales : Number.POSITIVE_INFINITY;
+      const turnoverDays = Number.isFinite(sellableDays) ? Math.max(1, Math.round(sellableDays)) : 999;
       productTurnover[p.id] = {
         name: p.name,
         turnoverDays,
@@ -588,7 +679,8 @@ export default function ReportsScreen() {
         inventoryValue: p.cost * p.quantity,
         seriesName: p.seriesName,
         recentSales: recentSalesQty[p.id] || 0,
-        totalSales: totalSalesQty[p.id] || 0,
+        totalSales,
+        dailySales,
       };
     });
 
@@ -600,9 +692,6 @@ export default function ReportsScreen() {
       .filter((item) => item.isSlow)
       .sort((a, b) => b.turnoverDays - a.turnoverDays)
       .slice(0, 5);
-
-    const totalSkuCount = uniqueProducts.length;
-    const sellThroughRate = totalSkuCount > 0 ? activeSkuCount / totalSkuCount : 0;
 
     const validTurnovers = Object.values(productTurnover).filter(p => p.turnoverDays !== 999);
     const avgTurnoverDays = validTurnovers.length > 0 
@@ -646,22 +735,88 @@ export default function ReportsScreen() {
     const slowValueRatio = totalInventoryValue > 0 ? slowValue / totalInventoryValue : 0;
     const isSlowWarning = slowValueRatio > 0.15;
 
+    const storeCityIdMap = new Map<string, string>();
+    filteredStores.forEach((store) => {
+      storeCityIdMap.set(store.id, store.city_id);
+    });
+
+    const cityInventorySkuMap = new Map<string, Set<string>>();
+    products.forEach((product) => {
+      if (Number(product.quantity || 0) <= 0) return;
+      const cityKey = product.city_id || (product.city_name ? `name:${product.city_name}` : '');
+      if (!cityKey) return;
+      if (!cityInventorySkuMap.has(cityKey)) cityInventorySkuMap.set(cityKey, new Set<string>());
+      cityInventorySkuMap.get(cityKey)!.add(product.id);
+    });
+    storeInventory.forEach((item) => {
+      if (Number(item.quantity || 0) <= 0) return;
+      const cityKey = storeCityIdMap.get(item.store_id);
+      if (!cityKey) return;
+      if (!cityInventorySkuMap.has(cityKey)) cityInventorySkuMap.set(cityKey, new Set<string>());
+      cityInventorySkuMap.get(cityKey)!.add(item.product_id);
+    });
+
+    const provinceInventorySkuMap = new Map<string, Set<string>>();
+    cityInventorySkuMap.forEach((skuSet, cityKey) => {
+      const cityName = cityNameByKey.get(cityKey) || cityKey.replace('name:', '');
+      const province = reportCityProvinceMap.get(cityKey) || getProvinceForCity(cityName) || '未知省份';
+      if (!provinceInventorySkuMap.has(province)) provinceInventorySkuMap.set(province, new Set<string>());
+      skuSet.forEach((sku) => provinceInventorySkuMap.get(province)!.add(sku));
+    });
+
+    const scopedSkuIds = new Set<string>();
+    if (selectedStoreId) {
+      if (isYunchuangStoreSelected) {
+        uniqueProducts.forEach((product) => {
+          if (Number(product.quantity || 0) > 0) {
+            scopedSkuIds.add(product.id);
+          }
+        });
+      } else {
+        storeInventory.forEach((item) => {
+          if (item.store_id === selectedStoreId && Number(item.quantity || 0) > 0) {
+            scopedSkuIds.add(item.product_id);
+          }
+        });
+      }
+    } else if (selectedCityId) {
+      (cityInventorySkuMap.get(selectedCityId) || new Set<string>()).forEach((skuId) => scopedSkuIds.add(skuId));
+    } else if (selectedProvinceId) {
+      (provinceInventorySkuMap.get(selectedProvinceId) || new Set<string>()).forEach((skuId) => scopedSkuIds.add(skuId));
+    } else {
+      uniqueProducts.forEach((product) => {
+        if (Number(product.quantity || 0) > 0) {
+          scopedSkuIds.add(product.id);
+        }
+      });
+    }
+
+    const scopedTotalSkuCount = scopedSkuIds.size;
+    const scopedActiveSkuCount = Array.from(scopedSkuIds).filter((productId) => Number(totalSalesQty[productId] || 0) > 0).length;
+    const scopedSellThroughRate = scopedTotalSkuCount > 0 ? scopedActiveSkuCount / scopedTotalSkuCount : 0;
+
     let drillDownData: { label: string; active: number; total: number; rate: number }[] = [];
     
     if (selectedStoreId) {
       drillDownData = uniqueProducts.map(p => {
-        const active = lastSoldAt[p.id] ? 1 : 0;
-        return { label: p.name, active, total: 1, rate: active };
+        const salesQty = Number(totalSalesQty[p.id] || 0);
+        const inventoryQty = Number(p.quantity || 0);
+        const rate = inventoryQty > 0 ? salesQty / inventoryQty : 0;
+        return { label: p.name, active: salesQty, total: inventoryQty, rate };
       }).sort((a, b) => b.rate - a.rate).slice(0, 10);
     } else if (selectedCityId) {
       const storesInCity = filteredStores.filter(s => s.city_id === selectedCityId);
+      const cityScopedTotalSkus = uniqueProducts.filter((product) => Number(product.quantity || 0) > 0).length;
       drillDownData = storesInCity.map(store => {
         const storeOrders = soldOrders.filter(o => o.store_id === store.id);
         const storeActiveSkus = new Set();
         storeOrders.forEach(o => o.items.forEach(i => {
           if (!i.is_sample && Number(i.quantity || 0) > 0) storeActiveSkus.add(i.product_id);
         }));
-        const storeTotalSkus = storeInventory.filter(si => si.store_id === store.id).length || uniqueProducts.length;
+        const isYunchuangStore = store.name.includes('云窗') && getStoreCityName(store).includes('郴州');
+        const storeTotalSkus = isYunchuangStore
+          ? cityScopedTotalSkus
+          : storeInventory.filter(si => si.store_id === store.id && Number(si.quantity || 0) > 0).length;
         const rate = storeTotalSkus > 0 ? storeActiveSkus.size / storeTotalSkus : 0;
         return { label: store.name, active: storeActiveSkus.size, total: storeTotalSkus, rate };
       }).sort((a, b) => b.rate - a.rate);
@@ -673,8 +828,9 @@ export default function ReportsScreen() {
         cityOrders.forEach(o => o.items.forEach(i => {
           if (!i.is_sample && Number(i.quantity || 0) > 0) cityActiveSkus.add(i.product_id);
         }));
-        const rate = uniqueProducts.length > 0 ? cityActiveSkus.size / uniqueProducts.length : 0;
-        return { label: city.name, active: cityActiveSkus.size, total: uniqueProducts.length, rate };
+        const cityTotalSkus = cityInventorySkuMap.get(city.id)?.size || 0;
+        const rate = cityTotalSkus > 0 ? cityActiveSkus.size / cityTotalSkus : 0;
+        return { label: city.name, active: cityActiveSkus.size, total: cityTotalSkus, rate };
       }).sort((a, b) => b.rate - a.rate);
     } else {
       const provinceMap = new Map<string, Set<string>>();
@@ -688,17 +844,18 @@ export default function ReportsScreen() {
       });
       
       drillDownData = Array.from(provinceMap.entries()).map(([province, activeSkus]) => {
-        const rate = uniqueProducts.length > 0 ? activeSkus.size / uniqueProducts.length : 0;
-        return { label: province, active: activeSkus.size, total: uniqueProducts.length, rate };
+        const provinceTotalSkus = provinceInventorySkuMap.get(province)?.size || 0;
+        const rate = provinceTotalSkus > 0 ? activeSkus.size / provinceTotalSkus : 0;
+        return { label: province, active: activeSkus.size, total: provinceTotalSkus, rate };
       }).sort((a, b) => b.rate - a.rate);
     }
 
     return {
       topTurnoverProducts,
       slowMovingProducts,
-      activeSkuCount,
-      totalSkuCount,
-      sellThroughRate,
+      activeSkuCount: scopedActiveSkuCount,
+      totalSkuCount: scopedTotalSkuCount,
+      sellThroughRate: scopedSellThroughRate,
       avgTurnoverDays,
       seriesAvgTurnover,
       inventoryValuePie: [
@@ -714,26 +871,33 @@ export default function ReportsScreen() {
       scatterData: Object.values(productTurnover).filter(p => p.turnoverDays !== 999).map(p => ({
         name: p.name,
         cost: p.cost,
-        turnoverDays: p.turnoverDays
+        turnoverDays: p.turnoverDays,
+        dailySales: p.dailySales,
       }))
     };
-  }, [filteredOrders, products, selectedStoreId, storeInventory, selectedCityId, selectedProvinceId, filteredStores, reportCities, reportCityProvinceMap]);
+  }, [filteredOrders, filteredStores, isRefundLikeOrder, products, reportCities, reportCityProvinceMap, selectedCityId, selectedMonth, selectedProvinceId, selectedReportStore, selectedStoreId, storeInventory]);
 
   useEffect(() => {
+    if (reportType !== 'inventory_turnover') {
+      slowMovingAlertTriggeredRef.current = false;
+      slowMovingAlertScopeRef.current = null;
+      return;
+    }
     if (!isAdminOrManager) return;
-    if (reportType !== 'inventory_turnover') return;
+    if (slowMovingAlertTriggeredRef.current) return;
+    slowMovingAlertTriggeredRef.current = true;
     if (!turnoverData.isSlowWarning || turnoverData.totalInventoryValue <= 0) return;
-    if (slowMovingAlertScopeRef.current === slowMovingAlertScopeLabel) return;
 
-    slowMovingAlertScopeRef.current = slowMovingAlertScopeLabel;
+    slowMovingAlertScopeRef.current = '全部范围';
     void (async () => {
       const { error } = await createSlowMovingAlertNotification({
-        scopeLabel: slowMovingAlertScopeLabel,
+        scopeLabel: '全部范围',
         slowMovingRatio: turnoverData.slowValueRatio,
         slowMovingCost: turnoverData.slowInventoryValue,
         totalInventoryCost: turnoverData.totalInventoryValue,
       });
       if (error) {
+        slowMovingAlertTriggeredRef.current = false;
         slowMovingAlertScopeRef.current = null;
       }
     })();
@@ -741,7 +905,6 @@ export default function ReportsScreen() {
     createSlowMovingAlertNotification,
     isAdminOrManager,
     reportType,
-    slowMovingAlertScopeLabel,
     turnoverData.isSlowWarning,
     turnoverData.slowInventoryValue,
     turnoverData.slowValueRatio,
@@ -1015,10 +1178,11 @@ export default function ReportsScreen() {
         row.单品毛利,
       ]);
   
-      const paymentHeaders = ['序号', '城市渠道', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'];
-      const paymentRows: SheetRow[] = generatePaymentReport().map((row) => [
+      const paymentHeaders = ['序号', '城市', '渠道门店', '对账周期', '应收货款', '已回款金额', '未结欠款', '逾期天数', '渠道扣点费用', '实际毛利额', '回款状态'];
+      const paymentRows: SheetRow[] = generatePaymentReport(transactions).map((row) => [
         row.序号,
-        row.城市渠道,
+        row.城市,
+        row.渠道门店,
         row.对账周期,
         row.应收货款,
         row.已回款金额,
@@ -1109,28 +1273,8 @@ export default function ReportsScreen() {
   const renderInventoryReport = () => (
     <ScrollView>
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>库存概览</Text>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{inventoryData.totalProducts}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>商品种类</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.textPrimary }]}>{inventoryData.totalQuantity}</Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>总库存</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, inventoryData.lowStockItems.length > 0 && styles.warningText]}>
-              {inventoryData.lowStockItems.length}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>库存不足</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>SKU动销率与周转</Text>
-        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>动销率 = 有销量 SKU 数 / 总 SKU 数</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>动销率 = 有销量 SKU 数 / 总 SKU 数（店铺商品维度为销量 / 库存）</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: theme.textPrimary }]}>{turnoverData.activeSkuCount} / {turnoverData.totalSkuCount}</Text>
@@ -1196,32 +1340,37 @@ export default function ReportsScreen() {
           {selectedStoreId ? '商品维度' : selectedCityId ? '店铺维度' : selectedProvinceId ? '城市维度' : '省份维度'}
         </Text>
         {turnoverData.drillDownData.length > 0 ? (
-          <BarChart
-            data={turnoverData.drillDownData.map((item, index) => ({
-              value: item.rate * 100,
-              label: item.label.length > 4 ? item.label.slice(0, 4) + '..' : item.label,
-              frontColor: CHART_COLORS[index % CHART_COLORS.length],
-              topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                  {(item.rate * 100).toFixed(0)}%
-                </Text>
-              ),
-            }))}
-            barWidth={30}
-            spacing={20}
-            roundedTop
-            roundedBottom
-            hideRules
-            xAxisThickness={1}
-            xAxisColor={theme.divider}
-            yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-            noOfSections={4}
-            maxValue={100}
-            isAnimated
-            animationDuration={500}
-            height={150}
-          />
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 12 }}>
+              <BarChart
+                data={turnoverData.drillDownData.map((item, index) => ({
+                  value: item.rate > 0 ? Math.max(item.rate * 100, 1) : 0,
+                  label: item.label.length > 6 ? `${item.label.slice(0, 6)}…` : item.label,
+                  frontColor: CHART_COLORS[index % CHART_COLORS.length],
+                  onPress: () => showFullProductName(`${item.label}\n动销SKU: ${item.active}/${item.total}\n动销率: ${(item.rate * 100).toFixed(1)}%`),
+                }))}
+                width={Math.max(420, turnoverData.drillDownData.length * 96)}
+                barWidth={24}
+                spacing={20}
+                initialSpacing={10}
+                roundedTop
+                roundedBottom
+                hideRules
+                xAxisThickness={1}
+                xAxisColor={theme.divider}
+                yAxisThickness={0}
+                yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
+                xAxisLabelTextStyle={{ fontSize: 10, color: theme.textSecondary, width: 56, textAlign: 'center' }}
+                xAxisLabelsHeight={56}
+                noOfSections={4}
+                maxValue={Math.max(100, ...turnoverData.drillDownData.map((item) => item.rate * 100))}
+                isAnimated
+                animationDuration={500}
+                height={240}
+              />
+            </ScrollView>
+            <Text style={[styles.chartHintText, { color: theme.textTertiary }]}>点击柱体查看该维度详情</Text>
+          </>
         ) : (
           <View style={styles.emptyChartContainer}>
             <BarChart3 size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -1255,7 +1404,7 @@ export default function ReportsScreen() {
                       opacity: 0.7,
                       transform: [{ translateX: 6 }, { translateY: -6 }]
                     }}
-                    onPress={() => showFullProductName(`${d.name}\n成本: ${d.cost}元\n周转: ${d.turnoverDays}天`)}
+                    onPress={() => showFullProductName(`${d.name}\n成本: ${d.cost}元\n可售天数: ${d.turnoverDays}天\n日均出库: ${d.dailySales > 0 ? d.dailySales.toFixed(2) : '无销售'}`)}
                   />
                 );
               });
@@ -1287,7 +1436,7 @@ export default function ReportsScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>商品周转天数排行榜</Text>
-        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>周转天数 = 商品距上次售出天数，大于60天标红</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>周转天数 = 当前库存 ÷ 日均出库量（无销售显示暂无销量记录）</Text>
         {turnoverData.topTurnoverProducts.length > 0 ? (
           turnoverData.topTurnoverProducts.map((item, index) => (
             <View key={item.name} style={[styles.velocityItem, item.isSlow && styles.velocityUnhealthyBg]}>
@@ -1410,33 +1559,47 @@ export default function ReportsScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>SKU毛利润排行</Text>
         {profitData.profitByProduct.length > 0 ? (
-          <BarChart
-            horizontal
-            data={profitData.profitByProduct.slice(0, 10).map((item, index) => ({
-              value: item.profit,
-              label: item.name.length > 4 ? item.name.slice(0, 4) + '..' : item.name,
-              frontColor: item.profit >= 0 ? CHART_COLORS[index % CHART_COLORS.length] : Colors.danger,
-              topLabelComponent: () => (
-                <Text style={{ fontSize: 10, color: theme.textSecondary, marginLeft: 4 }}>
-                  {item.profit.toFixed(0)}
-                </Text>
-              ),
-            }))}
-            barWidth={20}
-            spacing={15}
-            roundedTop
-            roundedBottom
-            hideRules
-            xAxisThickness={1}
-            xAxisColor={theme.divider}
-            yAxisThickness={0}
-            yAxisTextStyle={{ fontSize: 10, color: theme.textTertiary }}
-            noOfSections={4}
-            isAnimated
-            animationDuration={500}
-            height={250}
-            shiftY={0}
-          />
+          <>
+            <BarChart
+              horizontal
+              data={profitData.profitByProduct.slice(0, 10).map((item, index) => ({
+                value: item.profit,
+                label: item.name,
+                onPress: () => showFullProductName(`${item.name}\n毛利润: ${item.profit.toFixed(2)}元`),
+                frontColor: item.profit >= 0 ? CHART_COLORS[index % CHART_COLORS.length] : Colors.danger,
+              }))}
+              barWidth={18}
+              spacing={14}
+              yAxisLabelWidth={190}
+              roundedTop
+              roundedBottom
+              hideRules
+              xAxisThickness={1}
+              xAxisColor={theme.divider}
+              yAxisThickness={0}
+              yAxisTextStyle={{ fontSize: 11, color: theme.textSecondary }}
+              noOfSections={4}
+              isAnimated
+              animationDuration={500}
+              height={Math.max(280, profitData.profitByProduct.slice(0, 10).length * 40)}
+              shiftY={0}
+            />
+            <View style={styles.rankListContainer}>
+              {profitData.profitByProduct.slice(0, 10).map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.name}-${index}`}
+                  style={[styles.rankListRow, { borderBottomColor: theme.divider }]}
+                  onPress={() => showFullProductName(`${item.name}\n毛利润: ${item.profit.toFixed(2)}元`)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.rankListName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                    {index + 1}. {item.name}
+                  </Text>
+                  <Text style={[styles.rankListValue, { color: theme.textSecondary }]}>{item.profit.toFixed(2)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         ) : (
           <View style={styles.emptyChartContainer}>
             <TrendingUp size={40} color={theme.textTertiary} strokeWidth={1.5} />
@@ -1500,11 +1663,6 @@ export default function ReportsScreen() {
                 value: item.value,
                 label: item.label,
                 frontColor: CHART_COLORS[index % CHART_COLORS.length],
-                topLabelComponent: () => (
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4 }}>
-                    {item.value.toFixed(0)}
-                  </Text>
-                ),
               }))}
               barWidth={30}
               spacing={20}
@@ -1787,7 +1945,7 @@ export default function ReportsScreen() {
 
       {floatingProductName ? (
         <View style={[styles.floatingNameBubble, { backgroundColor: theme.surface, borderColor: theme.border }] }>
-          <Text style={[styles.floatingNameText, { color: theme.textPrimary }]} numberOfLines={2} ellipsizeMode="tail">
+          <Text style={[styles.floatingNameText, { color: theme.textPrimary }]}>
             {floatingProductName}
           </Text>
         </View>
@@ -1925,10 +2083,10 @@ const styles = StyleSheet.create({
     ...Shadow.card,
   },
   cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 15, color: Colors.textPrimary },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  statItem: { alignItems: 'center' },
-  statValue: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  statLabel: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 8 },
+  statItem: { alignItems: 'center', width: '48%' },
+  statValue: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center', lineHeight: 22 },
+  statLabel: { fontSize: 12, color: Colors.textSecondary, marginTop: 4, textAlign: 'center', lineHeight: 16 },
   warningText: { color: Colors.danger },
   profitText: { color: Colors.success },
   lossText: { color: Colors.danger },
@@ -2004,6 +2162,11 @@ const styles = StyleSheet.create({
   rankListValue: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  chartHintText: {
+    fontSize: 11,
+    marginTop: 8,
+    textAlign: 'right',
   },
   filterEntryRow: {
     paddingHorizontal: 12,
@@ -2124,11 +2287,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 18,
+    bottom: 92,
     borderRadius: Radius.md,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    zIndex: 20,
     ...Shadow.card,
   },
   floatingNameText: {
