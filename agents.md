@@ -224,7 +224,7 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql
+41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql -> 47. migrate-v6.6-inventory-log-completion.sql -> 48. migrate-v6.7-refund-reversal-backfill.sql
 
 **Upgrade v1->v2:**
 1. migrate-v2.sql -> 2-28 same as above
@@ -255,7 +255,7 @@ Before committing:
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
 - Latest mobile stabilization: 省份维度全链路升级完成（新增 ProvinceCityFilter、静态省市映射、省份管理排序）；商品/库存/订单/报表筛选统一省份→城市联动；店铺库存补齐省份筛选；移动端 3 个导出函数升级为样式化 xlsx 导出并修复报表导出链路稳定性
 - Latest store-management wave: Web 店铺定价管理与订单修改 UI、双端报表店铺维度均已完成并通过 admin 手工验收
-- Latest finance-report wave: v6.3/v6.4/v6.5 全链路收口（财务联动、损耗/采购/退款财务记录、自动现金余额、历史财务补录、滞销告警通知）；双端财务页与报表 5-tab 已完成并对齐
+- Latest finance-report wave: v6.3/v6.4/v6.5 全链路收口后，post-v6-polish 已继续补齐 v6.6/v6.7（主仓库存日志补全、退款净额冲减历史补录修正）；双端财务页与报表 5-tab 已完成并对齐
 - Latest migration hardening: `migrate-v6.4-financial-backfill.sql` 已修复 `max(uuid)` 兼容问题（改用 ARRAY_AGG uuid-safe 取值）并移除 `COMMIT` 后重复版本更新块
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
