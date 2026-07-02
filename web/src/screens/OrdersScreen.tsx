@@ -3,7 +3,7 @@ import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
-import type { City, OrderKind } from '../types';
+import type { City, OrderKind, PurchaseOrder } from '../types';
 import { getPaymentApiEndpoint } from '../lib/payment';
 import { resolvePrice } from '../utils/priceResolver';
 import { getProvinceForCity } from '../utils/provinceMapping';
@@ -69,9 +69,32 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
-  const { orders, products, user, acceptOrder, createBatchOrders, createSettlementOrder, confirmPurchaseDelivery, fetchOrderDetail, fetchOrders, deleteOrder, cities, stores, storeProductPrices, storeInventory, fetchStoreInventory, fetchStoreProductPrices, modifyDistributionOrder } = useAppStore();
+  const {
+    orders,
+    purchaseOrders,
+    products,
+    user,
+    acceptOrder,
+    createBatchOrders,
+    createSettlementOrder,
+    confirmPurchaseDelivery,
+    confirmPurchaseItemDelivery,
+    fetchOrderDetail,
+    fetchOrders,
+    fetchPurchaseOrders,
+    fetchUndeliveredItems,
+    deleteOrder,
+    deletePurchaseOrderV2,
+    cities,
+    stores,
+    storeProductPrices,
+    storeInventory,
+    fetchStoreInventory,
+    fetchStoreProductPrices,
+    modifyDistributionOrder,
+  } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
-  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin';
+  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'finance';
   const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
   const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
   const [filter, setFilter] = useState<OrderFilter>('all');
@@ -96,6 +119,19 @@ export const OrdersScreen: React.FC = () => {
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [refundingOrderId, setRefundingOrderId] = useState<string | null>(null);
   const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | 'all'>('all');
+  const [showUndeliveredOnly, setShowUndeliveredOnly] = useState(false);
+  const [undeliveredItems, setUndeliveredItems] = useState<Array<Awaited<ReturnType<typeof fetchUndeliveredItems>>[number]>>([]);
+  const [loadingUndeliveredItems, setLoadingUndeliveredItems] = useState(false);
+  const [submittingPurchaseConfirm, setSubmittingPurchaseConfirm] = useState(false);
+  const [purchaseConfirmPayload, setPurchaseConfirmPayload] = useState<{
+    purchaseOrderId: string;
+    itemId: string;
+    productName: string;
+    orderedQuantity: number;
+    deliveredQuantity: number;
+  } | null>(null);
+  const [purchaseDeleteTargetId, setPurchaseDeleteTargetId] = useState<string | null>(null);
+  const [deletingPurchaseOrderId, setDeletingPurchaseOrderId] = useState<string | null>(null);
   const [refundModalOrderId, setRefundModalOrderId] = useState<string | null>(null);
   const [refundSelectedItemIds, setRefundSelectedItemIds] = useState<Set<string>>(new Set());
   const [refundReasonInput, setRefundReasonInput] = useState('收银台退款');
@@ -111,7 +147,7 @@ export const OrdersScreen: React.FC = () => {
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.role === 'finance';
 
   const getOrderKindLabel = (kind: OrderKind): string => {
     if (kind === 'purchase') return '进货单';
@@ -123,6 +159,12 @@ export const OrdersScreen: React.FC = () => {
   const getOrderStatusLabel = (order: (typeof orders)[number]): string => {
     if (order.order_kind === 'purchase') return order.status === 'accepted' ? '已到货' : '待到货';
     return order.status === 'accepted' ? '已接单' : '待处理';
+  };
+
+  const getPurchaseStatusLabel = (status: PurchaseOrder['status']): string => {
+    if (status === 'delivered') return '已到货';
+    if (status === 'partially_delivered') return '部分到货';
+    return '待到货';
   };
 
   const baseOrders = useMemo(() => {
@@ -237,6 +279,33 @@ export const OrdersScreen: React.FC = () => {
     return result
       .filter((order) => matchesStatsRange(order.created_at));
   }, [baseOrders, matchesStatsRange, orderCityProvinceMap, refundViewFilter, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
+
+  const filteredPurchaseOrders = useMemo(() => {
+    let result = purchaseOrders;
+
+    if (filter === 'pending') {
+      result = result.filter((order) => order.status !== 'delivered');
+    } else if (filter === 'accepted') {
+      result = result.filter((order) => order.status === 'delivered');
+    }
+
+    if (selectedFilterProvinceId) {
+      result = result.filter((order) => {
+        const province = orderCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
+        return selectedFilterProvinceId === '未知省份' ? !province : province === selectedFilterProvinceId;
+      });
+    }
+
+    if (selectedFilterCityId) {
+      result = result.filter((order) => order.city_id === selectedFilterCityId);
+    }
+
+    if (selectedFilterStoreId) {
+      result = result.filter((order) => order.store_id === selectedFilterStoreId);
+    }
+
+    return result.filter((order) => matchesStatsRange(order.created_at));
+  }, [filter, matchesStatsRange, orderCityProvinceMap, purchaseOrders, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId]);
 
   const revenueOrders = useMemo(() => {
     return filteredOrders.filter((order) => {
@@ -443,6 +512,87 @@ export const OrdersScreen: React.FC = () => {
       }
     }));
   }, [fetchOrderDetail, filteredOrders]);
+  useEffect(() => {
+    void fetchPurchaseOrders();
+  }, [fetchPurchaseOrders]);
+
+  useEffect(() => {
+    if (selectedOrderKind !== 'purchase') return;
+    void fetchPurchaseOrders();
+  }, [fetchPurchaseOrders, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind, statsRange, rangeStartDate, rangeEndDate]);
+
+  useEffect(() => {
+    if (!showUndeliveredOnly || selectedOrderKind !== 'purchase') return;
+
+    setLoadingUndeliveredItems(true);
+    void fetchUndeliveredItems()
+      .then((rows) => {
+        setUndeliveredItems(rows);
+      })
+      .finally(() => {
+        setLoadingUndeliveredItems(false);
+      });
+  }, [fetchUndeliveredItems, selectedOrderKind, showUndeliveredOnly]);
+
+  useEffect(() => {
+    if (selectedOrderKind !== 'purchase') {
+      setShowUndeliveredOnly(false);
+      setUndeliveredItems([]);
+    }
+  }, [selectedOrderKind]);
+
+  const refreshUndeliveredItems = useCallback(async (): Promise<void> => {
+    setLoadingUndeliveredItems(true);
+    try {
+      const rows = await fetchUndeliveredItems();
+      setUndeliveredItems(rows);
+    } finally {
+      setLoadingUndeliveredItems(false);
+    }
+  }, [fetchUndeliveredItems]);
+
+  const handleConfirmPurchaseItemDelivery = useCallback(async (): Promise<void> => {
+    if (!purchaseConfirmPayload) return;
+
+    setSubmittingPurchaseConfirm(true);
+    const { error } = await confirmPurchaseItemDelivery(
+      purchaseConfirmPayload.purchaseOrderId,
+      purchaseConfirmPayload.itemId,
+      Number(purchaseConfirmPayload.deliveredQuantity),
+    );
+    setSubmittingPurchaseConfirm(false);
+
+    if (error) {
+      setPageNotice({ type: 'error', text: `确认到货失败：${error.message}` });
+      return;
+    }
+
+    setPurchaseConfirmPayload(null);
+    if (showUndeliveredOnly) {
+      await refreshUndeliveredItems();
+    }
+    setPageNotice({ type: 'success', text: '单品到货已确认' });
+  }, [confirmPurchaseItemDelivery, purchaseConfirmPayload, refreshUndeliveredItems, showUndeliveredOnly]);
+
+  const handleDeletePurchaseOrder = useCallback(async (): Promise<void> => {
+    if (!purchaseDeleteTargetId) return;
+
+    setDeletingPurchaseOrderId(purchaseDeleteTargetId);
+    const { error } = await deletePurchaseOrderV2(purchaseDeleteTargetId);
+    setDeletingPurchaseOrderId(null);
+
+    if (error) {
+      setPageNotice({ type: 'error', text: `删除进货单失败：${error.message}` });
+      return;
+    }
+
+    setPurchaseDeleteTargetId(null);
+    if (showUndeliveredOnly) {
+      await refreshUndeliveredItems();
+    }
+    setPageNotice({ type: 'success', text: '进货单已删除' });
+  }, [deletePurchaseOrderV2, purchaseDeleteTargetId, refreshUndeliveredItems, showUndeliveredOnly]);
+
   useEffect(() => {
     if (selectedStoreId) {
       void fetchStoreProductPrices(selectedStoreId);
@@ -1307,7 +1457,153 @@ export const OrdersScreen: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {filteredOrders.map((order, index) => (
+        {selectedOrderKind === 'purchase' ? (
+          <>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUndeliveredOnly((prev) => !prev);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${showUndeliveredOnly ? 'bg-amber-500/20 border-amber-400/40 text-amber-100' : 'bg-white/5 border-white/10 text-white/70'}`}
+                >
+                  {showUndeliveredOnly ? '返回全部进货单' : '筛选未到货'}
+                </button>
+                {showUndeliveredOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void refreshUndeliveredItems();
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-white/5 border-white/10 text-white/70"
+                  >
+                    刷新未到货列表
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-white/60">
+                {showUndeliveredOnly
+                  ? `未到货商品 ${undeliveredItems.length} 条`
+                  : `进货单 ${filteredPurchaseOrders.length} 条`}
+              </p>
+            </div>
+
+            {showUndeliveredOnly ? (
+              <div className="space-y-3">
+                {loadingUndeliveredItems ? (
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-sm text-white/60">正在加载未到货数据...</div>
+                ) : undeliveredItems.length === 0 ? (
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-sm text-white/60">暂无未到货商品</div>
+                ) : (
+                  undeliveredItems.map((row) => (
+                    <div key={`${row.purchase_order_id}-${row.item_id}`} className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold">{row.product_name}</p>
+                        <p className="text-xs text-white/60">已下单 {row.days_since_ordered} 天</p>
+                      </div>
+                      <p className="text-sm text-white/70">下单数量：{row.ordered_quantity}</p>
+                      <p className="text-sm text-white/70">配送店铺：{row.store_name}</p>
+                      <p className="text-sm text-white/70">到货地址：{row.store_address}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              filteredPurchaseOrders.map((purchaseOrder, index) => {
+                const pendingItems = (purchaseOrder.items || []).filter((item) => item.delivery_status !== 'delivered');
+                const canOperatePurchase = user?.role === 'admin' || user?.role === 'super_admin';
+
+                return (
+                  <motion.div
+                    key={purchaseOrder.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    className="group bg-white/5 border border-white/10 rounded-3xl p-6 hover:border-amber-400/30 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-4 mb-5">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h3 className="text-lg font-bold">进货单 #{purchaseOrder.id.slice(0, 8)}</h3>
+                          <span className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${purchaseOrder.status === 'delivered' ? 'text-green-300 bg-green-500/10 border-green-500/20' : purchaseOrder.status === 'partially_delivered' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : 'text-amber-300 bg-amber-500/10 border-amber-500/20'}`}>
+                            {getPurchaseStatusLabel(purchaseOrder.status)}
+                          </span>
+                        </div>
+                        <div className="text-xs text-white/50 flex flex-wrap gap-3">
+                          <span>城市：{purchaseOrder.city_name || '-'}</span>
+                          <span>店铺：{purchaseOrder.store_name || '-'}</span>
+                          <span>供应商：{purchaseOrder.supplier_name || '未绑定'}</span>
+                          <span>创建时间：{new Date(purchaseOrder.created_at).toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      {canOperatePurchase && (
+                        <button
+                          type="button"
+                          onClick={() => setPurchaseDeleteTargetId(purchaseOrder.id)}
+                          className="px-3 py-1.5 rounded-lg border border-red-400/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 text-xs font-bold inline-flex items-center gap-1"
+                        >
+                          <Trash2 size={14} />
+                          <span>删除进货单</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="border border-white/10 rounded-2xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-white/[0.03]">
+                          <tr>
+                            <th className="text-left px-4 py-3 text-white/50">商品</th>
+                            <th className="text-right px-4 py-3 text-white/50">下单数量</th>
+                            <th className="text-right px-4 py-3 text-white/50">到货数量</th>
+                            <th className="text-right px-4 py-3 text-white/50">状态</th>
+                            <th className="text-right px-4 py-3 text-white/50">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(purchaseOrder.items || []).map((item) => (
+                            <tr key={item.id} className="border-t border-white/5">
+                              <td className="px-4 py-3">{item.product_name || fallbackProductName}</td>
+                              <td className="px-4 py-3 text-right">{item.ordered_quantity}</td>
+                              <td className="px-4 py-3 text-right">{item.delivered_quantity}</td>
+                              <td className="px-4 py-3 text-right">{item.delivery_status === 'delivered' ? '已到货' : '待到货'}</td>
+                              <td className="px-4 py-3 text-right">
+                                {canOperatePurchase && item.delivery_status !== 'delivered' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPurchaseConfirmPayload({
+                                        purchaseOrderId: purchaseOrder.id,
+                                        itemId: item.id,
+                                        productName: item.product_name || fallbackProductName,
+                                        orderedQuantity: Number(item.ordered_quantity || 0),
+                                        deliveredQuantity: Number(item.ordered_quantity || 0),
+                                      });
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg border border-amber-400/30 bg-amber-500/20 text-amber-100 text-xs font-bold"
+                                  >
+                                    确认到货
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-white/40">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {pendingItems.length > 0 && (
+                      <p className="mt-3 text-xs text-amber-100/80">待到货商品：{pendingItems.length} 项</p>
+                    )}
+                  </motion.div>
+                );
+              })
+            )}
+          </>
+        ) : filteredOrders.map((order, index) => (
           (() => {
             const resolvedOrder = getResolvedOrder(order.id) || order;
             const itemKinds = resolvedOrder.items.length;
@@ -1463,6 +1759,95 @@ export const OrdersScreen: React.FC = () => {
           })()
         ))}
       </div>
+
+      {purchaseConfirmPayload && (
+        <div className="fixed inset-0 bg-black/70 z-[95] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">确认单品到货</h3>
+              <button
+                type="button"
+                onClick={() => setPurchaseConfirmPayload(null)}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/70">商品：{purchaseConfirmPayload.productName}</p>
+            <p className="text-xs text-white/50">下单数量：{purchaseConfirmPayload.orderedQuantity}（可输入大于下单数）</p>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={purchaseConfirmPayload.deliveredQuantity}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setPurchaseConfirmPayload((prev) => (prev ? {
+                  ...prev,
+                  deliveredQuantity: Number.isFinite(value) ? value : prev.deliveredQuantity,
+                } : prev));
+              }}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPurchaseConfirmPayload(null)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleConfirmPurchaseItemDelivery();
+                }}
+                disabled={submittingPurchaseConfirm || Number(purchaseConfirmPayload.deliveredQuantity || 0) <= 0}
+                className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
+              >
+                {submittingPurchaseConfirm ? '提交中...' : '确认到货'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {purchaseDeleteTargetId && (
+        <div className="fixed inset-0 bg-black/70 z-[94] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">确认删除进货单</h3>
+              <button
+                type="button"
+                onClick={() => setPurchaseDeleteTargetId(null)}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/60">确定删除进货单 #{purchaseDeleteTargetId.slice(0, 8)} 吗？已到货商品会按系统规则回退库存并清理关联采购流水。</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPurchaseDeleteTargetId(null)}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDeletePurchaseOrder();
+                }}
+                disabled={deletingPurchaseOrderId === purchaseDeleteTargetId}
+                className="px-4 py-2 rounded-xl border border-red-400/30 bg-red-500/20 text-red-100 font-semibold disabled:opacity-60"
+              >
+                {deletingPurchaseOrderId === purchaseDeleteTargetId ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateModal && canCreateOrder && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">

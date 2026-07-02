@@ -14,12 +14,28 @@ import {
 } from '../utils/permissions';
 
 type TransactionType = FinancialTransaction['transaction_type'];
+type RecurringFrequency = NonNullable<FinancialTransaction['recurring_frequency']>;
+
+const recurringFrequencyOptions: ReadonlyArray<{ value: RecurringFrequency; label: string }> = [
+  { value: 'monthly', label: '月度' },
+  { value: 'quarterly', label: '季度' },
+  { value: 'semiannual', label: '半年度' },
+  { value: 'annual', label: '年度' },
+];
+
+const recurringFrequencyLabelMap: Record<RecurringFrequency, string> = {
+  monthly: '月度',
+  quarterly: '季度',
+  semiannual: '半年度',
+  annual: '年度',
+};
 
 interface FinanceFormState {
   transaction_type: TransactionType;
   category: string;
   amount: string;
   transaction_date: string;
+  city_id: string;
   store_id: string;
   supplier_id: string;
   product_id: string;
@@ -27,6 +43,7 @@ interface FinanceFormState {
   channel_name: string;
   description: string;
   is_recurring: boolean;
+  recurring_frequency: RecurringFrequency;
 }
 
 interface PageNotice {
@@ -45,7 +62,7 @@ const formatCurrency = (value: number): string => `¥${value.toFixed(2)}`;
 const getToday = (): string => new Date().toISOString().slice(0, 10);
 
 export const FinanceScreen: React.FC = () => {
-  const { user, stores, products, fetchStores, fetchProducts } = useAppStore();
+  const { user, cities, stores, products, fetchCities, fetchStores, fetchProducts } = useAppStore();
   const { suppliers, fetchSuppliers } = useSupplierStore();
   const {
     transactions,
@@ -73,6 +90,7 @@ export const FinanceScreen: React.FC = () => {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [cityFilter, setCityFilter] = useState('all');
   const [storeFilter, setStoreFilter] = useState('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
@@ -84,6 +102,7 @@ export const FinanceScreen: React.FC = () => {
     category: '',
     amount: '',
     transaction_date: getToday(),
+    city_id: '',
     store_id: '',
     supplier_id: '',
     product_id: '',
@@ -91,11 +110,16 @@ export const FinanceScreen: React.FC = () => {
     channel_name: '',
     description: '',
     is_recurring: false,
+    recurring_frequency: 'monthly',
   });
 
   const storeNameMap = useMemo(() => {
     return new Map(stores.map((store) => [store.id, store.name]));
   }, [stores]);
+
+  const cityNameMap = useMemo(() => {
+    return new Map(cities.map((city) => [city.id, city.name]));
+  }, [cities]);
 
   const supplierNameMap = useMemo(() => {
     return new Map(suppliers.map((supplier) => [supplier.id, supplier.company_name]));
@@ -121,6 +145,7 @@ export const FinanceScreen: React.FC = () => {
       category: defaultCategory?.name || '',
       amount: '',
       transaction_date: getToday(),
+      city_id: '',
       store_id: '',
       supplier_id: '',
       product_id: '',
@@ -128,6 +153,7 @@ export const FinanceScreen: React.FC = () => {
       channel_name: '',
       description: '',
       is_recurring: false,
+      recurring_frequency: 'monthly',
     };
   };
 
@@ -148,13 +174,14 @@ export const FinanceScreen: React.FC = () => {
     void fetchTransactions();
     void fetchCategories();
     void fetchBalance();
+    void fetchCities();
     void fetchStores();
     void fetchProducts();
 
     if (canLoadSuppliers) {
       void fetchSuppliers();
     }
-  }, [canLoadSuppliers, canView, fetchBalance, fetchCategories, fetchProducts, fetchStores, fetchSuppliers, fetchTransactions]);
+  }, [canLoadSuppliers, canView, fetchBalance, fetchCategories, fetchCities, fetchProducts, fetchStores, fetchSuppliers, fetchTransactions]);
 
   useEffect(() => {
     if (isEditingInitialBalance) {
@@ -191,6 +218,14 @@ export const FinanceScreen: React.FC = () => {
     return storeNameMap.get(storeId) || `店铺 ${storeId.slice(0, 8)}`;
   };
 
+  const getCityLabel = (cityId?: string | null): string => {
+    if (!cityId) {
+      return '未关联城市';
+    }
+
+    return cityNameMap.get(cityId) || `城市 ${cityId.slice(0, 8)}`;
+  };
+
   const getSupplierLabel = (supplierId?: string | null): string => {
     if (!supplierId) {
       return '未关联供应商';
@@ -205,18 +240,20 @@ export const FinanceScreen: React.FC = () => {
     return transactions.filter((transaction) => {
       const matchesType = typeFilter === 'all' ? true : transaction.transaction_type === typeFilter;
       const matchesCategory = categoryFilter === 'all' ? true : transaction.category === categoryFilter;
+      const matchesCity = cityFilter === 'all' ? true : transaction.city_id === cityFilter;
       const matchesStore = storeFilter === 'all' ? true : transaction.store_id === storeFilter;
       const matchesStartDate = startDateFilter ? transaction.transaction_date >= startDateFilter : true;
       const matchesEndDate = endDateFilter ? transaction.transaction_date <= endDateFilter : true;
 
       if (!keyword) {
-        return matchesType && matchesCategory && matchesStore && matchesStartDate && matchesEndDate;
+        return matchesType && matchesCategory && matchesCity && matchesStore && matchesStartDate && matchesEndDate;
       }
 
       const searchText = [
         transaction.category,
         transaction.channel_name || '',
         transaction.description || '',
+        getCityLabel(transaction.city_id),
         getStoreLabel(transaction.store_id),
         getSupplierLabel(transaction.supplier_id),
       ]
@@ -225,6 +262,7 @@ export const FinanceScreen: React.FC = () => {
 
       return matchesType
         && matchesCategory
+        && matchesCity
         && matchesStore
         && matchesStartDate
         && matchesEndDate
@@ -232,7 +270,9 @@ export const FinanceScreen: React.FC = () => {
     });
   }, [
     categoryFilter,
+    cityFilter,
     endDateFilter,
+    getCityLabel,
     getStoreLabel,
     getSupplierLabel,
     keywordFilter,
@@ -245,6 +285,7 @@ export const FinanceScreen: React.FC = () => {
   const resetFilters = (): void => {
     setTypeFilter('all');
     setCategoryFilter('all');
+    setCityFilter('all');
     setStoreFilter('all');
     setStartDateFilter('');
     setEndDateFilter('');
@@ -278,6 +319,7 @@ export const FinanceScreen: React.FC = () => {
       category: transaction.category,
       amount: String(transaction.amount),
       transaction_date: transaction.transaction_date,
+      city_id: transaction.city_id || '',
       store_id: transaction.store_id || '',
       supplier_id: transaction.supplier_id || '',
       product_id: transaction.product_id || '',
@@ -285,6 +327,7 @@ export const FinanceScreen: React.FC = () => {
       channel_name: transaction.channel_name || '',
       description: transaction.description || '',
       is_recurring: transaction.is_recurring,
+      recurring_frequency: transaction.recurring_frequency || 'monthly',
     });
     setShowCreate(true);
   };
@@ -340,6 +383,7 @@ export const FinanceScreen: React.FC = () => {
       category: form.category,
       amount,
       transaction_date: form.transaction_date,
+      city_id: form.city_id || null,
       store_id: form.store_id || null,
       supplier_id: form.supplier_id || null,
       product_id: form.product_id || null,
@@ -347,6 +391,7 @@ export const FinanceScreen: React.FC = () => {
       channel_name: form.channel_name.trim() || null,
       description: form.description.trim() || null,
       is_recurring: form.is_recurring,
+      recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
     };
 
     if (editingTransactionId) {
@@ -575,6 +620,22 @@ export const FinanceScreen: React.FC = () => {
           </label>
 
           <label className="space-y-1 block">
+            <span className="text-xs font-bold text-white/40 uppercase tracking-wider">城市</span>
+            <select
+              value={cityFilter}
+              onChange={(event) => setCityFilter(event.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white"
+            >
+              <option value="all" className="bg-[#121217]">全部城市</option>
+              {cities.map((city) => (
+                <option key={city.id} value={city.id} className="bg-[#121217]">
+                  {city.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 block">
             <span className="text-xs font-bold text-white/40 uppercase tracking-wider">店铺</span>
             <select
               value={storeFilter}
@@ -663,7 +724,9 @@ export const FinanceScreen: React.FC = () => {
                       {transaction.category}
                     </span>
                     {transaction.is_recurring ? (
-                      <span className="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300">周期项</span>
+                      <span className="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300">
+                        周期项 · {recurringFrequencyLabelMap[transaction.recurring_frequency || 'monthly']}
+                      </span>
                     ) : null}
                     <span className="text-sm text-white/40">{transaction.transaction_date}</span>
                   </div>
@@ -679,13 +742,18 @@ export const FinanceScreen: React.FC = () => {
                     {isIncome ? '+' : '-'}{formatCurrency(transaction.amount)}
                   </div>
                   <p className="text-sm text-white/50">渠道：{transaction.channel_name || '未填写'}</p>
+                  <p className="text-sm text-white/50">城市：{transaction.city_name || getCityLabel(transaction.city_id)}</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5">
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-3">
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">关联店铺</p>
                   <p className="text-sm font-medium text-white/80 truncate">{getStoreLabel(transaction.store_id)}</p>
+                </div>
+                <div className="bg-white/5 border border-white/5 rounded-2xl p-3">
+                  <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">关联城市</p>
+                  <p className="text-sm font-medium text-white/80 truncate">{transaction.city_name || getCityLabel(transaction.city_id)}</p>
                 </div>
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-3">
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">关联供应商</p>
@@ -808,7 +876,15 @@ export const FinanceScreen: React.FC = () => {
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">关联店铺</span>
                 <select
                   value={form.store_id}
-                  onChange={(event) => setForm((prev) => ({ ...prev, store_id: event.target.value }))}
+                  onChange={(event) => {
+                    const nextStoreId = event.target.value;
+                    const nextStore = stores.find((store) => store.id === nextStoreId);
+                    setForm((prev) => ({
+                      ...prev,
+                      store_id: nextStoreId,
+                      city_id: nextStore ? nextStore.city_id : prev.city_id,
+                    }));
+                  }}
                   disabled={!canEdit}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60"
                 >
@@ -816,6 +892,23 @@ export const FinanceScreen: React.FC = () => {
                   {stores.map((store) => (
                     <option key={store.id} value={store.id} className="bg-[#121217]">
                       {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">关联城市</span>
+                <select
+                  value={form.city_id}
+                  onChange={(event) => setForm((prev) => ({ ...prev, city_id: event.target.value, store_id: prev.store_id }))}
+                  disabled={!canEdit}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60"
+                >
+                  <option value="" className="bg-[#121217]">不关联城市</option>
+                  {cities.map((city) => (
+                    <option key={city.id} value={city.id} className="bg-[#121217]">
+                      {city.name}
                     </option>
                   ))}
                 </select>
@@ -909,6 +1002,25 @@ export const FinanceScreen: React.FC = () => {
                   <p className="text-xs text-white/40 mt-1">用于标识工资、房租等重复发生的流水</p>
                 </div>
               </label>
+
+              {form.is_recurring ? (
+                <label className="md:col-span-2 space-y-2 block">
+                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">周期频次</span>
+                  <div className="flex flex-wrap gap-2">
+                    {recurringFrequencyOptions.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setForm((prev) => ({ ...prev, recurring_frequency: item.value }))}
+                        disabled={!canEdit}
+                        className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${form.recurring_frequency === item.value ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'} disabled:opacity-60`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </label>
+              ) : null}
             </div>
 
             <div className="flex justify-end gap-2">

@@ -38,7 +38,7 @@ export default function InventoryScreen() {
     updateInventorySettings,
     findProductByBarcode,
     inboundStock,
-    createPurchaseOrder,
+    createPurchaseOrderV2,
     user,
   } = useAppStore(
     useShallow((state) => ({
@@ -55,7 +55,7 @@ export default function InventoryScreen() {
       updateInventorySettings: state.updateInventorySettings,
       findProductByBarcode: state.findProductByBarcode,
       inboundStock: state.inboundStock,
-      createPurchaseOrder: state.createPurchaseOrder,
+      createPurchaseOrderV2: state.createPurchaseOrderV2,
       user: state.user,
     })),
   );
@@ -345,7 +345,7 @@ export default function InventoryScreen() {
     }
 
     setSubmittingPurchase(true);
-    const { error } = await createPurchaseOrder(groupedItems);
+    const { error } = await createPurchaseOrderV2(groupedItems);
     setSubmittingPurchase(false);
 
     if (error) {

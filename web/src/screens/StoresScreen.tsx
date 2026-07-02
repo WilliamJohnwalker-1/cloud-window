@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Store as StoreIcon, Plus, Edit2, PowerOff, RotateCcw, Trash2 } from 'lucide-react';
+import { Store as StoreIcon, Plus, Edit2, PowerOff, RotateCcw, Trash2, Copy, ChevronDown, ChevronUp, Check, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { useAppStore } from '../store/useAppStore';
@@ -7,6 +7,12 @@ import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { supabase } from '../lib/supabase';
 import type { Store } from '../types';
 import { getProvinceForCity } from '../utils/provinceMapping';
+
+const cooperationModeLabelMap: Record<'consignment' | 'buyout' | 'direct', string> = {
+  consignment: '寄售',
+  buyout: '买断',
+  direct: '直营',
+};
 
 export const StoresScreen: React.FC = () => {
   const { user, cities, stores, addStore, updateStore, deactivateStore, deleteStore } = useAppStore();
@@ -26,6 +32,9 @@ export const StoresScreen: React.FC = () => {
     actionLabel: string;
   } | null>(null);
   const [distributors, setDistributors] = useState<{ id: string; email: string }[]>([]);
+  const [expandedInvoiceByStore, setExpandedInvoiceByStore] = useState<Record<string, boolean>>({});
+  const [isEditorInvoiceExpanded, setIsEditorInvoiceExpanded] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   
   const [form, setForm] = useState({
     name: '',
@@ -40,7 +49,56 @@ export const StoresScreen: React.FC = () => {
     contract_expiry_date: '',
     grade: '' as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E',
     contract_file_url: '',
+    invoice_title: '',
+    tax_id: '',
+    bank_name: '',
+    bank_account: '',
   });
+
+  const buildInvoiceText = (store: Store): string => {
+    return [
+      `发票抬头：${store.invoice_title || '-'}`,
+      `纳税人识别号：${store.tax_id || '-'}`,
+      `开户行：${store.bank_name || '-'}`,
+      `账号：${store.bank_account || '-'}`,
+    ].join('\n');
+  };
+
+  const hasEditorInvoiceInfo = Boolean(form.invoice_title || form.tax_id || form.bank_name || form.bank_account);
+
+  const buildEditorInvoiceText = (): string => {
+    return [
+      `发票抬头：${form.invoice_title || '-'}`,
+      `纳税人识别号：${form.tax_id || '-'}`,
+      `开户行：${form.bank_name || '-'}`,
+      `账号：${form.bank_account || '-'}`,
+    ].join('\n');
+  };
+
+  const hasInvoiceInfo = (store: Store): boolean => {
+    return Boolean(store.invoice_title || store.tax_id || store.bank_name || store.bank_account);
+  };
+
+  const handleCopy = async (text: string, key: string): Promise<void> => {
+    if (!text.trim()) {
+      setPageNotice({ type: 'error', text: '无可复制内容' });
+      return;
+    }
+
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('当前浏览器不支持剪贴板 API');
+      }
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 1500);
+      setPageNotice({ type: 'success', text: '已复制到剪贴板' });
+    } catch (error) {
+      setPageNotice({ type: 'error', text: `复制失败：${error instanceof Error ? error.message : '未知错误'}` });
+    }
+  };
 
   useEffect(() => {
     if (isAdmin) {
@@ -97,6 +155,10 @@ export const StoresScreen: React.FC = () => {
       contract_expiry_date: form.contract_expiry_date || null,
       grade: (form.grade || null) as Store['grade'] | null,
       contract_file_url: form.contract_file_url || null,
+      invoice_title: form.invoice_title.trim() || null,
+      tax_id: form.tax_id.trim() || null,
+      bank_name: form.bank_name.trim() || null,
+      bank_account: form.bank_account.trim() || null,
     };
 
     const { error } = await addStore(payload);
@@ -105,7 +167,7 @@ export const StoresScreen: React.FC = () => {
       return;
     }
     setShowCreate(false);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '' });
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '', invoice_title: '', tax_id: '', bank_name: '', bank_account: '' });
     setPageNotice({ type: 'success', text: '新增店铺成功' });
   };
 
@@ -116,7 +178,8 @@ export const StoresScreen: React.FC = () => {
     }
 
     setEditingStoreId(null);
-    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '' });
+    setIsEditorInvoiceExpanded(false);
+    setForm({ name: '', city_id: '', distributor_id: '', discount_rate: '1', contact: '', address: '', phone: '', settlement_day: '', cooperation_mode: '', contract_expiry_date: '', grade: '', contract_file_url: '', invoice_title: '', tax_id: '', bank_name: '', bank_account: '' });
     setShowCreate(true);
   };
 
@@ -127,6 +190,7 @@ export const StoresScreen: React.FC = () => {
     if (!store) return;
 
     setEditingStoreId(store.id);
+    setIsEditorInvoiceExpanded(false);
     setForm({
       name: store.name,
       city_id: store.city_id,
@@ -140,6 +204,10 @@ export const StoresScreen: React.FC = () => {
       contract_expiry_date: store.contract_expiry_date || '',
       grade: store.grade || '',
       contract_file_url: store.contract_file_url || '',
+      invoice_title: store.invoice_title || '',
+      tax_id: store.tax_id || '',
+      bank_name: store.bank_name || '',
+      bank_account: store.bank_account || '',
     });
     setShowCreate(true);
   };
@@ -171,6 +239,10 @@ export const StoresScreen: React.FC = () => {
         contract_expiry_date: form.contract_expiry_date || null,
         grade: (form.grade || null) as Store['grade'] | null,
         contract_file_url: form.contract_file_url || null,
+        invoice_title: form.invoice_title.trim() || null,
+        tax_id: form.tax_id.trim() || null,
+        bank_name: form.bank_name.trim() || null,
+        bank_account: form.bank_account.trim() || null,
       };
 
       if (!payload.name || !payload.city_id) {
@@ -361,7 +433,9 @@ export const StoresScreen: React.FC = () => {
                 </div>
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">合作模式</p>
-                  <p className="text-sm font-medium text-white/80 truncate">{store.cooperation_mode || '-'}</p>
+                  <p className="text-sm font-medium text-white/80 truncate">
+                    {store.cooperation_mode ? cooperationModeLabelMap[store.cooperation_mode] : '-'}
+                  </p>
                 </div>
                 <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
                   <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">等级 / 合同到期</p>
@@ -371,6 +445,83 @@ export const StoresScreen: React.FC = () => {
                   <div className="bg-white/5 p-3 rounded-2xl border border-white/5 col-span-1 md:col-span-2">
                     <p className="text-[10px] text-white/40 uppercase font-bold tracking-tighter mb-1">合同文件</p>
                     <p className="text-sm font-medium text-accent truncate">{store.contract_file_url}</p>
+                  </div>
+                )}
+                {hasInvoiceInfo(store) && (
+                  <div className="bg-white/5 p-3 rounded-2xl border border-white/5 col-span-1 md:col-span-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedInvoiceByStore((prev) => ({
+                            ...prev,
+                            [store.id]: !prev[store.id],
+                          }));
+                        }}
+                        className="flex items-center gap-2 text-left"
+                      >
+                        <span className="text-[10px] text-white/40 uppercase font-bold tracking-tighter">开票信息</span>
+                        {expandedInvoiceByStore[store.id] ? <ChevronUp size={14} className="text-white/50" /> : <ChevronDown size={14} className="text-white/50" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleCopy(buildInvoiceText(store), `${store.id}:all`);
+                        }}
+                        className="inline-flex items-center gap-1 text-xs text-white/70 hover:text-white"
+                      >
+                        {copiedKey === `${store.id}:all` ? <Check size={14} /> : <Copy size={14} />}
+                        一键复制全部
+                      </button>
+                    </div>
+                    {expandedInvoiceByStore[store.id] && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                          <span className="truncate">发票抬头：{store.invoice_title || '-'}</span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCopy(store.invoice_title || '', `${store.id}:title`);
+                            }}
+                            className="text-white/70 hover:text-white"
+                            title="复制发票抬头"
+                          >
+                            {copiedKey === `${store.id}:title` ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                          <span className="truncate">纳税人识别号：{store.tax_id || '-'}</span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCopy(store.tax_id || '', `${store.id}:tax`);
+                            }}
+                            className="text-white/70 hover:text-white"
+                            title="复制纳税人识别号"
+                          >
+                            {copiedKey === `${store.id}:tax` ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                          <span className="truncate">开户行+账号：{store.bank_name || '-'} / {store.bank_account || '-'}</span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCopy(`${store.bank_name || '-'} / ${store.bank_account || '-'}`, `${store.id}:bank`);
+                            }}
+                            className="text-white/70 hover:text-white"
+                            title="复制开户行与账号"
+                          >
+                            {copiedKey === `${store.id}:bank` ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -439,9 +590,14 @@ export const StoresScreen: React.FC = () => {
       )}
 
       {showCreate && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
-            <h3 className="text-xl font-bold">{editingStoreId ? '编辑店铺' : '新增店铺'}</h3>
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <div className="sticky top-0 z-10 -mx-6 px-6 py-1 bg-[#121217] flex items-center justify-between">
+              <h3 className="text-xl font-bold">{editingStoreId ? '编辑店铺' : '新增店铺'}</h3>
+              <button type="button" onClick={() => setShowCreate(false)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">店铺名称</span>
@@ -501,9 +657,9 @@ export const StoresScreen: React.FC = () => {
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">合作模式</span>
                 <select value={form.cooperation_mode} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, cooperation_mode: event.target.value as '' | 'consignment' | 'buyout' | 'direct' }))} className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white disabled:opacity-60">
                   <option value="" className="bg-[#121217]">未设置</option>
-                  <option value="consignment" className="bg-[#121217]">consignment</option>
-                  <option value="buyout" className="bg-[#121217]">buyout</option>
-                  <option value="direct" className="bg-[#121217]">direct</option>
+                  <option value="consignment" className="bg-[#121217]">寄售</option>
+                  <option value="buyout" className="bg-[#121217]">买断</option>
+                  <option value="direct" className="bg-[#121217]">直营</option>
                 </select>
               </label>
               <label className="col-span-2 space-y-1 block">
@@ -530,6 +686,70 @@ export const StoresScreen: React.FC = () => {
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">合同文件链接</span>
                 <input value={form.contract_file_url} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, contract_file_url: event.target.value }))} placeholder="合同文件链接" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
               </label>
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">发票抬头</span>
+                <input value={form.invoice_title} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, invoice_title: event.target.value }))} placeholder="发票抬头" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="col-span-2 space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">纳税人识别号</span>
+                <input value={form.tax_id} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, tax_id: event.target.value }))} placeholder="纳税人识别号" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">开户银行</span>
+                <input value={form.bank_name} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, bank_name: event.target.value }))} placeholder="开户银行" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">银行账号</span>
+                <input value={form.bank_account} disabled={!isSuperAdmin} onChange={(event) => setForm((prev) => ({ ...prev, bank_account: event.target.value }))} placeholder="银行账号" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 disabled:opacity-60" />
+              </label>
+
+              {hasEditorInvoiceInfo && (
+                <div className="col-span-2 bg-white/5 p-3 rounded-2xl border border-white/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditorInvoiceExpanded((prev) => !prev)}
+                      className="flex items-center gap-2 text-left"
+                    >
+                      <span className="text-[10px] text-white/40 uppercase font-bold tracking-tighter">开票信息</span>
+                      {isEditorInvoiceExpanded ? <ChevronUp size={14} className="text-white/50" /> : <ChevronDown size={14} className="text-white/50" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCopy(buildEditorInvoiceText(), 'editor:all');
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-white/70 hover:text-white"
+                    >
+                      {copiedKey === 'editor:all' ? <Check size={14} /> : <Copy size={14} />}
+                      一键复制全部
+                    </button>
+                  </div>
+
+                  {isEditorInvoiceExpanded && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                        <span className="truncate">发票抬头：{form.invoice_title || '-'}</span>
+                        <button type="button" onClick={() => { void handleCopy(form.invoice_title || '', 'editor:title'); }} className="text-white/70 hover:text-white" title="复制发票抬头">
+                          {copiedKey === 'editor:title' ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                        <span className="truncate">纳税人识别号：{form.tax_id || '-'}</span>
+                        <button type="button" onClick={() => { void handleCopy(form.tax_id || '', 'editor:tax'); }} className="text-white/70 hover:text-white" title="复制纳税人识别号">
+                          {copiedKey === 'editor:tax' ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-sm text-white/80">
+                        <span className="truncate">开户行+账号：{form.bank_name || '-'} / {form.bank_account || '-'}</span>
+                        <button type="button" onClick={() => { void handleCopy(`${form.bank_name || '-'} / ${form.bank_account || '-'}`, 'editor:bank'); }} className="text-white/70 hover:text-white" title="复制开户行与账号">
+                          {copiedKey === 'editor:bank' ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl bg-white/5">取消</button>

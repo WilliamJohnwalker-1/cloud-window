@@ -57,20 +57,29 @@ type FinanceCategoryRelation = {
   type: 'income' | 'expense';
 }[] | null;
 
+type CityRelation = {
+  name?: string | null;
+} | {
+  name?: string | null;
+}[] | null;
+
 type FinancialTransactionRow = {
   id: string;
   transaction_type: 'income' | 'expense';
   amount: number | string;
   transaction_date: string;
   store_id: string | null;
+  city_id?: string | null;
   supplier_id: string | null;
   channel_name: string | null;
   description: string | null;
   is_recurring: boolean;
+  recurring_frequency?: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | null;
   created_by: string;
   created_at: string;
   updated_at: string;
   finance_categories?: FinanceCategoryRelation;
+  cities?: CityRelation;
 };
 
 type CashBalanceRow = {
@@ -96,8 +105,17 @@ function normalizeCategoryRelation(relation: FinanceCategoryRelation | undefined
   return Array.isArray(relation) ? relation[0] ?? null : relation;
 }
 
+function normalizeCityRelation(relation: CityRelation | undefined): { name?: string | null } | null {
+  if (!relation) {
+    return null;
+  }
+
+  return Array.isArray(relation) ? relation[0] ?? null : relation;
+}
+
 function mapTransaction(row: FinancialTransactionRow): FinancialTransaction {
   const category = normalizeCategoryRelation(row.finance_categories);
+  const city = normalizeCityRelation(row.cities);
 
   return {
     id: row.id,
@@ -106,14 +124,37 @@ function mapTransaction(row: FinancialTransactionRow): FinancialTransaction {
     amount: Number(row.amount || 0),
     transaction_date: row.transaction_date,
     store_id: row.store_id,
+    city_id: row.city_id ?? null,
+    city_name: city?.name ?? null,
     supplier_id: row.supplier_id,
     channel_name: row.channel_name,
     description: row.description,
     is_recurring: row.is_recurring,
+    recurring_frequency: row.recurring_frequency ?? null,
     created_by: row.created_by,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+const transactionSelectWithRecurring = 'id, transaction_type, amount, transaction_date, store_id, city_id, supplier_id, channel_name, description, is_recurring, recurring_frequency, created_by, created_at, updated_at, cities:city_id(name), finance_categories(id, name, type)';
+const transactionSelectWithoutRecurring = 'id, transaction_type, amount, transaction_date, store_id, city_id, supplier_id, channel_name, description, is_recurring, created_by, created_at, updated_at, cities:city_id(name), finance_categories(id, name, type)';
+
+function isMissingRecurringFrequencyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string; details?: string | null; hint?: string | null };
+  const code = maybeError.code || '';
+  const combinedMessage = `${maybeError.message || ''} ${maybeError.details || ''} ${maybeError.hint || ''}`.toLowerCase();
+
+  const missingColumn = combinedMessage.includes('recurring_frequency')
+    && (combinedMessage.includes('does not exist')
+      || combinedMessage.includes('could not find the')
+      || combinedMessage.includes('schema cache'));
+
+  return missingColumn || ((code === '42703' || code === 'PGRST204') && combinedMessage.includes('recurring_frequency'));
 }
 
 async function fetchFinanceCategoriesFromDb(): Promise<FinanceCategory[]> {
@@ -178,17 +219,33 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
   fetchTransactions: async () => {
     set({ isLoading: true, error: null });
     try {
-      const { data, error } = await supabase
+      const withRecurring = await supabase
         .from('financial_transactions')
-        .select('id, transaction_type, amount, transaction_date, store_id, supplier_id, channel_name, description, is_recurring, created_by, created_at, updated_at, finance_categories(id, name, type)')
+        .select(transactionSelectWithRecurring)
         .order('transaction_date', { ascending: false })
         .order('created_at', { ascending: false });
 
-      if (error) {
-        throw error;
+      if (withRecurring.error && isMissingRecurringFrequencyError(withRecurring.error)) {
+        const withoutRecurring = await supabase
+          .from('financial_transactions')
+          .select(transactionSelectWithoutRecurring)
+          .order('transaction_date', { ascending: false })
+          .order('created_at', { ascending: false });
+
+        if (withoutRecurring.error) {
+          throw withoutRecurring.error;
+        }
+
+        const fallbackTransactions = ((withoutRecurring.data || []) as FinancialTransactionRow[]).map(mapTransaction);
+        set({ transactions: fallbackTransactions });
+        return;
       }
 
-      const transactions = ((data || []) as FinancialTransactionRow[]).map(mapTransaction);
+      if (withRecurring.error) {
+        throw withRecurring.error;
+      }
+
+      const transactions = ((withRecurring.data || []) as FinancialTransactionRow[]).map(mapTransaction);
       set({ transactions });
     } catch (error) {
       const message = normalizeError(error, '获取财务流水失败').message;
@@ -234,21 +291,33 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
       const categoryId = await resolveCategoryId(input.transaction_type, input.category, get().categories);
 
-      const { error } = await supabase
+      const insertPayload = {
+        transaction_type: input.transaction_type,
+        category_id: categoryId,
+        amount: input.amount,
+        transaction_date: input.transaction_date,
+        store_id: input.store_id ?? null,
+        city_id: input.city_id ?? null,
+        supplier_id: input.supplier_id ?? null,
+        product_id: input.product_id ?? null,
+        channel_name: input.channel_name?.trim() || null,
+        description: input.description?.trim() || null,
+        is_recurring: input.is_recurring,
+        recurring_frequency: input.is_recurring ? (input.recurring_frequency || 'monthly') : null,
+        created_by: createdBy,
+      };
+
+      let { error } = await supabase
         .from('financial_transactions')
-        .insert({
-          transaction_type: input.transaction_type,
-          category_id: categoryId,
-          amount: input.amount,
-          transaction_date: input.transaction_date,
-          store_id: input.store_id ?? null,
-          supplier_id: input.supplier_id ?? null,
-          product_id: input.product_id ?? null,
-          channel_name: input.channel_name?.trim() || null,
-          description: input.description?.trim() || null,
-          is_recurring: input.is_recurring,
-          created_by: createdBy,
-        });
+        .insert(insertPayload);
+
+      if (error && isMissingRecurringFrequencyError(error)) {
+        const { recurring_frequency: _omitRecurringFrequency, ...legacyPayload } = insertPayload;
+        const retryResult = await supabase
+          .from('financial_transactions')
+          .insert(legacyPayload);
+        error = retryResult.error;
+      }
 
       if (error) {
         throw error;
@@ -323,6 +392,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         amount: input.amount ?? existingTransaction.amount,
         transaction_date: input.transaction_date ?? existingTransaction.transaction_date,
         store_id: input.store_id === undefined ? existingTransaction.store_id ?? null : input.store_id,
+        city_id: input.city_id === undefined ? existingTransaction.city_id ?? null : input.city_id,
         supplier_id: input.supplier_id === undefined ? existingTransaction.supplier_id ?? null : input.supplier_id,
         channel_name: input.channel_name === undefined
           ? existingTransaction.channel_name ?? null
@@ -331,12 +401,24 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
           ? existingTransaction.description ?? null
           : input.description?.trim() || null,
         is_recurring: input.is_recurring ?? existingTransaction.is_recurring,
+        recurring_frequency: (input.is_recurring ?? existingTransaction.is_recurring)
+          ? (input.recurring_frequency ?? existingTransaction.recurring_frequency ?? 'monthly')
+          : null,
       };
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('financial_transactions')
         .update(payload)
         .eq('id', id);
+
+      if (error && isMissingRecurringFrequencyError(error)) {
+        const { recurring_frequency: _omitRecurringFrequency, ...legacyPayload } = payload;
+        const retryResult = await supabase
+          .from('financial_transactions')
+          .update(legacyPayload)
+          .eq('id', id);
+        error = retryResult.error;
+      }
 
       if (error) {
         throw error;

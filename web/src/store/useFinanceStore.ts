@@ -30,14 +30,17 @@ interface FinancialTransactionRow {
   amount: number | string | null;
   transaction_date: string;
   store_id?: string | null;
+  city_id?: string | null;
   supplier_id?: string | null;
   channel_name?: string | null;
   description?: string | null;
   is_recurring?: boolean | null;
+  recurring_frequency?: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | null;
   created_by: string;
   created_at: string;
   updated_at: string;
   finance_categories?: FinanceCategoryRelation | FinanceCategoryRelation[] | null;
+  cities?: { name?: string | null } | Array<{ name?: string | null }> | null;
 }
 
 interface CashBalanceRow {
@@ -96,6 +99,7 @@ const mapCategory = (row: FinanceCategoryOption): FinanceCategoryOption => ({
 
 const mapTransaction = (row: FinancialTransactionRow): FinancialTransaction => {
   const category = pickFirstRelation(row.finance_categories);
+  const city = pickFirstRelation(row.cities);
 
   return {
     id: row.id,
@@ -104,14 +108,82 @@ const mapTransaction = (row: FinancialTransactionRow): FinancialTransaction => {
     amount: Number(row.amount || 0),
     transaction_date: row.transaction_date,
     store_id: row.store_id ?? null,
+    city_id: row.city_id ?? null,
+    city_name: city?.name ?? null,
     supplier_id: row.supplier_id ?? null,
     channel_name: row.channel_name ?? null,
     description: row.description ?? null,
     is_recurring: Boolean(row.is_recurring),
+    recurring_frequency: row.recurring_frequency ?? null,
     created_by: row.created_by,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+};
+
+const transactionSelectWithRecurring = `
+  id,
+  transaction_type,
+  amount,
+  transaction_date,
+  store_id,
+  city_id,
+  supplier_id,
+  channel_name,
+  description,
+  is_recurring,
+  recurring_frequency,
+  created_by,
+  created_at,
+  updated_at,
+  cities:city_id(
+    name
+  ),
+  finance_categories:category_id(
+    id,
+    name,
+    type
+  )
+`;
+
+const transactionSelectWithoutRecurring = `
+  id,
+  transaction_type,
+  amount,
+  transaction_date,
+  store_id,
+  city_id,
+  supplier_id,
+  channel_name,
+  description,
+  is_recurring,
+  created_by,
+  created_at,
+  updated_at,
+  cities:city_id(
+    name
+  ),
+  finance_categories:category_id(
+    id,
+    name,
+    type
+  )
+`;
+
+const isMissingRecurringFrequencyError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string; details?: string | null; hint?: string | null };
+  const code = maybeError.code || '';
+  const combinedMessage = `${maybeError.message || ''} ${maybeError.details || ''} ${maybeError.hint || ''}`.toLowerCase();
+  const missingColumn = combinedMessage.includes('recurring_frequency')
+    && (combinedMessage.includes('does not exist')
+      || combinedMessage.includes('could not find the')
+      || combinedMessage.includes('schema cache'));
+
+  return missingColumn || ((code === '42703' || code === 'PGRST204') && combinedMessage.includes('recurring_frequency'));
 };
 
 const loadCategories = async (): Promise<FinanceCategoryOption[]> => {
@@ -153,35 +225,32 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
   fetchTransactions: async () => {
     set({ isLoading: true, error: null });
     try {
-      const { data, error } = await supabase
+      const withRecurring = await supabase
         .from('financial_transactions')
-        .select(`
-          id,
-          transaction_type,
-          amount,
-          transaction_date,
-          store_id,
-          supplier_id,
-          channel_name,
-          description,
-          is_recurring,
-          created_by,
-          created_at,
-          updated_at,
-          finance_categories:category_id(
-            id,
-            name,
-            type
-          )
-        `)
+        .select(transactionSelectWithRecurring)
         .order('transaction_date', { ascending: false })
         .order('created_at', { ascending: false });
 
-      if (error) {
-        throw error;
+      if (withRecurring.error && isMissingRecurringFrequencyError(withRecurring.error)) {
+        const withoutRecurring = await supabase
+          .from('financial_transactions')
+          .select(transactionSelectWithoutRecurring)
+          .order('transaction_date', { ascending: false })
+          .order('created_at', { ascending: false });
+
+        if (withoutRecurring.error) {
+          throw withoutRecurring.error;
+        }
+
+        set({ transactions: ((withoutRecurring.data || []) as FinancialTransactionRow[]).map(mapTransaction) });
+        return;
       }
 
-      set({ transactions: ((data || []) as FinancialTransactionRow[]).map(mapTransaction) });
+      if (withRecurring.error) {
+        throw withRecurring.error;
+      }
+
+      set({ transactions: ((withRecurring.data || []) as FinancialTransactionRow[]).map(mapTransaction) });
     } catch (error) {
       set({ transactions: [], error: (error as Error).message });
     } finally {
@@ -236,19 +305,29 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         get().categories,
       );
 
-      const { error } = await supabase.from('financial_transactions').insert({
+      const insertPayload = {
         transaction_type: transaction.transaction_type,
         category_id: categoryId,
         amount: normalizeAmount(Number(transaction.amount)),
         transaction_date: transaction.transaction_date,
         store_id: transaction.store_id ?? null,
+        city_id: transaction.city_id ?? null,
         supplier_id: transaction.supplier_id ?? null,
         product_id: transaction.product_id ?? null,
         channel_name: normalizeText(transaction.channel_name),
         description: normalizeText(transaction.description),
         is_recurring: Boolean(transaction.is_recurring),
+        recurring_frequency: transaction.is_recurring ? (transaction.recurring_frequency || 'monthly') : null,
         created_by: transaction.created_by,
-      });
+      };
+
+      let { error } = await supabase.from('financial_transactions').insert(insertPayload);
+
+      if (error && isMissingRecurringFrequencyError(error)) {
+        const { recurring_frequency: _omitRecurringFrequency, ...legacyPayload } = insertPayload;
+        const retryResult = await supabase.from('financial_transactions').insert(legacyPayload);
+        error = retryResult.error;
+      }
 
       if (error) {
         throw error;
@@ -351,6 +430,10 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         payload.store_id = transaction.store_id ?? null;
       }
 
+      if (transaction.city_id !== undefined) {
+        payload.city_id = transaction.city_id ?? null;
+      }
+
       if (transaction.supplier_id !== undefined) {
         payload.supplier_id = transaction.supplier_id ?? null;
       }
@@ -367,14 +450,30 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
         payload.is_recurring = Boolean(transaction.is_recurring);
       }
 
+      if (transaction.recurring_frequency !== undefined || transaction.is_recurring !== undefined) {
+        const nextRecurring = transaction.is_recurring ?? currentTransaction?.is_recurring ?? false;
+        payload.recurring_frequency = nextRecurring
+          ? (transaction.recurring_frequency ?? currentTransaction?.recurring_frequency ?? 'monthly')
+          : null;
+      }
+
       if (Object.keys(payload).length === 0) {
         return { error: null };
       }
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('financial_transactions')
         .update(payload)
         .eq('id', id);
+
+      if (error && isMissingRecurringFrequencyError(error)) {
+        const { recurring_frequency: _omitRecurringFrequency, ...legacyPayload } = payload;
+        const retryResult = await supabase
+          .from('financial_transactions')
+          .update(legacyPayload)
+          .eq('id', id);
+        error = retryResult.error;
+      }
 
       if (error) {
         throw error;

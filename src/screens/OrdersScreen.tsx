@@ -22,7 +22,7 @@ import Toast from 'react-native-toast-message';
 import { useAppStore } from '../store/useAppStore';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
-import type { City, Order, OrderKind, ProductWithDetails } from '../types';
+import type { City, Order, OrderKind, ProductWithDetails, PurchaseOrder } from '../types';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import { resolvePrice } from '../utils/priceResolver';
 
@@ -41,12 +41,14 @@ export default function OrdersScreen() {
     user,
     products,
     orders,
+    purchaseOrders,
     distributors,
     stores,
     storeInventory,
     storeProductPrices,
     fetchProducts,
     fetchOrders,
+    fetchPurchaseOrders,
     fetchDistributors,
     fetchStores,
     fetchStoreInventory,
@@ -55,7 +57,9 @@ export default function OrdersScreen() {
     createBatchOrders,
     deleteOrder,
     acceptOrder,
-    confirmPurchaseDelivery,
+    confirmPurchaseItemDelivery,
+    fetchUndeliveredItems,
+    deletePurchaseOrderV2,
     findProductByBarcode,
     outboundStock,
   } = useAppStore();
@@ -69,6 +73,27 @@ export default function OrdersScreen() {
   const [selectedOrderProvinceId, setSelectedOrderProvinceId] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [confirmingPurchaseOrderId, setConfirmingPurchaseOrderId] = useState<string | null>(null);
+  const [showUndeliveredOnly, setShowUndeliveredOnly] = useState(false);
+  const [undeliveredItems, setUndeliveredItems] = useState<Array<{
+    item_id: string;
+    purchase_order_id: string;
+    product_name: string;
+    ordered_quantity: number;
+    store_name: string;
+    store_address: string;
+    days_since_ordered: number;
+  }>>([]);
+  const [loadingUndeliveredItems, setLoadingUndeliveredItems] = useState(false);
+  const [purchaseConfirmPayload, setPurchaseConfirmPayload] = useState<{
+    purchaseOrderId: string;
+    itemId: string;
+    productName: string;
+    orderedQuantity: number;
+    deliveredQuantityInput: string;
+  } | null>(null);
+  const [submittingPurchaseConfirm, setSubmittingPurchaseConfirm] = useState(false);
+  const [purchaseDeleteTargetId, setPurchaseDeleteTargetId] = useState<string | null>(null);
+  const [deletingPurchaseOrderId, setDeletingPurchaseOrderId] = useState<string | null>(null);
   const [selectedOrderStoreId, setSelectedOrderStoreId] = useState<string | null>(null);
   const [selectedOrderKind, setSelectedOrderKind] = useState<OrderKind | null>(null);
   const [statsRange, setStatsRange] = useState<StatsRange>('month');
@@ -104,8 +129,8 @@ export default function OrdersScreen() {
   const animatedOpacity = useRef(new Animated.Value(0)).current;
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const isAdminOrManager = isAdmin || user?.role === 'inventory_manager';
-  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdminOrManager = isAdmin || user?.role === 'inventory_manager' || user?.role === 'finance';
+  const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'finance';
   const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
   const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
@@ -132,10 +157,34 @@ export default function OrdersScreen() {
 
   useEffect(() => {
     fetchOrders();
+    fetchPurchaseOrders();
     fetchProducts();
     fetchDistributors();
     fetchStores();
-  }, [fetchDistributors, fetchOrders, fetchProducts, fetchStores]);
+  }, [fetchDistributors, fetchOrders, fetchProducts, fetchPurchaseOrders, fetchStores]);
+
+  useEffect(() => {
+    if (selectedOrderKind !== 'purchase') {
+      setShowUndeliveredOnly(false);
+      setUndeliveredItems([]);
+      return;
+    }
+
+    fetchPurchaseOrders();
+  }, [fetchPurchaseOrders, selectedOrderKind]);
+
+  useEffect(() => {
+    if (!showUndeliveredOnly || selectedOrderKind !== 'purchase') return;
+
+    const loadUndelivered = async () => {
+      setLoadingUndeliveredItems(true);
+      const rows = await fetchUndeliveredItems();
+      setUndeliveredItems(rows);
+      setLoadingUndeliveredItems(false);
+    };
+
+    loadUndelivered();
+  }, [fetchUndeliveredItems, selectedOrderKind, showUndeliveredOnly]);
 
   useEffect(() => {
     if (orderModalStoreId) {
@@ -152,7 +201,11 @@ export default function OrdersScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchOrders(), fetchProducts(), fetchDistributors(), fetchStores()]);
+    await Promise.all([fetchOrders(), fetchPurchaseOrders(), fetchProducts(), fetchDistributors(), fetchStores()]);
+    if (showUndeliveredOnly && selectedOrderKind === 'purchase') {
+      const rows = await fetchUndeliveredItems();
+      setUndeliveredItems(rows);
+    }
     setRefreshing(false);
   };
 
@@ -283,14 +336,37 @@ export default function OrdersScreen() {
         list = list.filter((o) => o.store_id === selectedOrderStoreId);
       }
     }
+    if (selectedOrderKind === 'purchase') {
+      return [];
+    }
     if (selectedOrderKind) {
       list = list.filter((o) => o.order_kind === selectedOrderKind);
     }
     return list;
   }, [orders, isAdminOrManager, orderFilterCities, selectedOrderCityId, selectedOrderProvinceId, selectedOrderStoreId, selectedOrderKind]);
 
-  const matchesStatsRange = useCallback((order: Order): boolean => {
-    const date = new Date(order.created_at);
+  const filteredPurchaseOrders = useMemo(() => {
+    let list = [...purchaseOrders];
+    if (isAdminOrManager) {
+      if (selectedOrderProvinceId) {
+        list = list.filter((o) => {
+          const city = orderFilterCities.find((item) => item.id === o.city_id);
+          const province = city?.province || getProvinceForCity(city?.name || o.city_name || '');
+          return selectedOrderProvinceId === '未知省份' ? !province : province === selectedOrderProvinceId;
+        });
+      }
+      if (selectedOrderCityId) {
+        list = list.filter((o) => o.city_id === selectedOrderCityId);
+      }
+      if (selectedOrderStoreId) {
+        list = list.filter((o) => o.store_id === selectedOrderStoreId);
+      }
+    }
+    return list;
+  }, [isAdminOrManager, orderFilterCities, purchaseOrders, selectedOrderCityId, selectedOrderProvinceId, selectedOrderStoreId]);
+
+  const matchesStatsRange = useCallback((createdAt: string): boolean => {
+    const date = new Date(createdAt);
     const now = new Date();
 
     if (statsRange === 'all') return true;
@@ -332,7 +408,7 @@ export default function OrdersScreen() {
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const rangedOrders = useMemo(() => {
-    return baseOrders.filter(matchesStatsRange);
+    return baseOrders.filter((order) => matchesStatsRange(order.created_at));
   }, [baseOrders, matchesStatsRange]);
 
   const filteredOrders = useMemo(() => {
@@ -347,6 +423,23 @@ export default function OrdersScreen() {
     }
     return list;
   }, [rangedOrders, searchText]);
+
+  const rangedPurchaseOrders = useMemo(() => {
+    return filteredPurchaseOrders.filter((order) => matchesStatsRange(order.created_at));
+  }, [filteredPurchaseOrders, matchesStatsRange]);
+
+  const displayPurchaseOrders = useMemo(() => {
+    let list = [...rangedPurchaseOrders];
+    if (searchText.trim()) {
+      const lowerSearch = searchText.toLowerCase().trim();
+      list = list.filter((o) => {
+        const shortId = o.id.slice(0, 8).toLowerCase();
+        const storeName = (o.store_name || '').toLowerCase();
+        return shortId.includes(lowerSearch) || storeName.includes(lowerSearch);
+      });
+    }
+    return list;
+  }, [rangedPurchaseOrders, searchText]);
 
   const monthlyProductStats = useMemo(() => {
     const map = new Map<string, { name: string; quantity: number }>();
@@ -604,18 +697,64 @@ export default function OrdersScreen() {
     ]);
   };
 
-  const handleConfirmPurchaseDelivery = async (order: Order) => {
-    setConfirmingPurchaseOrderId(order.id);
-    const { error } = await confirmPurchaseDelivery(order.id);
+  const refreshUndeliveredItems = useCallback(async (): Promise<void> => {
+    setLoadingUndeliveredItems(true);
+    const rows = await fetchUndeliveredItems();
+    setUndeliveredItems(rows);
+    setLoadingUndeliveredItems(false);
+  }, [fetchUndeliveredItems]);
+
+  const handleConfirmPurchaseItemDelivery = useCallback(async (): Promise<void> => {
+    if (!purchaseConfirmPayload) return;
+
+    const deliveredQuantity = Number.parseInt(purchaseConfirmPayload.deliveredQuantityInput || '', 10);
+    if (Number.isNaN(deliveredQuantity) || deliveredQuantity <= 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效到货数量' });
+      return;
+    }
+
+    setSubmittingPurchaseConfirm(true);
+    setConfirmingPurchaseOrderId(purchaseConfirmPayload.purchaseOrderId);
+    const { error } = await confirmPurchaseItemDelivery(
+      purchaseConfirmPayload.purchaseOrderId,
+      purchaseConfirmPayload.itemId,
+      deliveredQuantity,
+    );
     setConfirmingPurchaseOrderId(null);
+    setSubmittingPurchaseConfirm(false);
 
     if (error) {
       Toast.show({ type: 'error', text1: '确认到货失败', text2: error.message });
       return;
     }
 
-    Toast.show({ type: 'success', text1: '成功', text2: '进货单已确认到货' });
-  };
+    setPurchaseConfirmPayload(null);
+    await fetchPurchaseOrders();
+    if (showUndeliveredOnly) {
+      await refreshUndeliveredItems();
+    }
+    Toast.show({ type: 'success', text1: '成功', text2: '单品到货已确认' });
+  }, [confirmPurchaseItemDelivery, fetchPurchaseOrders, purchaseConfirmPayload, refreshUndeliveredItems, showUndeliveredOnly]);
+
+  const handleDeletePurchaseOrder = useCallback(async (): Promise<void> => {
+    if (!purchaseDeleteTargetId) return;
+
+    setDeletingPurchaseOrderId(purchaseDeleteTargetId);
+    const { error } = await deletePurchaseOrderV2(purchaseDeleteTargetId);
+    setDeletingPurchaseOrderId(null);
+
+    if (error) {
+      Toast.show({ type: 'error', text1: '删除失败', text2: error.message });
+      return;
+    }
+
+    setPurchaseDeleteTargetId(null);
+    await fetchPurchaseOrders();
+    if (showUndeliveredOnly) {
+      await refreshUndeliveredItems();
+    }
+    Toast.show({ type: 'success', text1: '成功', text2: '进货单已删除' });
+  }, [deletePurchaseOrderV2, fetchPurchaseOrders, purchaseDeleteTargetId, refreshUndeliveredItems, showUndeliveredOnly]);
 
   const handleOutboundBarcodeLookup = (rawCode?: string) => {
     const normalized = (rawCode ?? outboundBarcode).replace(/\D/g, '').slice(0, 13);
@@ -876,11 +1015,25 @@ export default function OrdersScreen() {
     }
   };
 
-  const summaryOrders = selectedOrderKind === 'purchase'
-    ? filteredOrders
-    : filteredOrders.filter((order) => order.order_kind !== 'purchase');
-  const totalRetail = summaryOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
-  const totalDiscount = summaryOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
+  const purchaseTotals = useMemo(() => {
+    return displayPurchaseOrders.reduce((acc, order) => {
+      order.items?.forEach((item) => {
+        const orderedQty = Number(item.ordered_quantity || 0);
+        const unitCost = Number(item.unit_cost || 0);
+        const lineTotal = orderedQty * unitCost;
+        acc.total += lineTotal;
+      });
+      return acc;
+    }, { total: 0 });
+  }, [displayPurchaseOrders]);
+
+  const summaryOrders = filteredOrders.filter((order) => order.order_kind !== 'purchase');
+  const totalRetail = selectedOrderKind === 'purchase'
+    ? purchaseTotals.total
+    : summaryOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
+  const totalDiscount = selectedOrderKind === 'purchase'
+    ? purchaseTotals.total
+    : summaryOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
   const summaryRetailLabel = selectedOrderKind === 'purchase' ? '进货成本' : '零售总价';
   const summaryDiscountLabel = selectedOrderKind === 'purchase' ? '进货总价' : '折扣总价';
 
@@ -945,20 +1098,6 @@ export default function OrdersScreen() {
             <Text style={styles.acceptOrderButtonText}>接单</Text>
           </TouchableOpacity>
         )}
-        {canConfirmPurchase && item.status === 'pending' && item.order_kind === 'purchase' && (
-          <TouchableOpacity
-            style={[styles.acceptOrderButton, confirmingPurchaseOrderId === item.id && styles.deleteOrderButtonDisabled]}
-            onPress={() => handleConfirmPurchaseDelivery(item)}
-            disabled={confirmingPurchaseOrderId === item.id}
-          >
-            <Text style={styles.acceptOrderButtonText}>{confirmingPurchaseOrderId === item.id ? '确认中...' : '确认到货'}</Text>
-          </TouchableOpacity>
-        )}
-        {item.status === 'pending' && item.order_kind === 'purchase' && !canConfirmPurchase && (
-          <View style={styles.pendingTag}>
-            <Text style={styles.pendingTagText}>待到货</Text>
-          </View>
-        )}
         {item.status === 'accepted' && (
           <View style={styles.acceptedTag}>
             <Text style={styles.acceptedTagText}>{item.order_kind === 'purchase' ? '已到货' : '已接单'}</Text>
@@ -989,6 +1128,78 @@ export default function OrdersScreen() {
       </View>
     </View>
   );
+
+  const renderPurchaseOrder = ({ item }: { item: PurchaseOrder }) => {
+    const pendingItems = (item.items || []).filter((purchaseItem) => purchaseItem.delivery_status !== 'delivered');
+
+    return (
+      <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
+        <View style={styles.orderHeader}>
+          <View>
+            <Text style={[styles.orderId, { color: theme.textPrimary }]}>进货单 #{item.id.slice(0, 8)}</Text>
+            <Text style={[styles.orderKindTag, { color: theme.blue }]}>{item.status === 'delivered' ? '已到货' : item.status === 'partially_delivered' ? '部分到货' : '待到货'}</Text>
+          </View>
+          <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+        </View>
+
+        <View style={styles.orderMetaContainer}>
+          <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+          <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>配送店铺: {item.store_name || '未指定'}</Text>
+        </View>
+        <View style={styles.orderMetaContainer}>
+          <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+          <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>供应商: {item.supplier_name || '未绑定'}</Text>
+        </View>
+
+        <View style={styles.orderItemsSummary}>
+          <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
+            共 {(item.items || []).length} 种商品，待到货 {pendingItems.length} 项
+          </Text>
+        </View>
+
+        {(item.items || []).map((purchaseItem) => (
+          <View key={purchaseItem.id} style={[styles.detailItemRow, { borderBottomColor: theme.divider }]}> 
+            <Text style={[styles.detailItemName, { color: theme.textPrimary }]} numberOfLines={1}>
+              {purchaseItem.product_name || '未知商品'}
+            </Text>
+            <Text style={[styles.detailItemQty, { color: theme.textSecondary }]}>
+              {purchaseItem.delivered_quantity}/{purchaseItem.ordered_quantity}
+            </Text>
+            {canConfirmPurchase && purchaseItem.delivery_status !== 'delivered' ? (
+              <TouchableOpacity
+                style={styles.exportButton}
+                onPress={() => {
+                  setPurchaseConfirmPayload({
+                    purchaseOrderId: item.id,
+                    itemId: purchaseItem.id,
+                    productName: purchaseItem.product_name || '未知商品',
+                    orderedQuantity: Number(purchaseItem.ordered_quantity || 0),
+                    deliveredQuantityInput: String(Number(purchaseItem.ordered_quantity || 0)),
+                  });
+                }}
+              >
+                <Text style={styles.exportButtonText}>确认到货</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.detailItemPrice}>{purchaseItem.delivery_status === 'delivered' ? '已到货' : '待到货'}</Text>
+            )}
+          </View>
+        ))}
+
+        <View style={styles.orderActions}>
+          {(isAdmin || user?.role === 'super_admin') && (
+            <TouchableOpacity
+              style={[styles.deleteOrderButton, deletingPurchaseOrderId === item.id && styles.deleteOrderButtonDisabled]}
+              onPress={() => setPurchaseDeleteTargetId(item.id)}
+              disabled={deletingPurchaseOrderId === item.id}
+            >
+              <Text style={styles.deleteOrderButtonText}>删除进货单</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
 
   const renderProductRow = ({ item }: { item: ProductWithDetails }) => {
     const saleKey = getCartKey(item.id, 'sale');
@@ -1166,7 +1377,7 @@ export default function OrdersScreen() {
 
       <View style={[styles.summary, { backgroundColor: theme.surface }]}> 
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryValue}>{filteredOrders.length}</Text>
+          <Text style={styles.summaryValue}>{selectedOrderKind === 'purchase' ? displayPurchaseOrders.length : filteredOrders.length}</Text>
           <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>订单数</Text>
         </View>
         <View style={styles.summaryItem}>
@@ -1330,19 +1541,156 @@ export default function OrdersScreen() {
         </View>
       )}
 
-      <FlatList
-        data={filteredOrders}
-        keyExtractor={(item) => item.id}
-        renderItem={renderOrder}
-        contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
-            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无订单记录</Text>
+      {selectedOrderKind === 'purchase' ? (
+        <>
+          <View style={[styles.activeFiltersWrap, { marginTop: -6 }]}> 
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
+              <TouchableOpacity
+                style={[styles.activeFilterChip, { backgroundColor: showUndeliveredOnly ? Colors.warningBg : theme.surfaceSecondary }]}
+                onPress={() => setShowUndeliveredOnly((prev) => !prev)}
+              >
+                <Text style={[styles.activeFilterChipText, { color: showUndeliveredOnly ? Colors.warning : theme.textSecondary }]}> 
+                  {showUndeliveredOnly ? '返回全部进货单' : '筛选未到货'}
+                </Text>
+              </TouchableOpacity>
+              {showUndeliveredOnly && (
+                <TouchableOpacity
+                  style={[styles.activeFilterChip, { backgroundColor: theme.surfaceSecondary }]}
+                  onPress={() => {
+                    refreshUndeliveredItems();
+                  }}
+                >
+                  <Text style={[styles.activeFilterChipText, { color: theme.textSecondary }]}>刷新未到货列表</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
           </View>
-        }
-      />
+
+          {showUndeliveredOnly ? (
+            <FlatList
+              data={undeliveredItems}
+              keyExtractor={(item) => `${item.purchase_order_id}-${item.item_id}`}
+              contentContainerStyle={styles.list}
+              refreshControl={<RefreshControl refreshing={refreshing || loadingUndeliveredItems} onRefresh={onRefresh} tintColor={Colors.pink} />}
+              renderItem={({ item }) => (
+                <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
+                  <Text style={[styles.orderId, { color: theme.textPrimary }]}>{item.product_name}</Text>
+                  <Text style={[styles.orderMeta, { color: theme.textSecondary, marginTop: 6 }]}>下单数量：{item.ordered_quantity}</Text>
+                  <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>配送店铺：{item.store_name || '未指定'}</Text>
+                  <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>到货地址：{item.store_address || '-'}</Text>
+                  <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>已下单 {item.days_since_ordered} 天</Text>
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                  <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无未到货商品</Text>
+                </View>
+              }
+            />
+          ) : (
+            <FlatList
+              data={displayPurchaseOrders}
+              keyExtractor={(item) => item.id}
+              renderItem={renderPurchaseOrder}
+              contentContainerStyle={styles.list}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                  <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无进货单记录</Text>
+                </View>
+              }
+            />
+          )}
+        </>
+      ) : (
+        <FlatList
+          data={filteredOrders}
+          keyExtractor={(item) => item.id}
+          renderItem={renderOrder}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.pink} />}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+              <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无订单记录</Text>
+            </View>
+          }
+        />
+      )}
+
+      <Modal visible={purchaseConfirmPayload !== null} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface, maxHeight: 360 }] }>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>确认单品到货</Text>
+              <TouchableOpacity onPress={() => setPurchaseConfirmPayload(null)}>
+                <Text style={styles.modalClose}>取消</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 8 }]}>商品：{purchaseConfirmPayload?.productName}</Text>
+            <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 12 }]}>下单数量：{purchaseConfirmPayload?.orderedQuantity}</Text>
+            <TextInput
+              style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+              value={purchaseConfirmPayload?.deliveredQuantityInput || ''}
+              onChangeText={(text) => {
+                setPurchaseConfirmPayload((prev) => {
+                  if (!prev) return prev;
+                  return { ...prev, deliveredQuantityInput: text.replace(/[^0-9]/g, '') };
+                });
+              }}
+              keyboardType="number-pad"
+              placeholder="请输入到货数量"
+              placeholderTextColor={theme.textTertiary}
+            />
+
+            <View style={[styles.modalButtons, { marginTop: 16 }]}> 
+              <TouchableOpacity
+                style={[styles.confirmButtonWrap, submittingPurchaseConfirm && styles.disabledButton]}
+                onPress={() => {
+                  handleConfirmPurchaseItemDelivery();
+                }}
+                disabled={submittingPurchaseConfirm}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>{submittingPurchaseConfirm ? '提交中...' : '确认到货'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={purchaseDeleteTargetId !== null} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface, maxHeight: 300 }] }>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>确认删除进货单</Text>
+              <TouchableOpacity onPress={() => setPurchaseDeleteTargetId(null)}>
+                <Text style={styles.modalClose}>取消</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 16 }]}>确定删除进货单 #{purchaseDeleteTargetId?.slice(0, 8)} 吗？</Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButtonWrap, deletingPurchaseOrderId === purchaseDeleteTargetId && styles.disabledButton]}
+                onPress={() => {
+                  handleDeletePurchaseOrder();
+                }}
+                disabled={deletingPurchaseOrderId === purchaseDeleteTargetId}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>{deletingPurchaseOrderId === purchaseDeleteTargetId ? '删除中...' : '确认删除'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={filterModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
