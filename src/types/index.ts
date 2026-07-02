@@ -66,6 +66,10 @@ export interface Store {
   contract_expiry_date?: string | null;
   grade?: 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | null;
   contract_file_url?: string | null;
+  invoice_title?: string | null;
+  tax_id?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -262,11 +266,14 @@ export interface FinancialTransaction {
   amount: number;
   transaction_date: string;
   store_id?: string | null;
+  city_id?: string | null;
+  city_name?: string | null;
   supplier_id?: string | null;
   product_id?: string | null;
   channel_name?: string | null;
   description?: string | null;
   is_recurring: boolean;
+  recurring_frequency?: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -280,5 +287,39 @@ export interface KnowledgeBaseFile {
   file_type: string;
   category: 'contract_template' | 'internal_contract' | 'business_license' | 'other';
   uploaded_by: string;
+  created_at: string;
+}
+
+export type PurchaseOrderStatus = 'pending' | 'partially_delivered' | 'delivered';
+
+export type PurchaseItemDeliveryStatus = 'pending' | 'delivered';
+
+export interface PurchaseOrder {
+  id: string;
+  store_id: string;
+  store_name?: string;
+  city_id: string;
+  city_name?: string;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  status: PurchaseOrderStatus;
+  created_by: string;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  items?: PurchaseOrderItem[];
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  purchase_order_id: string;
+  product_id: string;
+  product_name?: string;
+  ordered_quantity: number;
+  delivered_quantity: number;
+  delivery_status: PurchaseItemDeliveryStatus;
+  delivered_at?: string | null;
+  confirmed_by?: string | null;
+  unit_cost: number;
   created_at: string;
 }

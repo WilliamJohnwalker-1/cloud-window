@@ -7,7 +7,7 @@ import { useSupplierStore } from '../store/useSupplierStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const InventoryScreen: React.FC = () => {
-  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, createPurchaseOrder, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, createPurchaseOrderV2, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
@@ -223,7 +223,7 @@ export const InventoryScreen: React.FC = () => {
     }, new Map());
 
     setSubmittingPurchase(true);
-    const { error } = await createPurchaseOrder(Array.from(grouped.values()));
+    const { error } = await createPurchaseOrderV2(Array.from(grouped.values()));
     setSubmittingPurchase(false);
     if (error) {
       setPageNotice({ type: 'error', text: `进货建单失败：${error.message}` });

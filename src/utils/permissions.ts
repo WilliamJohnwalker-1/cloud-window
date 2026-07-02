@@ -48,11 +48,11 @@ export function canViewProducts(role: RoleInput): boolean {
 }
 
 /**
- * canViewOrders: all roles except finance => true
+ * canViewOrders: all roles => true
  */
 export function canViewOrders(role: RoleInput): boolean {
   if (!isKnownRole(role)) return false;
-  return role !== 'finance';
+  return true;
 }
 
 /**

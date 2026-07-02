@@ -614,6 +614,8 @@ export const ReportsScreen: React.FC = () => {
     let totalInventoryCost = 0;
     let hotCost = 0;
     let regularCost = 0;
+    const hotValueCandidates: Array<{ name: string; inventoryValue: number }> = [];
+    const slowValueCandidates: Array<{ name: string; inventoryValue: number }> = [];
 
     const scatterData: Array<{
       id: string;
@@ -643,9 +645,15 @@ export const ReportsScreen: React.FC = () => {
 
       const inventoryCost = product.inventoryQty * Number(product.cost || 0);
       totalInventoryCost += inventoryCost;
-      if (category === '滞销款') slowMovingCost += inventoryCost;
-      else if (category === '热销款') hotCost += inventoryCost;
-      else regularCost += inventoryCost;
+      if (category === '滞销款') {
+        slowMovingCost += inventoryCost;
+        slowValueCandidates.push({ name: product.name, inventoryValue: inventoryCost });
+      } else if (category === '热销款') {
+        hotCost += inventoryCost;
+        hotValueCandidates.push({ name: product.name, inventoryValue: inventoryCost });
+      } else {
+        regularCost += inventoryCost;
+      }
 
       if (turnoverDays !== 999) {
         scatterData.push({
@@ -681,6 +689,8 @@ export const ReportsScreen: React.FC = () => {
 
     const slowMovingRatio = totalInventoryCost > 0 ? slowMovingCost / totalInventoryCost : 0;
     const isSlowMovingAlert = slowMovingRatio > 0.15;
+    const hotValueRanking = hotValueCandidates.sort((a, b) => b.inventoryValue - a.inventoryValue).slice(0, 5);
+    const slowValueRanking = slowValueCandidates.sort((a, b) => b.inventoryValue - a.inventoryValue).slice(0, 5);
 
     const storeCityIdMap = new Map<string, string>();
     filteredStores.forEach((store) => {
@@ -782,6 +792,8 @@ export const ReportsScreen: React.FC = () => {
       avgTurnoverDays,
       seriesAvgTurnover,
       pieData,
+      hotValueRanking,
+      slowValueRanking,
       slowMovingCost,
       slowMovingRatio,
       totalInventoryCost,
@@ -1321,6 +1333,7 @@ export const ReportsScreen: React.FC = () => {
             </div>
           )}
         </div>
+
       </div>
       )}
 
@@ -1452,6 +1465,34 @@ export const ReportsScreen: React.FC = () => {
                   <Legend verticalAlign="bottom" height={36} wrapperStyle={{ color: '#fff' }} formatter={(value: string) => <span style={{ color: '#fff' }}>{value}</span>} />
                 </PieChart>
               </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <h3 className="text-xl font-bold mb-4">热销款库存价值 TOP 5</h3>
+            <div className="space-y-2">
+              {turnoverData.hotValueRanking.map((row, index) => (
+                <div key={`${row.name}-${index}`} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
+                  <p className="text-sm text-white/90 truncate pr-3">{index + 1}. {row.name}</p>
+                  <p className="text-sm font-bold text-accent">¥{row.inventoryValue.toFixed(0)}</p>
+                </div>
+              ))}
+              {turnoverData.hotValueRanking.length === 0 && <p className="text-sm text-white/40">暂无热销库存价值数据</p>}
+            </div>
+          </div>
+
+          <div className="bg-white/5 border border-white/10 p-6 rounded-[32px]">
+            <h3 className="text-xl font-bold mb-4">滞销款库存价值 TOP 5</h3>
+            <div className="space-y-2">
+              {turnoverData.slowValueRanking.map((row, index) => (
+                <div key={`${row.name}-${index}`} className="flex items-center justify-between border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
+                  <p className="text-sm text-white/90 truncate pr-3">{index + 1}. {row.name}</p>
+                  <p className="text-sm font-bold text-yellow-300">¥{row.inventoryValue.toFixed(0)}</p>
+                </div>
+              ))}
+              {turnoverData.slowValueRanking.length === 0 && <p className="text-sm text-white/40">暂无滞销库存价值数据</p>}
             </div>
           </div>
         </div>

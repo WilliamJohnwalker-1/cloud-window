@@ -1,6 +1,6 @@
 {
   "name": "inventory-app",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -33,6 +33,7 @@
     "events": "^3.3.0",
     "exceljs": "^4.4.0",
     "expo": "~55.0.5",
+    "expo-clipboard": "~55.0.14",
     "expo-constants": "^55.0.7",
     "expo-document-picker": "~55.0.14",
     "expo-file-system": "~55.0.10",

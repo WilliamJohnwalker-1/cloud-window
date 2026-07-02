@@ -11,6 +11,7 @@
 - `admin`：全权限（商品、库存、订单、通知接单、分销商管理、报表）
 - `inventory_manager`：商品与库存管理
 - `distributor`：仅查看所属城市商品，仅查看自己订单，可下单
+- `finance`：可查看订单/建结算单/财务流水与报表（无接单、删单、改单、确认到货权限）
 
 ### 2) 商品与价格模型
 
@@ -147,6 +148,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 47. 执行 `supabase/migrate-v6.6-inventory-log-completion.sql`
 48. 执行 `supabase/migrate-v6.7-refund-reversal-backfill.sql`
 49. 执行 `supabase/migrate-v6.8-retail-income-category-normalization.sql`
+50. 执行 `supabase/migrate-v7.0-store-invoice-fields.sql`
+51. 执行 `supabase/migrate-v7.1-finance-city-binding.sql`
+52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -199,6 +203,9 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 47. 执行 `supabase/migrate-v6.6-inventory-log-completion.sql`
 48. 执行 `supabase/migrate-v6.7-refund-reversal-backfill.sql`
 49. 执行 `supabase/migrate-v6.8-retail-income-category-normalization.sql`
+50. 执行 `supabase/migrate-v7.0-store-invoice-fields.sql`
+51. 执行 `supabase/migrate-v7.1-finance-city-binding.sql`
+52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -214,7 +221,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.3）
+### 5. 启动 Web 端（v1.3.4）
 
 ```bash
 npm run web:v2
@@ -404,9 +411,25 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 后续规划
 
-- 计划区已清空（本轮 finance-report-refinement 已完成并合并到下方更新日志）
+- 计划区已收口（`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Mobile v2.2.4 (2026-07-02) - v7 升级批次收口 + 开票/财务兼容热修
+
+- 完成 v7 升级主线（移动端）：店铺开票信息折叠区、开票字段一键复制、财务角色订单访问与结算建单能力、财务收支城市绑定、库存价值热销/滞销排行榜、V2 进货单独立体系接入。
+- 店铺管理能力补齐：开票字段（抬头/税号/开户行/账号）进入店铺编辑链路，新增折叠展示与复制交互，避免占用主卡片空间。
+- 财务流水兼容增强：对 `financial_transactions.recurring_frequency` 缺列场景新增查询/写入降级回退，迁移未齐时双端不再直接失败。
+- 店铺开票保存回显修复：补齐 `StoreRow -> mapStore` 的 `invoice_title/tax_id/bank_name/bank_account` 映射，修复“保存后看似未生效”的读回缺口。
+- 进货单分离链路与财务/库存联动对齐：逐品到货、到货数量可超下单、未到货筛选、到货后财务流水与库存日志同步刷新。
+
+### Web v1.3.4 (2026-07-02) - v7 升级批次收口 + 店铺编辑可达性修复
+
+- 完成 v7 升级主线（Web）：店铺开票信息折叠+复制、财务角色订单页权限放开、财务流水城市绑定、库存价值热销/滞销榜（Top5）、进货单独立表与逐品到货交互。
+- 店铺编辑弹层可用性修复：编辑区补齐 `max-height + overflow-y`，头部与关闭按钮在长内容下可达，解决“无法滚动/无法关闭”。
+- 财务流水兼容增强：`recurring_frequency` 缺列时自动降级查询与写入，减小数据库迁移不同步导致的线上阻断。
+- 店铺开票读回修复：补齐 `StoreRow` 与 `mapStore` 的开票字段映射，确保保存后列表与编辑弹窗可回显。
+- 与移动端保持同口径：开票、财务城市绑定、进货单独立链路与报表排行规则保持一致，便于双端验收对账。
 
 ### Mobile v2.2.3 (2026-06-29) - post-v6-polish 全量修复收口（报表 + 财务 + 退款 + 日志）
 

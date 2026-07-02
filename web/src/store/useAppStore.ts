@@ -13,6 +13,7 @@ import type {
   Notification,
   Order,
   OrderItem,
+  PurchaseOrder,
   RefundedOrderItem,
   ProductCreateInput,
   ProfileUpdateInput,
@@ -97,6 +98,36 @@ interface OrderRow {
   order_items?: OrderItemRow[];
 }
 
+interface PurchaseOrderItemRow {
+  id: string;
+  purchase_order_id: string;
+  product_id: string;
+  ordered_quantity?: number | string | null;
+  delivered_quantity?: number | string | null;
+  delivery_status?: string | null;
+  delivered_at?: string | null;
+  confirmed_by?: string | null;
+  unit_cost?: number | string | null;
+  created_at: string;
+  products?: { name?: string | null; cost?: number | string | null } | Array<{ name?: string | null; cost?: number | string | null }> | null;
+}
+
+interface PurchaseOrderRow {
+  id: string;
+  store_id: string;
+  city_id: string;
+  supplier_id?: string | null;
+  status?: string | null;
+  created_by: string;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  stores?: { name?: string | null; address?: string | null } | Array<{ name?: string | null; address?: string | null }> | null;
+  cities?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  suppliers?: { company_name?: string | null } | Array<{ company_name?: string | null }> | null;
+  purchase_order_items?: PurchaseOrderItemRow[];
+}
+
 interface InventoryLogRow {
   id: string;
   product_id: string;
@@ -124,6 +155,10 @@ interface StoreRow {
   contract_expiry_date?: string | null;
   grade?: Store['grade'] | null;
   contract_file_url?: string | null;
+  invoice_title?: string | null;
+  tax_id?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
   status?: Store['status'] | null;
   created_at: string;
   updated_at: string;
@@ -163,6 +198,10 @@ interface StoreCreateInput {
   contract_expiry_date?: string | null;
   grade?: Store['grade'] | null;
   contract_file_url?: string | null;
+  invoice_title?: string | null;
+  tax_id?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
 }
 
 interface StoreUpdateInput {
@@ -178,6 +217,10 @@ interface StoreUpdateInput {
   contract_expiry_date?: string | null;
   grade?: Store['grade'] | null;
   contract_file_url?: string | null;
+  invoice_title?: string | null;
+  tax_id?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
   status?: Store['status'];
 }
 
@@ -212,6 +255,13 @@ interface SlowMovingAlertNotificationInput {
 interface RpcErrorLike {
   code?: string;
   message?: string;
+}
+
+interface DetailedErrorLike {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
 }
 
 const requiredSchemaVersion = '4.3.0';
@@ -252,6 +302,20 @@ const shouldFallbackToLegacyFlow = (error: RpcErrorLike | null): boolean => {
   return message.includes('could not find the function public.create_batch_order_atomic')
     || message.includes('could not find the function public.create_retail_order_atomic')
     || message.includes('could not find the function public.create_settlement_order_atomic');
+};
+
+const isMissingStoreInvoiceColumnError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const raw = error as DetailedErrorLike;
+  const code = String(raw.code || '');
+  const message = `${raw.message || ''} ${raw.details || ''} ${raw.hint || ''}`.toLowerCase();
+  const hasInvoiceColumn = ['invoice_title', 'tax_id', 'bank_name', 'bank_account'].some((column) => message.includes(column));
+  const hasMissingHint = message.includes('does not exist') || message.includes('could not find the') || message.includes('schema cache');
+
+  return hasInvoiceColumn && (hasMissingHint || code === '42703' || code === 'PGRST204');
 };
 
 const parseSemver = (input: string): [number, number, number] | null => {
@@ -295,6 +359,7 @@ interface AppState {
   cities: City[];
   products: ProductWithDetails[];
   orders: Order[];
+  purchaseOrders: PurchaseOrder[];
   stores: Store[];
   storeInventory: StoreInventory[];
   storeProductPrices: StoreProductPrice[];
@@ -315,6 +380,18 @@ interface AppState {
   fetchProducts: () => Promise<void>;
   fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchPurchaseOrders: () => Promise<void>;
+  createPurchaseOrderV2: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
+  confirmPurchaseItemDelivery: (purchaseOrderId: string, itemId: string, deliveredQuantity: number) => Promise<{ error: Error | null }>;
+  deletePurchaseOrderV2: (purchaseOrderId: string) => Promise<{ error: Error | null }>;
+  fetchUndeliveredItems: () => Promise<Array<{
+    item_id: string;
+    purchase_order_id: string;
+    product_name: string;
+    ordered_quantity: number;
+    store_name: string;
+    store_address: string;
+    days_since_ordered: number;
+  }>>;
   fetchStores: () => Promise<void>;
   fetchStoreInventory: (storeId: string) => Promise<void>;
   fetchAllStoreInventory: () => Promise<void>;
@@ -446,6 +523,10 @@ const mapStore = (row: StoreRow): Store => {
     contract_expiry_date: row.contract_expiry_date ?? null,
     grade: row.grade ?? null,
     contract_file_url: row.contract_file_url ?? null,
+    invoice_title: row.invoice_title ?? null,
+    tax_id: row.tax_id ?? null,
+    bank_name: row.bank_name ?? null,
+    bank_account: row.bank_account ?? null,
     status: row.status || 'active',
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -552,6 +633,47 @@ const mapOrder = (row: OrderRow): Order => {
   };
 
   return applyRetailRefundProjection(mappedOrder);
+};
+
+const mapPurchaseOrder = (row: PurchaseOrderRow): PurchaseOrder => {
+  const storeData = pickFirstRelation(row.stores);
+  const cityData = pickFirstRelation(row.cities);
+  const supplierData = pickFirstRelation(row.suppliers);
+
+  return {
+    id: row.id,
+    store_id: row.store_id,
+    store_name: storeData?.name ?? undefined,
+    city_id: row.city_id,
+    city_name: cityData?.name ?? undefined,
+    supplier_id: row.supplier_id ?? null,
+    supplier_name: supplierData?.company_name ?? null,
+    status: row.status === 'delivered'
+      ? 'delivered'
+      : row.status === 'partially_delivered'
+        ? 'partially_delivered'
+        : 'pending',
+    created_by: row.created_by,
+    notes: row.notes ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    items: (row.purchase_order_items || []).map((item) => {
+      const productData = pickFirstRelation(item.products);
+      return {
+        id: item.id,
+        purchase_order_id: item.purchase_order_id,
+        product_id: item.product_id,
+        product_name: productData?.name ?? undefined,
+        ordered_quantity: Number(item.ordered_quantity || 0),
+        delivered_quantity: Number(item.delivered_quantity || 0),
+        delivery_status: item.delivery_status === 'delivered' ? 'delivered' : 'pending',
+        delivered_at: item.delivered_at ?? null,
+        confirmed_by: item.confirmed_by ?? null,
+        unit_cost: Number(item.unit_cost ?? productData?.cost ?? 0),
+        created_at: item.created_at,
+      };
+    }),
+  };
 };
 
 export interface CityChannelReportRow {
@@ -903,6 +1025,7 @@ export const useAppStore = create<AppState>()(
       cities: [],
       products: [],
       orders: [],
+      purchaseOrders: [],
       stores: [],
       storeInventory: [],
       storeProductPrices: [],
@@ -1028,6 +1151,7 @@ export const useAppStore = create<AppState>()(
             cities: [],
             products: [],
             orders: [],
+            purchaseOrders: [],
             stores: [],
             storeInventory: [],
             storeProductPrices: [],
@@ -1143,22 +1267,195 @@ export const useAppStore = create<AppState>()(
       },
 
       fetchPurchaseOrders: async () => {
-        const { user, orders } = get();
+        const { user } = get();
         if (!user) return;
 
         const { data, error } = await supabase
-          .from('orders')
-          .select(orderSelect)
-          .eq('order_kind', 'purchase')
+          .from('purchase_orders')
+          .select(`
+            *,
+            stores(name,address),
+            cities(name),
+            suppliers(company_name),
+            purchase_order_items(
+              *,
+              products(name,cost)
+            )
+          `)
           .order('created_at', { ascending: false })
-          .limit(200);
+          .limit(300);
         if (error || !data) return;
 
-        const purchaseOrders = (data as OrderRow[]).map(mapOrder);
-        const nonPurchaseOrders = orders.filter((order) => order.order_kind !== 'purchase');
-        set({
-          orders: [...purchaseOrders, ...nonPurchaseOrders]
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+        set({ purchaseOrders: (data as PurchaseOrderRow[]).map(mapPurchaseOrder) });
+      },
+
+      createPurchaseOrderV2: async (items) => {
+        const { user, stores } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!(user.role === 'admin' || user.role === 'super_admin')) return { error: new Error('当前角色无进货建单权限') };
+        if (!Array.isArray(items) || items.length === 0) return { error: new Error('进货单不能为空') };
+
+        try {
+          const orderIds: string[] = [];
+          for (const group of items) {
+            const selectedStore = stores.find((store) => store.id === group.store_id) || null;
+            if (!selectedStore) throw new Error('店铺不存在或未加载');
+            if (selectedStore.status !== 'active') throw new Error('店铺已停用');
+            if (selectedStore.city_id !== group.city_id) throw new Error('店铺不属于所选城市');
+            if (!Array.isArray(group.products) || group.products.length === 0) throw new Error(`${selectedStore.name} 进货商品不能为空`);
+
+            const payload = group.products.map((product) => {
+              const quantity = Number(product.quantity);
+              if (!product.productId || !Number.isFinite(quantity) || quantity <= 0) {
+                throw new Error('进货商品参数无效');
+              }
+              return {
+                product_id: product.productId,
+                quantity,
+              };
+            });
+
+            const { data: purchaseOrderId, error } = await supabase.rpc('create_purchase_order_v2', {
+              p_user_id: user.id,
+              p_store_id: group.store_id,
+              p_city_id: group.city_id,
+              p_items: payload,
+              p_supplier_id: group.supplier_id ?? null,
+            });
+            if (error) throw error;
+            if (purchaseOrderId) orderIds.push(String(purchaseOrderId));
+          }
+
+          await get().fetchPurchaseOrders();
+          return { orderIds, error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      confirmPurchaseItemDelivery: async (purchaseOrderId, itemId, deliveredQuantity) => {
+        const { user, purchaseOrders } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前角色无确认进货权限');
+          }
+          const quantity = Number(deliveredQuantity);
+          if (!purchaseOrderId || !itemId || !Number.isFinite(quantity) || quantity <= 0) {
+            throw new Error('到货参数无效');
+          }
+
+          const { error } = await supabase.rpc('confirm_purchase_item_delivery', {
+            p_purchase_order_id: purchaseOrderId,
+            p_item_id: itemId,
+            p_delivered_quantity: quantity,
+            p_confirmed_by: user.id,
+          });
+          if (error) throw error;
+
+          const targetOrder = purchaseOrders.find((order) => order.id === purchaseOrderId) || null;
+          const financeStore = useFinanceStore.getState();
+          const refreshTasks: Array<Promise<void>> = [
+            get().fetchPurchaseOrders(),
+            get().fetchProducts(),
+            financeStore.fetchTransactions(),
+            financeStore.fetchBalance(),
+          ];
+          if (targetOrder?.store_id) {
+            refreshTasks.push(get().fetchStoreInventory(targetOrder.store_id));
+          } else {
+            refreshTasks.push(get().fetchAllStoreInventory());
+          }
+          await Promise.all(refreshTasks);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      deletePurchaseOrderV2: async (purchaseOrderId) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前账号无删除进货单权限');
+          }
+          if (!purchaseOrderId) throw new Error('进货单ID不能为空');
+
+          const { error } = await supabase.rpc('delete_purchase_order_v2', {
+            p_purchase_order_id: purchaseOrderId,
+          });
+          if (error) throw error;
+
+          await Promise.all([
+            get().fetchPurchaseOrders(),
+            get().fetchProducts(),
+            get().fetchAllStoreInventory(),
+            useFinanceStore.getState().fetchTransactions(),
+            useFinanceStore.getState().fetchBalance(),
+          ]);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      fetchUndeliveredItems: async () => {
+        const { user } = get();
+        if (!user) return [];
+
+        const { data, error } = await supabase
+          .from('purchase_order_items')
+          .select(`
+            id,
+            purchase_order_id,
+            ordered_quantity,
+            delivery_status,
+            products(name),
+            purchase_orders!inner(
+              created_at,
+              store_id,
+              stores(name,address)
+            )
+          `)
+          .eq('delivery_status', 'pending')
+          .order('created_at', { ascending: true });
+
+        if (error || !data) return [];
+
+        return (data as Array<{
+          id: string;
+          purchase_order_id: string;
+          ordered_quantity?: number | string | null;
+          products?: { name?: string | null } | Array<{ name?: string | null }> | null;
+          purchase_orders?: {
+            created_at?: string | null;
+            stores?: { name?: string | null; address?: string | null } | Array<{ name?: string | null; address?: string | null }> | null;
+          } | Array<{
+            created_at?: string | null;
+            stores?: { name?: string | null; address?: string | null } | Array<{ name?: string | null; address?: string | null }> | null;
+          }> | null;
+        }>).map((row) => {
+          const productData = pickFirstRelation(row.products);
+          const orderData = pickFirstRelation(row.purchase_orders);
+          const storeData = pickFirstRelation(orderData?.stores);
+          const createdAt = orderData?.created_at || null;
+          const createdTime = createdAt ? new Date(createdAt).getTime() : NaN;
+          const daysSinceOrdered = Number.isFinite(createdTime)
+            ? Math.max(0, Math.floor((Date.now() - createdTime) / (24 * 60 * 60 * 1000)))
+            : 0;
+
+          return {
+            item_id: row.id,
+            purchase_order_id: row.purchase_order_id,
+            product_name: productData?.name || '未知商品',
+            ordered_quantity: Number(row.ordered_quantity || 0),
+            store_name: storeData?.name || '未指定店铺',
+            store_address: storeData?.address || '未填写地址',
+            days_since_ordered: daysSinceOrdered,
+          };
         });
       },
 
@@ -1530,10 +1827,19 @@ export const useAppStore = create<AppState>()(
             contract_expiry_date: store.contract_expiry_date ?? null,
             grade: store.grade ?? null,
             contract_file_url: store.contract_file_url ?? null,
+            invoice_title: store.invoice_title ?? null,
+            tax_id: store.tax_id ?? null,
+            bank_name: store.bank_name ?? null,
+            bank_account: store.bank_account ?? null,
           };
 
           const { error } = await supabase.from('stores').insert(payload);
-          if (error) throw error;
+          if (error) {
+            if (isMissingStoreInvoiceColumnError(error)) {
+              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.0-store-invoice-fields.sql 后再保存开票信息');
+            }
+            throw error;
+          }
 
           await get().fetchStores();
           return { error: null };
@@ -1565,9 +1871,18 @@ export const useAppStore = create<AppState>()(
           if (updates.contract_expiry_date !== undefined) payload.contract_expiry_date = updates.contract_expiry_date;
           if (updates.grade !== undefined) payload.grade = updates.grade;
           if (updates.contract_file_url !== undefined) payload.contract_file_url = updates.contract_file_url;
+          if (updates.invoice_title !== undefined) payload.invoice_title = updates.invoice_title;
+          if (updates.tax_id !== undefined) payload.tax_id = updates.tax_id;
+          if (updates.bank_name !== undefined) payload.bank_name = updates.bank_name;
+          if (updates.bank_account !== undefined) payload.bank_account = updates.bank_account;
 
           const { error } = await supabase.from('stores').update(payload).eq('id', id);
-          if (error) throw error;
+          if (error) {
+            if (isMissingStoreInvoiceColumnError(error)) {
+              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.0-store-invoice-fields.sql 后再保存开票信息');
+            }
+            throw error;
+          }
 
           await get().fetchStores();
           return { error: null };
@@ -2151,6 +2466,7 @@ export const useAppStore = create<AppState>()(
       },
 
       createPurchaseOrder: async (items) => {
+        // @deprecated Legacy V1 purchase RPC. Kept for backward compatibility during V2 rollout.
         const { user, products, stores } = get();
         if (!user) return { error: new Error('未登录') };
         if (!(user.role === 'admin' || user.role === 'super_admin')) return { error: new Error('当前角色无进货建单权限') };
@@ -2204,6 +2520,7 @@ export const useAppStore = create<AppState>()(
       },
 
       confirmPurchaseDelivery: async (orderId) => {
+        // @deprecated Legacy V1 purchase delivery confirmation. Kept for backward compatibility during V2 rollout.
         try {
           const { user, orders } = get();
           if (!user) throw new Error('未登录');
@@ -2236,7 +2553,7 @@ export const useAppStore = create<AppState>()(
       createSettlementOrder: async (storeId, items) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
-        if (!(user.role === 'admin' || user.role === 'super_admin')) return { error: new Error('当前角色无结算建单权限') };
+        if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'finance')) return { error: new Error('当前角色无结算建单权限') };
         if (!storeId) return { error: new Error('请选择店铺') };
         if (!Array.isArray(items) || items.length === 0) return { error: new Error('购物车为空') };
 

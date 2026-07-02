@@ -717,6 +717,8 @@ export default function ReportsScreen() {
     let hotValue = 0;
     let slowValue = 0;
     let regularValue = 0;
+    const hotValueCandidates: Array<{ name: string; inventoryValue: number }> = [];
+    const slowValueCandidates: Array<{ name: string; inventoryValue: number }> = [];
 
     Object.entries(productTurnover).forEach(([_, p]) => {
       const isHot = sortedBySales.findIndex(sp => sp.name === p.name) < top10PercentCount && p.totalSales > 0;
@@ -724,8 +726,10 @@ export default function ReportsScreen() {
       
       if (isHot) {
         hotValue += p.inventoryValue;
+        hotValueCandidates.push({ name: p.name, inventoryValue: p.inventoryValue });
       } else if (isSlow) {
         slowValue += p.inventoryValue;
+        slowValueCandidates.push({ name: p.name, inventoryValue: p.inventoryValue });
       } else {
         regularValue += p.inventoryValue;
       }
@@ -734,6 +738,12 @@ export default function ReportsScreen() {
     const totalInventoryValue = hotValue + slowValue + regularValue;
     const slowValueRatio = totalInventoryValue > 0 ? slowValue / totalInventoryValue : 0;
     const isSlowWarning = slowValueRatio > 0.15;
+    const hotValueRanking = hotValueCandidates
+      .sort((a, b) => b.inventoryValue - a.inventoryValue)
+      .slice(0, 3);
+    const slowValueRanking = slowValueCandidates
+      .sort((a, b) => b.inventoryValue - a.inventoryValue)
+      .slice(0, 3);
 
     const storeCityIdMap = new Map<string, string>();
     filteredStores.forEach((store) => {
@@ -863,6 +873,8 @@ export default function ReportsScreen() {
         { name: '常规款', value: regularValue, color: '#5B8DEF' },
         { name: '滞销款', value: slowValue, color: '#C77DFF' },
       ].filter(item => item.value > 0),
+      hotValueRanking,
+      slowValueRanking,
       isSlowWarning,
       slowInventoryValue: slowValue,
       slowValueRatio,
@@ -1333,6 +1345,48 @@ export default function ReportsScreen() {
           </View>
         </View>
       )}
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>热销款库存价值 TOP 3</Text>
+        {turnoverData.hotValueRanking.length > 0 ? (
+          turnoverData.hotValueRanking.map((item, index) => (
+            <View key={`${item.name}-hot-${index}`} style={styles.velocityItem}>
+              <View style={styles.velocityRank}>
+                <Text style={styles.velocityRankText}>{index + 1}</Text>
+              </View>
+              <View style={styles.velocityInfo}>
+                <Text style={[styles.velocityName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                  {item.name}
+                </Text>
+                <Text style={[styles.velocityMeta, { color: theme.textSecondary }]}>¥{item.inventoryValue.toFixed(0)}</Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无热销库存价值数据</Text>
+        )}
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surface }] }>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>滞销款库存价值 TOP 3</Text>
+        {turnoverData.slowValueRanking.length > 0 ? (
+          turnoverData.slowValueRanking.map((item, index) => (
+            <View key={`${item.name}-slow-${index}`} style={styles.velocityItem}>
+              <View style={styles.velocityRank}>
+                <Text style={styles.velocityRankText}>{index + 1}</Text>
+              </View>
+              <View style={styles.velocityInfo}>
+                <Text style={[styles.velocityName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+                  {item.name}
+                </Text>
+                <Text style={[styles.velocityMeta, { color: theme.textSecondary }]}>¥{item.inventoryValue.toFixed(0)}</Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <Text style={[styles.emptyText, { color: theme.textTertiary }]}>暂无滞销库存价值数据</Text>
+        )}
+      </View>
 
       <View style={[styles.card, { backgroundColor: theme.surface }] }>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>动销率下钻分析</Text>

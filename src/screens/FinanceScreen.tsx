@@ -23,12 +23,28 @@ import {
 } from '../utils/permissions';
 
 type TransactionType = 'income' | 'expense';
+type RecurringFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+
+const recurringFrequencyOptions: ReadonlyArray<{ value: RecurringFrequency; label: string }> = [
+  { value: 'monthly', label: '月度' },
+  { value: 'quarterly', label: '季度' },
+  { value: 'semiannual', label: '半年度' },
+  { value: 'annual', label: '年度' },
+];
+
+const recurringFrequencyLabelMap: Record<RecurringFrequency, string> = {
+  monthly: '月度',
+  quarterly: '季度',
+  semiannual: '半年度',
+  annual: '年度',
+};
 
 interface TransactionFormState {
   transaction_type: TransactionType;
   category: string;
   amount: string;
   transaction_date: string;
+  city_id: string;
   store_id: string;
   supplier_id: string;
   product_id: string;
@@ -36,14 +52,17 @@ interface TransactionFormState {
   channel_name: string;
   description: string;
   is_recurring: boolean;
+  recurring_frequency: RecurringFrequency;
 }
 
 const getToday = (): string => new Date().toISOString().slice(0, 10);
 
 export default function FinanceScreen() {
   const user = useAppStore((state) => state.user);
+  const cities = useAppStore((state) => state.cities);
   const stores = useAppStore((state) => state.stores);
   const products = useAppStore((state) => state.products);
+  const fetchCities = useAppStore((state) => state.fetchCities);
   const fetchStores = useAppStore((state) => state.fetchStores);
   const {
     transactions,
@@ -68,6 +87,7 @@ export default function FinanceScreen() {
   const [balanceDraft, setBalanceDraft] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [cityFilter, setCityFilter] = useState('all');
   const [storeFilter, setStoreFilter] = useState('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
@@ -76,6 +96,7 @@ export default function FinanceScreen() {
     category: '',
     amount: '',
     transaction_date: getToday(),
+    city_id: '',
     store_id: '',
     supplier_id: '',
     product_id: '',
@@ -83,6 +104,7 @@ export default function FinanceScreen() {
     channel_name: '',
     description: '',
     is_recurring: false,
+    recurring_frequency: 'monthly',
   });
 
   const filteredCategories = useMemo(
@@ -103,20 +125,27 @@ export default function FinanceScreen() {
     [stores],
   );
 
+  const cityNameMap = useMemo(
+    () => new Map(cities.map((item) => [item.id, item.name])),
+    [cities],
+  );
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter((item) => {
       const matchesType = typeFilter === 'all' ? true : item.transaction_type === typeFilter;
       const matchesCategory = categoryFilter === 'all' ? true : item.category === categoryFilter;
+      const matchesCity = cityFilter === 'all' ? true : item.city_id === cityFilter;
       const matchesStore = storeFilter === 'all' ? true : item.store_id === storeFilter;
       const matchesStartDate = startDateFilter ? item.transaction_date >= startDateFilter : true;
       const matchesEndDate = endDateFilter ? item.transaction_date <= endDateFilter : true;
 
-      return matchesType && matchesCategory && matchesStore && matchesStartDate && matchesEndDate;
+      return matchesType && matchesCategory && matchesCity && matchesStore && matchesStartDate && matchesEndDate;
     });
-  }, [categoryFilter, endDateFilter, startDateFilter, storeFilter, transactions, typeFilter]);
+  }, [categoryFilter, cityFilter, endDateFilter, startDateFilter, storeFilter, transactions, typeFilter]);
 
   const hasActiveFilters = typeFilter !== 'all'
     || categoryFilter !== 'all'
+    || cityFilter !== 'all'
     || storeFilter !== 'all'
     || Boolean(startDateFilter)
     || Boolean(endDateFilter);
@@ -140,8 +169,9 @@ export default function FinanceScreen() {
     fetchTransactions();
     fetchCategories();
     fetchBalance();
+    fetchCities();
     fetchStores();
-  }, [canView, fetchBalance, fetchCategories, fetchStores, fetchTransactions]);
+  }, [canView, fetchBalance, fetchCategories, fetchCities, fetchStores, fetchTransactions]);
 
   useEffect(() => {
     if (editingBalance) return;
@@ -170,6 +200,7 @@ export default function FinanceScreen() {
       category: filteredCategories[0]?.name || '',
       amount: '',
       transaction_date: getToday(),
+      city_id: '',
       store_id: '',
       supplier_id: '',
       product_id: '',
@@ -177,12 +208,14 @@ export default function FinanceScreen() {
       channel_name: '',
       description: '',
       is_recurring: false,
+      recurring_frequency: 'monthly',
     });
   };
 
   const resetFilters = (): void => {
     setTypeFilter('all');
     setCategoryFilter('all');
+    setCityFilter('all');
     setStoreFilter('all');
     setStartDateFilter('');
     setEndDateFilter('');
@@ -194,6 +227,14 @@ export default function FinanceScreen() {
     }
 
     return storeNameMap.get(storeId) || '未命名店铺';
+  };
+
+  const getCityLabel = (cityId?: string | null): string => {
+    if (!cityId) {
+      return '未关联城市';
+    }
+
+    return cityNameMap.get(cityId) || '未命名城市';
   };
 
   const isBreakage = form.category === '损耗';
@@ -220,6 +261,7 @@ export default function FinanceScreen() {
       category: tx.category,
       amount: String(tx.amount || ''),
       transaction_date: tx.transaction_date,
+      city_id: tx.city_id || '',
       store_id: tx.store_id || '',
       supplier_id: tx.supplier_id || '',
       product_id: tx.product_id || '',
@@ -227,6 +269,7 @@ export default function FinanceScreen() {
       channel_name: tx.channel_name || '',
       description: tx.description || '',
       is_recurring: tx.is_recurring,
+      recurring_frequency: tx.recurring_frequency || 'monthly',
     });
   };
 
@@ -263,6 +306,7 @@ export default function FinanceScreen() {
       category: form.category.trim(),
       amount: amountValue,
       transaction_date: form.transaction_date,
+      city_id: form.city_id || null,
       store_id: form.store_id || null,
       supplier_id: form.supplier_id || null,
       product_id: form.product_id || null,
@@ -270,6 +314,7 @@ export default function FinanceScreen() {
       channel_name: form.channel_name.trim() || null,
       description: form.description.trim() || null,
       is_recurring: form.is_recurring,
+      recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
     };
 
     const result = editingId
@@ -407,6 +452,25 @@ export default function FinanceScreen() {
           ))}
         </ScrollView>
 
+        <Text style={styles.inputLabel}>城市</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
+          <TouchableOpacity
+            style={[styles.ghostButton, cityFilter === 'all' && styles.ghostButtonActive]}
+            onPress={() => setCityFilter('all')}
+          >
+            <Text style={styles.ghostButtonText}>全部城市</Text>
+          </TouchableOpacity>
+          {cities.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.ghostButton, cityFilter === item.id && styles.ghostButtonActive]}
+              onPress={() => setCityFilter(item.id)}
+            >
+              <Text style={styles.ghostButtonText}>{item.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
         <Text style={styles.inputLabel}>店铺</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
           <TouchableOpacity
@@ -458,7 +522,10 @@ export default function FinanceScreen() {
               <Text style={styles.itemTitle}>{tx.category}</Text>
               <Text style={styles.itemAmount}>{tx.transaction_type === 'income' ? '+' : '-'}¥{Number(tx.amount || 0).toFixed(2)}</Text>
             </View>
-            <Text style={styles.itemMeta}>{tx.transaction_date} · {getStoreLabel(tx.store_id)} · {tx.channel_name || '未填写渠道'}</Text>
+            <Text style={styles.itemMeta}>{tx.transaction_date} · {getCityLabel(tx.city_id)} · {getStoreLabel(tx.store_id)} · {tx.channel_name || '未填写渠道'}</Text>
+            {tx.is_recurring ? (
+              <Text style={styles.itemMeta}>周期频次：{recurringFrequencyLabelMap[tx.recurring_frequency || 'monthly']}</Text>
+            ) : null}
             <Text style={styles.itemMeta}>{tx.description || '无备注'}</Text>
             {canEdit ? (
               <TouchableOpacity onPress={() => handleDelete(tx.id)}>
@@ -507,7 +574,11 @@ export default function FinanceScreen() {
                   <Text style={styles.inputLabel}>店铺</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
                     {stores.map((item) => (
-                      <TouchableOpacity key={item.id} style={[styles.ghostButton, form.store_id === item.id && styles.ghostButtonActive]} onPress={() => setForm((p) => ({ ...p, store_id: item.id }))}>
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.ghostButton, form.store_id === item.id && styles.ghostButtonActive]}
+                        onPress={() => setForm((p) => ({ ...p, store_id: item.id, city_id: item.city_id || p.city_id }))}
+                      >
                         <Text style={styles.ghostButtonText}>{item.name}</Text>
                       </TouchableOpacity>
                     ))}
@@ -547,6 +618,48 @@ export default function FinanceScreen() {
                 placeholderTextColor={Colors.textSecondary}
               />
 
+              {!isBreakage ? (
+                <>
+                  <Text style={styles.inputLabel}>城市</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
+                    <TouchableOpacity
+                      style={[styles.ghostButton, form.city_id === '' && styles.ghostButtonActive]}
+                      onPress={() => setForm((p) => ({ ...p, city_id: '', store_id: '' }))}
+                    >
+                      <Text style={styles.ghostButtonText}>不关联城市</Text>
+                    </TouchableOpacity>
+                    {cities.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.ghostButton, form.city_id === item.id && styles.ghostButtonActive]}
+                        onPress={() => setForm((p) => ({ ...p, city_id: item.id, store_id: '' }))}
+                      >
+                        <Text style={styles.ghostButtonText}>{item.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  <Text style={styles.inputLabel}>店铺</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
+                    <TouchableOpacity
+                      style={[styles.ghostButton, form.store_id === '' && styles.ghostButtonActive]}
+                      onPress={() => setForm((p) => ({ ...p, store_id: '' }))}
+                    >
+                      <Text style={styles.ghostButtonText}>不关联店铺</Text>
+                    </TouchableOpacity>
+                    {stores.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.ghostButton, form.store_id === item.id && styles.ghostButtonActive]}
+                        onPress={() => setForm((p) => ({ ...p, store_id: item.id, city_id: item.city_id || p.city_id }))}
+                      >
+                        <Text style={styles.ghostButtonText}>{item.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
+
               <Text style={styles.inputLabel}>渠道</Text>
               <TextInput
                 value={form.channel_name}
@@ -570,6 +683,23 @@ export default function FinanceScreen() {
                 <Text style={styles.inputLabel}>周期性流水</Text>
                 <Switch value={form.is_recurring} onValueChange={(value) => setForm((p) => ({ ...p, is_recurring: value }))} />
               </View>
+
+              {form.is_recurring ? (
+                <>
+                  <Text style={styles.inputLabel}>周期频次</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
+                    {recurringFrequencyOptions.map((item) => (
+                      <TouchableOpacity
+                        key={item.value}
+                        style={[styles.ghostButton, form.recurring_frequency === item.value && styles.ghostButtonActive]}
+                        onPress={() => setForm((p) => ({ ...p, recurring_frequency: item.value }))}
+                      >
+                        <Text style={styles.ghostButtonText}>{item.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
 
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.ghostButton} onPress={resetForm}>

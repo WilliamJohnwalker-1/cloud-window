@@ -19,7 +19,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
-import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown, Store as StoreIcon } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import { User, MapPin, Users, WifiOff, Bell, Info, PackagePlus, CheckCircle2, Moon, Sun, ArrowUp, ArrowDown, Store as StoreIcon, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -41,6 +42,28 @@ import {
 } from '../utils/permissions';
 import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
+
+type RecurringFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+
+const recurringFrequencyOptions: ReadonlyArray<{ value: RecurringFrequency; label: string }> = [
+  { value: 'monthly', label: '月度' },
+  { value: 'quarterly', label: '季度' },
+  { value: 'semiannual', label: '半年度' },
+  { value: 'annual', label: '年度' },
+];
+
+const recurringFrequencyLabelMap: Record<RecurringFrequency, string> = {
+  monthly: '月度',
+  quarterly: '季度',
+  semiannual: '半年度',
+  annual: '年度',
+};
+
+const cooperationModeLabelMap: Record<'consignment' | 'buyout' | 'direct', string> = {
+  consignment: '寄售',
+  buyout: '买断',
+  direct: '直营',
+};
 export default function ProfileScreen() {
   const {
     user,
@@ -190,6 +213,10 @@ export default function ProfileScreen() {
     contract_expiry_date: '',
     grade: '' as '' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E',
     contract_file_url: '',
+    invoice_title: '',
+    tax_id: '',
+    bank_name: '',
+    bank_account: '',
     status: 'active' as 'active' | 'inactive',
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -214,6 +241,9 @@ export default function ProfileScreen() {
   const [sortingProvince, setSortingProvince] = useState<string | null>(null);
   const [storeFilterProvinceId, setStoreFilterProvinceId] = useState<string | null>(null);
   const [storeFilterCityId, setStoreFilterCityId] = useState<string | null>(null);
+  const [isStoreEditorInvoiceExpanded, setIsStoreEditorInvoiceExpanded] = useState(false);
+  const [expandedInvoiceByStore, setExpandedInvoiceByStore] = useState<Record<string, boolean>>({});
+  const [copiedInvoiceKey, setCopiedInvoiceKey] = useState<string | null>(null);
   const [seriesModalVisible, setSeriesModalVisible] = useState(false);
   const [isAddingSeries, setIsAddingSeries] = useState(false);
   const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
@@ -234,6 +264,7 @@ export default function ProfileScreen() {
     channel_name: '',
     description: '',
     is_recurring: false,
+    recurring_frequency: 'monthly' as RecurringFrequency,
   });
   const [supplierModalVisible, setSupplierModalVisible] = useState(false);
   const [isAddingSupplier, setIsAddingSupplier] = useState(false);
@@ -429,6 +460,38 @@ export default function ProfileScreen() {
     });
   }, [stores, cities, storeFilterProvinceId, storeFilterCityId]);
 
+  const hasInvoiceInfo = React.useCallback((store: Store): boolean => {
+    return Boolean(store.invoice_title || store.tax_id || store.bank_name || store.bank_account);
+  }, []);
+
+  const buildInvoiceText = React.useCallback((store: Store): string => {
+    return [
+      `发票抬头：${store.invoice_title || '-'}`,
+      `纳税人识别号：${store.tax_id || '-'}`,
+      `开户行：${store.bank_name || '-'}`,
+      `账号：${store.bank_account || '-'}`,
+    ].join('\n');
+  }, []);
+
+  const copyInvoiceText = React.useCallback(async (text: string, key: string) => {
+    if (!text.trim() || text.trim() === '-') {
+      Toast.show({ type: 'error', text1: '错误', text2: '无可复制内容' });
+      return;
+    }
+
+    try {
+      await Clipboard.setStringAsync(text);
+      setCopiedInvoiceKey(key);
+      setTimeout(() => {
+        setCopiedInvoiceKey((prev) => (prev === key ? null : prev));
+      }, 1500);
+      Toast.show({ type: 'success', text1: '成功', text2: '已复制到剪贴板' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      Toast.show({ type: 'error', text1: '复制失败', text2: message });
+    }
+  }, []);
+
   const filteredFinanceCategories = React.useMemo(
     () => categories.filter((item) => item.type === editTransactionData.transaction_type),
     [categories, editTransactionData.transaction_type],
@@ -531,6 +594,7 @@ export default function ProfileScreen() {
       channel_name: '',
       description: '',
       is_recurring: false,
+      recurring_frequency: 'monthly',
     });
   };
 
@@ -614,6 +678,7 @@ export default function ProfileScreen() {
       channel_name: transaction.channel_name || '',
       description: transaction.description || '',
       is_recurring: transaction.is_recurring,
+      recurring_frequency: transaction.recurring_frequency || 'monthly',
     });
   };
 
@@ -649,6 +714,7 @@ export default function ProfileScreen() {
       channel_name: editTransactionData.channel_name.trim() || null,
       description: editTransactionData.description.trim() || null,
       is_recurring: editTransactionData.is_recurring,
+      recurring_frequency: editTransactionData.is_recurring ? editTransactionData.recurring_frequency : null,
     };
 
     const result = isAddingTransaction
@@ -934,6 +1000,7 @@ export default function ProfileScreen() {
     }
     setIsAddingStore(true);
     setEditingStoreId(null);
+    setIsStoreEditorInvoiceExpanded(false);
     setEditStoreData({
       name: '',
       city_id: '',
@@ -947,6 +1014,10 @@ export default function ProfileScreen() {
       contract_expiry_date: '',
       grade: '',
       contract_file_url: '',
+      invoice_title: '',
+      tax_id: '',
+      bank_name: '',
+      bank_account: '',
       status: 'active',
     });
   };
@@ -958,6 +1029,7 @@ export default function ProfileScreen() {
     }
     setIsAddingStore(false);
     setEditingStoreId(store.id);
+    setIsStoreEditorInvoiceExpanded(false);
     setEditStoreData({
       name: store.name,
       city_id: store.city_id,
@@ -971,6 +1043,10 @@ export default function ProfileScreen() {
       contract_expiry_date: store.contract_expiry_date || '',
       grade: store.grade || '',
       contract_file_url: store.contract_file_url || '',
+      invoice_title: store.invoice_title || '',
+      tax_id: store.tax_id || '',
+      bank_name: store.bank_name || '',
+      bank_account: store.bank_account || '',
       status: store.status,
     });
   };
@@ -1015,6 +1091,10 @@ export default function ProfileScreen() {
         contract_expiry_date: editStoreData.contract_expiry_date || null,
         grade: (editStoreData.grade || null) as Store['grade'] | null,
         contract_file_url: editStoreData.contract_file_url || null,
+        invoice_title: editStoreData.invoice_title.trim() || null,
+        tax_id: editStoreData.tax_id.trim() || null,
+        bank_name: editStoreData.bank_name.trim() || null,
+        bank_account: editStoreData.bank_account.trim() || null,
       });
       if (error) {
         Toast.show({ type: 'error', text1: '错误', text2: error.message });
@@ -1035,6 +1115,10 @@ export default function ProfileScreen() {
         contract_expiry_date: editStoreData.contract_expiry_date || null,
         grade: (editStoreData.grade || null) as Store['grade'] | null,
         contract_file_url: editStoreData.contract_file_url || null,
+        invoice_title: editStoreData.invoice_title.trim() || null,
+        tax_id: editStoreData.tax_id.trim() || null,
+        bank_name: editStoreData.bank_name.trim() || null,
+        bank_account: editStoreData.bank_account.trim() || null,
         status: editStoreData.status,
       });
       if (error) {
@@ -1746,6 +1830,36 @@ export default function ProfileScreen() {
                     />
                   </View>
 
+                  {editTransactionData.is_recurring ? (
+                    <>
+                      <Text style={[styles.editorHint, { color: theme.textTertiary }]}>周期频次</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
+                        {recurringFrequencyOptions.map((item) => (
+                          <TouchableOpacity
+                            key={item.value}
+                            style={[
+                              styles.cityChip,
+                              { backgroundColor: theme.surface },
+                              editTransactionData.recurring_frequency === item.value && { backgroundColor: theme.pink },
+                            ]}
+                            disabled={!canEditFinanceManagement}
+                            onPress={() => setEditTransactionData({ ...editTransactionData, recurring_frequency: item.value })}
+                          >
+                            <Text
+                              style={[
+                                styles.cityChipText,
+                                { color: theme.textSecondary },
+                                editTransactionData.recurring_frequency === item.value && { color: '#fff', fontWeight: '600' },
+                              ]}
+                            >
+                              {item.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </>
+                  ) : null}
+
                   <View style={styles.editActions}>
                     <TouchableOpacity style={[styles.smallBtn, { backgroundColor: theme.surface }]} onPress={resetTransactionEditor}>
                       <Text style={[styles.smallBtnText, { color: theme.textSecondary }]}>取消</Text>
@@ -1790,6 +1904,9 @@ export default function ProfileScreen() {
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>店铺：{item.store_id ? (transactionStoreMap.get(item.store_id) || item.store_id) : '-'}</Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>供应商：{item.supplier_id ? (transactionSupplierMap.get(item.supplier_id) || item.supplier_id) : '-'}</Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>渠道：{item.channel_name || '-'}</Text>
+                      {item.is_recurring ? (
+                        <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>周期频次：{recurringFrequencyLabelMap[item.recurring_frequency || 'monthly']}</Text>
+                      ) : null}
                       {item.description ? <Text style={[styles.distributorSubText, { color: theme.textSecondary }]} numberOfLines={2}>备注：{item.description}</Text> : null}
                     </View>
                     <View style={styles.cityActionsRow}>
@@ -2199,7 +2316,7 @@ export default function ProfileScreen() {
       {/* Notifications Modal */}
       <Modal visible={notificationModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+          <View style={[styles.modalContent, styles.managementModalContent, { backgroundColor: theme.surface }]}> 
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>通知</Text>
               <TouchableOpacity onPress={() => setNotificationModalVisible(false)}>
@@ -2213,7 +2330,7 @@ export default function ProfileScreen() {
               renderItem={renderNotification}
               ListEmptyComponent={<Text style={[styles.emptyCityText, { color: theme.textTertiary }]}>暂无通知</Text>}
               style={styles.cityList}
-              contentContainerStyle={notifications.length === 0 ? styles.cityListEmptyContent : styles.cityListContent}
+              contentContainerStyle={notifications.length === 0 ? styles.cityListEmptyContent : [styles.cityListContent, styles.notificationListContent]}
             />
           </View>
         </View>
@@ -2642,10 +2759,113 @@ export default function ProfileScreen() {
                   placeholderTextColor={theme.textTertiary}
                 />
 
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="发票抬头 (选填)"
+                  value={editStoreData.invoice_title}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, invoice_title: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="纳税人识别号 (选填)"
+                  value={editStoreData.tax_id}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, tax_id: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="开户银行 (选填)"
+                  value={editStoreData.bank_name}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, bank_name: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="银行账号 (选填)"
+                  value={editStoreData.bank_account}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, bank_account: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                {(editStoreData.invoice_title || editStoreData.tax_id || editStoreData.bank_name || editStoreData.bank_account) ? (
+                  <View style={[styles.invoiceBox, { backgroundColor: theme.surfaceSecondary, borderColor: theme.divider }]}> 
+                    <View style={styles.invoiceHeaderRow}>
+                      <TouchableOpacity
+                        style={styles.invoiceToggleButton}
+                        onPress={() => setIsStoreEditorInvoiceExpanded((prev) => !prev)}
+                      >
+                        <Text style={[styles.invoiceTitleText, { color: theme.textSecondary }]}>开票信息</Text>
+                        {isStoreEditorInvoiceExpanded ? (
+                          <ChevronUp size={14} color={theme.textTertiary} />
+                        ) : (
+                          <ChevronDown size={14} color={theme.textTertiary} />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.invoiceCopyAllButton}
+                        onPress={() => {
+                          void copyInvoiceText([
+                            `发票抬头：${editStoreData.invoice_title || '-'}`,
+                            `纳税人识别号：${editStoreData.tax_id || '-'}`,
+                            `开户行：${editStoreData.bank_name || '-'}`,
+                            `账号：${editStoreData.bank_account || '-'}`,
+                          ].join('\n'), 'store-editor:all');
+                        }}
+                      >
+                        {copiedInvoiceKey === 'store-editor:all' ? (
+                          <Check size={14} color={theme.blue} />
+                        ) : (
+                          <Copy size={14} color={theme.textSecondary} />
+                        )}
+                        <Text style={[styles.invoiceCopyText, { color: theme.textSecondary }]}>一键复制</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {isStoreEditorInvoiceExpanded ? (
+                      <View style={styles.invoiceDetailWrap}>
+                        <View style={styles.invoiceDetailRow}>
+                          <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                            发票抬头：{editStoreData.invoice_title || '-'}
+                          </Text>
+                          <TouchableOpacity onPress={() => { void copyInvoiceText(editStoreData.invoice_title || '', 'store-editor:title'); }}>
+                            {copiedInvoiceKey === 'store-editor:title' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.invoiceDetailRow}>
+                          <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                            纳税人识别号：{editStoreData.tax_id || '-'}
+                          </Text>
+                          <TouchableOpacity onPress={() => { void copyInvoiceText(editStoreData.tax_id || '', 'store-editor:tax'); }}>
+                            {copiedInvoiceKey === 'store-editor:tax' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.invoiceDetailRow}>
+                          <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                            开户行+账号：{editStoreData.bank_name || '-'} / {editStoreData.bank_account || '-'}
+                          </Text>
+                          <TouchableOpacity onPress={() => { void copyInvoiceText(`${editStoreData.bank_name || '-'} / ${editStoreData.bank_account || '-'}`, 'store-editor:bank'); }}>
+                            {copiedInvoiceKey === 'store-editor:bank' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
                 <Text style={[styles.editorHint, { color: theme.textTertiary }]}>合作模式</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityChipsWrap}>
                   {([
-                    { value: 'consignment', label: '代销' },
+                    { value: 'consignment', label: '寄售' },
                     { value: 'buyout', label: '买断' },
                     { value: 'direct', label: '直营' },
                   ] as const).map((mode) => (
@@ -2713,9 +2933,75 @@ export default function ProfileScreen() {
                         {item.city_name || '未知城市'} · {item.distributor_email || '未绑定分销商'}
                       </Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>联系人：{item.contact || '-'} · 电话：{item.phone || '-'}</Text>
-                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>结算日：{item.settlement_day ?? '-'} · 合作模式：{item.cooperation_mode || '-'}</Text>
+                      <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>结算日：{item.settlement_day ?? '-'} · 合作模式：{item.cooperation_mode ? cooperationModeLabelMap[item.cooperation_mode] : '-'}</Text>
                       <Text style={[styles.distributorSubText, { color: theme.textSecondary }]}>等级：{item.grade || '-'} · 合同到期：{item.contract_expiry_date || '-'}</Text>
                       {item.contract_file_url ? <Text style={[styles.distributorSubText, { color: theme.blue }]} numberOfLines={1}>合同链接：{item.contract_file_url}</Text> : null}
+                      {hasInvoiceInfo(item) ? (
+                        <View style={[styles.invoiceBox, { backgroundColor: theme.surfaceSecondary, borderColor: theme.divider }]}> 
+                          <View style={styles.invoiceHeaderRow}>
+                            <TouchableOpacity
+                              style={styles.invoiceToggleButton}
+                              onPress={() => {
+                                setExpandedInvoiceByStore((prev) => ({
+                                  ...prev,
+                                  [item.id]: !prev[item.id],
+                                }));
+                              }}
+                            >
+                              <Text style={[styles.invoiceTitleText, { color: theme.textSecondary }]}>开票信息</Text>
+                              {expandedInvoiceByStore[item.id] ? (
+                                <ChevronUp size={14} color={theme.textTertiary} />
+                              ) : (
+                                <ChevronDown size={14} color={theme.textTertiary} />
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.invoiceCopyAllButton}
+                              onPress={() => {
+                                void copyInvoiceText(buildInvoiceText(item), `${item.id}:all`);
+                              }}
+                            >
+                              {copiedInvoiceKey === `${item.id}:all` ? (
+                                <Check size={14} color={theme.blue} />
+                              ) : (
+                                <Copy size={14} color={theme.textSecondary} />
+                              )}
+                              <Text style={[styles.invoiceCopyText, { color: theme.textSecondary }]}>一键复制</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          {expandedInvoiceByStore[item.id] ? (
+                            <View style={styles.invoiceDetailWrap}>
+                              <View style={styles.invoiceDetailRow}>
+                                <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  发票抬头：{item.invoice_title || '-'}
+                                </Text>
+                                <TouchableOpacity onPress={() => { void copyInvoiceText(item.invoice_title || '', `${item.id}:title`); }}>
+                                  {copiedInvoiceKey === `${item.id}:title` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                                </TouchableOpacity>
+                              </View>
+
+                              <View style={styles.invoiceDetailRow}>
+                                <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  纳税人识别号：{item.tax_id || '-'}
+                                </Text>
+                                <TouchableOpacity onPress={() => { void copyInvoiceText(item.tax_id || '', `${item.id}:tax`); }}>
+                                  {copiedInvoiceKey === `${item.id}:tax` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                                </TouchableOpacity>
+                              </View>
+
+                              <View style={styles.invoiceDetailRow}>
+                                <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  开户行+账号：{item.bank_name || '-'} / {item.bank_account || '-'}
+                                </Text>
+                                <TouchableOpacity onPress={() => { void copyInvoiceText(`${item.bank_name || '-'} / ${item.bank_account || '-'}`, `${item.id}:bank`); }}>
+                                  {copiedInvoiceKey === `${item.id}:bank` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          ) : null}
+                        </View>
+                      ) : null}
                     </View>
                     <View style={styles.cityActionsRow}>
                       {isSuperAdmin && (
@@ -2879,7 +3165,7 @@ const styles = StyleSheet.create({
   },
   storeModalContent: {
     maxHeight: '90%',
-    minHeight: '82%',
+    minHeight: '78%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2990,9 +3276,10 @@ const styles = StyleSheet.create({
   addCityButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cityList: { flex: 1 },
   cityListContent: { paddingBottom: Spacing.xxxl },
+  notificationListContent: { paddingBottom: Spacing.xxl },
   cityListEmptyContent: { flexGrow: 1, justifyContent: 'center' },
   storeEditorScroll: {
-    maxHeight: 430,
+    maxHeight: 520,
   },
   storeEditorScrollContent: {
     paddingBottom: 10,
@@ -3058,6 +3345,52 @@ const styles = StyleSheet.create({
   cityActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  invoiceBox: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  invoiceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  invoiceToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  invoiceTitleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  invoiceCopyAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  invoiceCopyText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  invoiceDetailWrap: {
+    marginTop: 6,
+    gap: 6,
+  },
+  invoiceDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  invoiceDetailText: {
+    flex: 1,
   },
   citySortBtn: {
     width: 30,
