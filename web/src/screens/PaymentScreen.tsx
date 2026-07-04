@@ -20,22 +20,6 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
 const defaultScanResetThresholdMs = 420;
 const scanThresholdPresets = [300, 420, 650, 900] as const;
 
-interface ScanDiagnostics {
-  totalAttempts: number;
-  productAccepted: number;
-  paymentAccepted: number;
-  switchedToPaymentTarget: number;
-  rejectedAttempts: number;
-  timeoutResets: number;
-}
-
-interface ScanEventRecord {
-  ts: number;
-  target: 'product' | 'payment';
-  code: string;
-  result: string;
-}
-
 interface ActiveOrderItemDraft {
   id: string;
   productName: string;
@@ -44,14 +28,30 @@ interface ActiveOrderItemDraft {
   discountPrice: number;
   draftDiscountPrice: string;
 }
+
+interface TimingEntry {
+  label: string;
+  durationMs: number;
+  timestamp: number;
+  isError?: boolean;
+}
+
+interface OperationLog {
+  id: string;
+  type: 'order' | 'payment';
+  entries: TimingEntry[];
+  totalMs: number;
+  timestamp: number;
+  hitFallback?: boolean;
+}
 const playSuccessSpeech = (amount: number): void => {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       const utterance = new SpeechSynthesisUtterance(`收款成功，金额${amount}元`);
       utterance.lang = 'zh-CN';
       window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      // degrade silently
+    } catch {
+      window.speechSynthesis.cancel();
     }
   }
 };
@@ -83,16 +83,9 @@ export const PaymentScreen: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('alipay');
   const [scanTarget, setScanTarget] = useState<'product' | 'payment'>('product');
   const [scanResetThresholdMs, setScanResetThresholdMs] = useState<number>(defaultScanResetThresholdMs);
-  const [showScannerDebug, setShowScannerDebug] = useState(false);
-  const [scanDiagnostics, setScanDiagnostics] = useState<ScanDiagnostics>({
-    totalAttempts: 0,
-    productAccepted: 0,
-    paymentAccepted: 0,
-    switchedToPaymentTarget: 0,
-    rejectedAttempts: 0,
-    timeoutResets: 0,
-  });
-  const [scanEvents, setScanEvents] = useState<ScanEventRecord[]>([]);
+  const [showTimingPanel, setShowTimingPanel] = useState(false);
+  const [operationLogs, setOperationLogs] = useState<OperationLog[]>([]);
+  const [currentTiming, setCurrentTiming] = useState<TimingEntry[]>([]);
 
   const productInputRef = useRef<HTMLInputElement | null>(null);
   const paymentInputRef = useRef<HTMLInputElement | null>(null);
@@ -101,27 +94,12 @@ export const PaymentScreen: React.FC = () => {
   const scanTargetRef = useRef<'product' | 'payment'>('product');
   const isScannerProcessingRef = useRef(false);
   const scanDisplaySyncTimeoutRef = useRef<number | null>(null);
+  const currentTimingRef = useRef<TimingEntry[]>([]);
   const addProductByBarcodeRef = useRef<(code: string) => void>(() => undefined);
   const collectByCodeRef = useRef<(code: string) => Promise<void>>(async () => undefined);
 
   const canUseCashier = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const canAdjustAmount = user?.role === 'admin' || user?.role === 'super_admin';
-
-  const pushScanEvent = useCallback((event: Omit<ScanEventRecord, 'ts'>): void => {
-    setScanEvents((prev) => [{ ...event, ts: Date.now() }, ...prev].slice(0, 20));
-  }, []);
-
-  const bumpDiagnostics = useCallback((patch: Partial<ScanDiagnostics>): void => {
-    setScanDiagnostics((prev) => ({
-      ...prev,
-      totalAttempts: prev.totalAttempts + (patch.totalAttempts ?? 0),
-      productAccepted: prev.productAccepted + (patch.productAccepted ?? 0),
-      paymentAccepted: prev.paymentAccepted + (patch.paymentAccepted ?? 0),
-      switchedToPaymentTarget: prev.switchedToPaymentTarget + (patch.switchedToPaymentTarget ?? 0),
-      rejectedAttempts: prev.rejectedAttempts + (patch.rejectedAttempts ?? 0),
-      timeoutResets: prev.timeoutResets + (patch.timeoutResets ?? 0),
-    }));
-  }, []);
 
   const syncScanDisplay = useCallback((target: 'product' | 'payment', value: string): void => {
     if (target === 'product') {
@@ -141,21 +119,49 @@ export const PaymentScreen: React.FC = () => {
     }, 80);
   }, [syncScanDisplay]);
 
-  const resetScannerDiagnostics = useCallback((): void => {
-    setScanDiagnostics({
-      totalAttempts: 0,
-      productAccepted: 0,
-      paymentAccepted: 0,
-      switchedToPaymentTarget: 0,
-      rejectedAttempts: 0,
-      timeoutResets: 0,
-    });
-    setScanEvents([]);
+  const resetCurrentTiming = useCallback((): void => {
+    currentTimingRef.current = [];
+    setCurrentTiming([]);
+  }, []);
+
+  const pushTimingEntry = useCallback((label: string, startTime: number, isError = false): void => {
+    const durationMs = Number((performance.now() - startTime).toFixed(1));
+    const nextEntry: TimingEntry = {
+      label,
+      durationMs,
+      timestamp: Date.now(),
+      isError,
+    };
+    const next = [...currentTimingRef.current, nextEntry];
+    currentTimingRef.current = next;
+    setCurrentTiming(next);
+  }, []);
+
+  const commitOperationLog = useCallback((type: 'order' | 'payment', hitFallback = false): void => {
+    const entries = currentTimingRef.current;
+    if (entries.length === 0) return;
+
+    const totalMs = Number(entries.reduce((sum, item) => sum + item.durationMs, 0).toFixed(1));
+    const timestamp = Date.now();
+    const log: OperationLog = {
+      id: `${type}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      entries,
+      totalMs,
+      timestamp,
+      hitFallback,
+    };
+    setOperationLogs((prev) => [log, ...prev].slice(0, 20));
+    currentTimingRef.current = [];
+    setCurrentTiming([]);
+  }, []);
+
+  const resetScannerState = useCallback((): void => {
     scanBufferRef.current = '';
-    syncScanDisplay(scanTargetRef.current, '');
+    scheduleScanDisplaySync(scanTargetRef.current);
     setStatus('pending');
-    setStatusMessage('已重置扫码调试统计');
-  }, [syncScanDisplay]);
+    setStatusMessage('已重置扫码状态');
+  }, [scheduleScanDisplaySync]);
 
   const productById = useMemo(() => {
     const byId = new Map<string, (typeof products)[number]>();
@@ -268,8 +274,6 @@ export const PaymentScreen: React.FC = () => {
     const digits = normalizeDigits(rawCode.trim());
     if (digits.length >= 16 && digits.length <= 24) {
       const detectedMethod = detectPaymentMethodByAuthCode(digits);
-      bumpDiagnostics({ switchedToPaymentTarget: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: digits.slice(0, 24), result: 'switch_to_payment_target' });
       setScanTarget('payment');
       setPaymentAuthCode(digits.slice(0, 24));
       if (detectedMethod) {
@@ -287,8 +291,6 @@ export const PaymentScreen: React.FC = () => {
 
     const barcode = normalizeProductBarcode(digits);
     if (barcode.length !== 13) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: digits.slice(0, 24), result: 'reject_invalid_product_barcode' });
       setStatus('failed');
       setStatusMessage('商品条码必须是 13 位数字');
       return;
@@ -296,8 +298,6 @@ export const PaymentScreen: React.FC = () => {
 
     const product = productByBarcode.get(barcode);
     if (!product) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: barcode, result: 'reject_product_not_found' });
       setStatus('failed');
       setStatusMessage(`未找到条码 ${barcode} 对应商品`);
       return;
@@ -305,11 +305,9 @@ export const PaymentScreen: React.FC = () => {
 
     const currentQty = cart.get(product.id) || 0;
     updateCartQuantity(product.id, currentQty + 1);
-    bumpDiagnostics({ totalAttempts: 1, productAccepted: 1 });
-    pushScanEvent({ target: scanTargetRef.current, code: barcode, result: `product_added:${product.name}` });
     setStatus('pending');
     setStatusMessage(`已加入 ${product.name} x1`);
-  }, [bumpDiagnostics, cart, productByBarcode, pushScanEvent, updateCartQuantity]);
+  }, [cart, productByBarcode, updateCartQuantity]);
 
   const handleProductScanSubmit = (): void => {
     addProductByBarcode(productScanCode);
@@ -348,11 +346,17 @@ export const PaymentScreen: React.FC = () => {
     }
 
     setIsCreatingOrder(true);
+    resetCurrentTiming();
+    let shouldCommitLog = false;
+    let hitFallback = false;
     try {
+      shouldCommitLog = true;
+      const rpcStart = performance.now();
       const result = await createRetailOrders(cartItems.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,
       })));
+      pushTimingEntry('建单 (RPC)', rpcStart, Boolean(result.error));
 
       if (result.error) {
         setStatus('failed');
@@ -361,6 +365,7 @@ export const PaymentScreen: React.FC = () => {
       }
 
       if (!result.orderId) {
+        hitFallback = true;
         await fetchOrders();
       }
       const orderId = result.orderId || resolveCreatedOrderId(totalAmount);
@@ -370,7 +375,9 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
+      const detailStart = performance.now();
       const detail = await fetchOrderDetail(orderId);
+      pushTimingEntry('订单详情拉取', detailStart, !detail || detail.items.length === 0);
       if (!detail || detail.items.length === 0) {
         setStatus('failed');
         setStatusMessage('订单已创建，但未能加载商品明细，请到订单页刷新后重试');
@@ -406,6 +413,9 @@ export const PaymentScreen: React.FC = () => {
       paymentInputRef.current?.focus();
     } finally {
       setIsCreatingOrder(false);
+      if (shouldCommitLog) {
+        commitOperationLog('order', hitFallback);
+      }
     }
   };
 
@@ -436,8 +446,6 @@ export const PaymentScreen: React.FC = () => {
 
   const handleCollect = useCallback(async (inputCode?: string): Promise<void> => {
     if (!activeOrder) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: normalizeDigits((inputCode ?? paymentAuthCode).trim()).slice(0, 24), result: 'reject_no_active_order' });
       setStatus('failed');
       setStatusMessage('请先创建订单，再扫描客户付款码');
       return;
@@ -445,8 +453,6 @@ export const PaymentScreen: React.FC = () => {
 
     const authCode = normalizeDigits((inputCode ?? paymentAuthCode).trim()).slice(0, 24);
     if (!validateAuthCode(authCode)) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: authCode, result: 'reject_invalid_auth_code' });
       setStatus('failed');
       setStatusMessage('付款码格式错误，应为 16-24 位数字');
       return;
@@ -459,8 +465,6 @@ export const PaymentScreen: React.FC = () => {
     }
 
     if (!validateAuthCodeForMethod(authCode, resolvedPaymentMethod)) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: authCode, result: `reject_mismatched_channel:${resolvedPaymentMethod}` });
       setStatus('failed');
       setStatusMessage(
         resolvedPaymentMethod === 'wechat'
@@ -471,24 +475,25 @@ export const PaymentScreen: React.FC = () => {
     }
 
     setIsCollecting(true);
+    resetCurrentTiming();
+    let shouldCommitLog = false;
     try {
+      shouldCommitLog = true;
+      const collectStart = performance.now();
       const result = await collectByAuthCode({
         orderId: activeOrder.id,
         amount: activeOrder.amount,
         paymentMethod: resolvedPaymentMethod,
         authCode,
       });
+      pushTimingEntry('收款 (gateway)', collectStart, !result.success);
 
       if (!result.success) {
-        bumpDiagnostics({ rejectedAttempts: 1 });
-        pushScanEvent({ target: scanTargetRef.current, code: authCode, result: `reject_collect_failed:${result.error || 'unknown'}` });
         setStatus('failed');
         setStatusMessage(`收款失败：${result.error || '未知错误'}`);
         return;
       }
 
-      bumpDiagnostics({ totalAttempts: 1, paymentAccepted: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: authCode, result: `payment_submitted:${resolvedPaymentMethod}` });
 
       setStatus(result.status);
       if (result.transactionId) {
@@ -503,18 +508,21 @@ export const PaymentScreen: React.FC = () => {
       }
 
       setStatusMessage('支付处理中，正在查询最终状态...');
+      const pollingStart = performance.now();
       await pollUntilSettled(activeOrder.id, activeOrder.amount);
+      pushTimingEntry('支付状态轮询', pollingStart);
     } catch (error) {
-      bumpDiagnostics({ rejectedAttempts: 1 });
-      pushScanEvent({ target: scanTargetRef.current, code: authCode, result: 'reject_collect_exception' });
       setStatus('failed');
       setStatusMessage(`收款异常：${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setIsCollecting(false);
       setPaymentAuthCode('');
       paymentInputRef.current?.focus();
+      if (shouldCommitLog) {
+        commitOperationLog('payment');
+      }
     }
-  }, [activeOrder, bumpDiagnostics, paymentAuthCode, paymentMethod, pollUntilSettled, pushScanEvent]);
+  }, [activeOrder, commitOperationLog, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
 
   const updateItemDraftPrice = (itemId: string, value: string): void => {
     if (!activeOrder || isApplyingItemRounding) return;
@@ -619,12 +627,6 @@ export const PaymentScreen: React.FC = () => {
       if (isDigit) {
         const currentTarget = scanTargetRef.current;
         if (scanBufferRef.current.length > 0 && now - lastKeyTsRef.current > scanResetThresholdMs) {
-          bumpDiagnostics({ timeoutResets: 1 });
-          pushScanEvent({
-            target: currentTarget,
-            code: scanBufferRef.current.slice(0, 24),
-            result: `timeout_reset>${scanResetThresholdMs}ms`,
-          });
           scanBufferRef.current = '';
         }
         lastKeyTsRef.current = now;
@@ -635,32 +637,39 @@ export const PaymentScreen: React.FC = () => {
 
       if ((event.key === 'Enter' || event.key === 'Tab') && scanBufferRef.current.length > 0) {
         event.preventDefault();
-        const currentTarget = scanTargetRef.current;
-        const scanned = scanBufferRef.current;
-        scanBufferRef.current = '';
-        syncScanDisplay(currentTarget, '');
+        if (isScannerProcessingRef.current) return;
 
-        if (currentTarget === 'product') {
-          addProductByBarcodeRef.current(scanned);
-          syncScanDisplay('product', '');
-          return;
-        }
+        isScannerProcessingRef.current = true;
+        void (async () => {
+          try {
+            const currentTarget = scanTargetRef.current;
+            const scanned = scanBufferRef.current;
+            scanBufferRef.current = '';
+            syncScanDisplay(currentTarget, '');
 
-        const authCode = normalizeDigits(scanned).slice(0, 24);
-        syncScanDisplay('payment', authCode);
-        const detectedMethod = detectPaymentMethodByAuthCode(authCode);
-        if (detectedMethod) {
-          setPaymentMethod(detectedMethod);
-        }
-        if (authCode.length >= 16 && authCode.length <= 24) {
-          void collectByCodeRef.current(authCode);
-          return;
-        }
+            if (currentTarget === 'product') {
+              addProductByBarcodeRef.current(scanned);
+              syncScanDisplay('product', '');
+              return;
+            }
 
-        bumpDiagnostics({ rejectedAttempts: 1 });
-        pushScanEvent({ target: 'payment', code: authCode, result: 'reject_payment_code_length' });
-        setStatus('failed');
-        setStatusMessage('付款码格式错误，应为 16-24 位数字');
+            const authCode = normalizeDigits(scanned).slice(0, 24);
+            syncScanDisplay('payment', authCode);
+            const detectedMethod = detectPaymentMethodByAuthCode(authCode);
+            if (detectedMethod) {
+              setPaymentMethod(detectedMethod);
+            }
+            if (authCode.length >= 16 && authCode.length <= 24) {
+              await collectByCodeRef.current(authCode);
+              return;
+            }
+
+            setStatus('failed');
+            setStatusMessage('付款码格式错误，应为 16-24 位数字');
+          } finally {
+            isScannerProcessingRef.current = false;
+          }
+        })();
         return;
       }
 
@@ -668,7 +677,6 @@ export const PaymentScreen: React.FC = () => {
         const currentTarget = scanTargetRef.current;
         scanBufferRef.current = '';
         syncScanDisplay(currentTarget, '');
-        pushScanEvent({ target: currentTarget, code: '', result: 'manual_buffer_reset' });
       }
     };
 
@@ -676,7 +684,7 @@ export const PaymentScreen: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', onGlobalKeyDown);
     };
-  }, [bumpDiagnostics, pushScanEvent, scanResetThresholdMs, scheduleScanDisplaySync, syncScanDisplay]);
+  }, [scanResetThresholdMs, scheduleScanDisplaySync, syncScanDisplay]);
 
   if (!canUseCashier) {
     return (
@@ -717,58 +725,75 @@ export const PaymentScreen: React.FC = () => {
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => setShowScannerDebug((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${showScannerDebug ? 'bg-amber-500/20 border-amber-400/40 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+            onClick={() => setShowTimingPanel((prev) => !prev)}
+            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${showTimingPanel ? 'bg-accent/20 border-accent/40 text-white' : 'bg-white/5 border-white/10 text-white/70'}`}
           >
-            {showScannerDebug ? '关闭扫码调试' : '开启扫码调试'}
-          </button>
-          <button
-            type="button"
-            onClick={resetScannerDiagnostics}
-            className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-white/5 border-white/20 text-white/70"
-          >
-            重置统计
+            {showTimingPanel ? '隐藏性能监控' : '显示性能监控'}
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs text-white/60">扫码重置阈值：</p>
-          {scanThresholdPresets.map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              onClick={() => setScanResetThresholdMs(preset)}
-              className={`px-3 py-1 rounded-lg border text-xs font-semibold ${scanResetThresholdMs === preset ? 'bg-accent/20 border-accent/40 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
-            >
-              {preset}ms
-            </button>
-          ))}
-        </div>
-
-        {showScannerDebug && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">扫描成功: {scanDiagnostics.totalAttempts}</p>
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">商品成功: {scanDiagnostics.productAccepted}</p>
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">付款提交: {scanDiagnostics.paymentAccepted}</p>
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">自动切目标: {scanDiagnostics.switchedToPaymentTarget}</p>
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">失败拒绝: {scanDiagnostics.rejectedAttempts}</p>
-              <p className="text-xs bg-white/5 rounded-lg px-2 py-1">超时重置: {scanDiagnostics.timeoutResets}</p>
+        {showTimingPanel && (
+          <div className="space-y-3 border-t border-white/10 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-white/60">性能分段耗时监控</p>
+              <button
+                type="button"
+                onClick={resetScannerState}
+                className="px-3 py-1 rounded-lg border text-xs font-semibold bg-white/5 border-white/20 text-white/70"
+              >
+                重置扫码状态
+              </button>
             </div>
 
-            <div className="max-h-[180px] overflow-auto border border-white/10 rounded-xl divide-y divide-white/5">
-              {scanEvents.length === 0 ? <p className="px-3 py-2 text-xs text-white/40">暂无扫码事件</p> : null}
-              {scanEvents.map((event) => (
-                <div key={`${event.ts}-${event.code}-${event.result}`} className="px-3 py-2 text-xs text-white/70 flex items-center justify-between gap-3">
-                  <span className="text-white/50">{new Date(event.ts).toLocaleTimeString('zh-CN', { hour12: false })}</span>
-                  <span>{event.target === 'product' ? '商品' : '付款'}</span>
-                  <span className="truncate max-w-[180px]">{event.code || '-'}</span>
-                  <span className="truncate max-w-[220px] text-white/50">{event.result}</span>
-                </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-white/60">扫码重置阈值：</p>
+              {scanThresholdPresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setScanResetThresholdMs(preset)}
+                  className={`px-3 py-1 rounded-lg border text-xs font-semibold ${scanResetThresholdMs === preset ? 'bg-accent/20 border-accent/40 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+                >
+                  {preset}ms
+                </button>
               ))}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-white/60">当前操作分段耗时</p>
+              <div className="max-h-32 overflow-y-auto border border-white/10 rounded-lg divide-y divide-white/5">
+                {currentTiming.length === 0 ? <p className="px-3 py-2 text-xs text-white/40">暂无记录</p> : null}
+                {currentTiming.map((entry, index) => (
+                  <div key={`${entry.timestamp}-${entry.label}-${index}`} className="px-3 py-2 text-xs flex items-center justify-between gap-3">
+                    <span className="text-white/70">{entry.label}</span>
+                    <span className={`font-mono ${entry.isError ? 'text-red-300' : 'text-white/90'}`}>{entry.durationMs.toFixed(1)}ms</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-white/60">历史操作日志（最近 20 条）</p>
+              <div className="max-h-48 overflow-y-auto border border-white/10 rounded-lg divide-y divide-white/5">
+                {operationLogs.length === 0 ? <p className="px-3 py-2 text-xs text-white/40">暂无记录</p> : null}
+                {operationLogs.map((log) => (
+                  <div key={log.id} className="px-3 py-2 text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-white/70">
+                        {log.type === 'order' ? '建单' : '收款'} · {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {log.hitFallback ? <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200">fallback</span> : null}
+                        <span className="font-mono text-white/90">{log.totalMs.toFixed(1)}ms</span>
+                      </div>
+                    </div>
+                    <div className="text-white/50">{log.entries.map((entry) => `${entry.label}:${entry.durationMs.toFixed(1)}ms`).join(' | ')}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
