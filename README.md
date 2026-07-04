@@ -221,7 +221,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.4）
+### 5. 启动 Web 端（v1.3.5）
 
 ```bash
 npm run web:v2
@@ -411,9 +411,15 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 后续规划
 
-- 计划区已收口（`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
+- 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.5 (2026-07-04) - 订单统计卡补齐 + 收银台耗时监控面板
+
+- Web 订单页新增“商品数量统计（同商品自动累加）”卡片：双列展示范围统计与累计统计，支持折叠，按数量降序，管理员/超级管理员可见，进货单视图自动隐藏。
+- 收银台页面移除扫码调试模块，替换为“性能分段耗时监控”面板：支持建单/收款分段耗时记录、历史日志（最近20条）、阈值预设切换与扫码状态重置。
+- 收银台扫码链路稳定性细节收口：保留 scanner refs 与缓冲重置逻辑，修复键盘扫码处理防重入与类型/构建检查问题。
 
 ### Mobile v2.2.4 (2026-07-02) - v7 升级批次收口 + 开票/财务兼容热修
 
