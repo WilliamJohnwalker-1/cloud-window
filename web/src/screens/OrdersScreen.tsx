@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ChevronRight, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
@@ -147,6 +147,7 @@ export const OrdersScreen: React.FC = () => {
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
+  const [showQuantityStats, setShowQuantityStats] = useState(true);
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.role === 'finance';
 
   const getOrderKindLabel = (kind: OrderKind): string => {
@@ -490,9 +491,67 @@ export const OrdersScreen: React.FC = () => {
     return map;
   }, [products]);
 
-  const resolveItemName = (productId: string, productName?: string): string => {
+  const resolveItemName = useCallback((productId: string, productName?: string): string => {
     return productName || productNameMap.get(productId) || fallbackProductName;
-  };
+  }, [productNameMap]);
+  const filteredOrdersWithoutRange = useMemo(() => {
+    let result = baseOrders;
+    if (selectedOrderKind !== 'all') {
+      result = result.filter((order) => order.order_kind === selectedOrderKind);
+    }
+    if (selectedFilterProvinceId) {
+      result = result.filter((order) => {
+        const province = orderCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
+        return selectedFilterProvinceId === '未知省份' ? !province : province === selectedFilterProvinceId;
+      });
+    }
+    if (selectedFilterCityId) {
+      result = result.filter((order) => order.city_id === selectedFilterCityId);
+    }
+    if (selectedFilterStoreId) {
+      result = result.filter((order) => order.store_id === selectedFilterStoreId);
+    }
+    if (refundViewFilter !== 'all') {
+      result = result.filter((order) => {
+        const paymentStatus = String(order.payment_status || '').toLowerCase();
+        const isRefundedOrder = paymentStatus === 'refunded'
+          || paymentStatus === 'refund_pending';
+        return refundViewFilter === 'refunded' ? isRefundedOrder : !isRefundedOrder;
+      });
+    }
+    return result;
+  }, [baseOrders, orderCityProvinceMap, refundViewFilter, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
+
+  const rangeProductStats = useMemo(() => {
+    const map = new Map<string, { name: string; quantity: number }>();
+    filteredOrders.forEach((order) => {
+      (order.items || []).forEach((item) => {
+        const key = item.product_id;
+        const prev = map.get(key);
+        map.set(key, {
+          name: item.product_name || '未知商品',
+          quantity: (prev?.quantity || 0) + item.quantity,
+        });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
+  }, [filteredOrders, resolveItemName]);
+
+  const cumulativeProductStats = useMemo(() => {
+    const map = new Map<string, { name: string; quantity: number }>();
+    filteredOrdersWithoutRange.forEach((order) => {
+      (order.items || []).forEach((item) => {
+        const key = item.product_id;
+        const prev = map.get(key);
+        map.set(key, {
+          name: item.product_name || '未知商品',
+          quantity: (prev?.quantity || 0) + item.quantity,
+        });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
+  }, [filteredOrdersWithoutRange, resolveItemName]);
+
 
   const getResolvedOrder = (orderId: string): (typeof orders)[number] | null => {
     return detailCache[orderId] || orders.find((item) => item.id === orderId) || null;
@@ -664,8 +723,13 @@ export const OrdersScreen: React.FC = () => {
         if (!latest || refundedLike) {
           return { success: true, latest: latest || null };
         }
-      } catch {
-        // continue retrying
+      } catch (error) {
+        if (attempt === 5) {
+          setPageNotice({
+            type: 'error',
+            text: `退款状态复核失败：${error instanceof Error ? error.message : '未知错误'}`,
+          });
+        }
       }
 
       if (attempt < 5) {
@@ -888,7 +952,7 @@ export const OrdersScreen: React.FC = () => {
     const centered = { horizontal: 'center' as const, vertical: 'middle' as const };
 
     const sanitizeSheetName = (name: string): string => {
-      const base = name.replace(/[\\/?*\[\]:]/g, '-').trim() || '未命名店铺';
+      const base = name.replace(/[[\\/?*\]:]/g, '-').trim() || '未命名店铺';
       return base.slice(0, 31);
     };
 
@@ -1107,7 +1171,10 @@ export const OrdersScreen: React.FC = () => {
   };
 
   const getCartKey = (productId: string, lineType: CartLineType): string => `${productId}:${lineType}`;
-  const getLineStep = (_lineType: CartLineType): number => 1;
+  const getLineStep = (lineType: CartLineType): number => {
+    void lineType;
+    return 1;
+  };
 
   const getCombinedQtyByProduct = (entries: Map<string, CartDraftItem>, productId: string): number => {
     let total = 0;
@@ -1454,6 +1521,58 @@ export const OrdersScreen: React.FC = () => {
             <p className="text-xl font-black text-accent">¥{statsCopy.discountValue.toFixed(2)}</p>
           </div>
         </div>
+
+        {(user?.role === 'admin' || user?.role === 'super_admin') && selectedOrderKind !== 'purchase' && (
+          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden mt-3">
+            <button
+              type="button"
+              onClick={() => setShowQuantityStats((prev) => !prev)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ShoppingCart size={16} className="text-white/50" />
+                <span className="text-sm font-bold text-white/80">商品数量统计（同商品自动累加）</span>
+              </div>
+              {showQuantityStats ? <ChevronUp size={16} className="text-white/50" /> : <ChevronDown size={16} className="text-white/50" />}
+            </button>
+            {showQuantityStats && (
+              <div className="border-t border-white/10 p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <p className="text-xs text-white/40 uppercase font-bold tracking-tighter">{rangeLabel}</p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                      {rangeProductStats.length === 0 ? (
+                        <p className="text-sm text-white/40">—</p>
+                      ) : (
+                        rangeProductStats.map((stat) => (
+                          <div key={stat.name} className="flex items-center justify-between text-sm gap-4">
+                            <span className="text-white/70 line-clamp-2 flex-1">{stat.name}</span>
+                            <span className="font-mono font-bold text-accent text-right">{stat.quantity}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs text-white/40 uppercase font-bold tracking-tighter">累计</p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                      {cumulativeProductStats.length === 0 ? (
+                        <p className="text-sm text-white/40">—</p>
+                      ) : (
+                        cumulativeProductStats.map((stat) => (
+                          <div key={stat.name} className="flex items-center justify-between text-sm gap-4">
+                            <span className="text-white/70 line-clamp-2 flex-1">{stat.name}</span>
+                            <span className="font-mono font-bold text-accent text-right">{stat.quantity}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
