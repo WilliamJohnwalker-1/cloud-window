@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
@@ -148,7 +148,50 @@ export const OrdersScreen: React.FC = () => {
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
   const [showQuantityStats, setShowQuantityStats] = useState(true);
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
+  const orderCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.role === 'finance';
+
+  useEffect(() => {
+    const handleSearchJump = (event: Event): void => {
+      const customEvent = event as CustomEvent<{
+        tab: 'products' | 'inventory' | 'orders';
+        resultType: 'product' | 'inventory' | 'order';
+        entityId: string;
+      }>;
+
+      if (customEvent.detail.tab !== 'orders' || customEvent.detail.resultType !== 'order') {
+        return;
+      }
+
+      setFilter('all');
+      setSelectedOrderKind('all');
+      setRefundViewFilter('all');
+      setSelectedFilterProvinceId(null);
+      setSelectedFilterCityId(null);
+      setSelectedFilterStoreId(null);
+      setStatsRange('all');
+      setRangeStartDate('');
+      setRangeEndDate('');
+
+      window.setTimeout(() => {
+        const targetId = customEvent.detail.entityId;
+        const targetNode = orderCardRefs.current[targetId];
+        if (!targetNode) return;
+
+        targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedOrderId(targetId);
+        window.setTimeout(() => {
+          setHighlightedOrderId((prev) => (prev === targetId ? null : prev));
+        }, 2200);
+      }, 100);
+    };
+
+    window.addEventListener('app:search-jump', handleSearchJump as EventListener);
+    return () => {
+      window.removeEventListener('app:search-jump', handleSearchJump as EventListener);
+    };
+  }, []);
 
   const getOrderKindLabel = (kind: OrderKind): string => {
     if (kind === 'purchase') return '进货单';
@@ -1730,10 +1773,13 @@ export const OrdersScreen: React.FC = () => {
             return (
           <motion.div
             key={order.id}
+            ref={(node) => {
+              orderCardRefs.current[order.id] = node;
+            }}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.03 }}
-            className="group bg-white/5 border border-white/10 rounded-3xl p-6 hover:border-accent/30 transition-all"
+            className={`group bg-white/5 border border-white/10 rounded-3xl p-6 hover:border-accent/30 transition-all ${highlightedOrderId === order.id ? 'ring-2 ring-accent/40 border-accent/60' : ''}`}
           >
             <div className="flex items-start justify-between mb-6">
               <div className="flex items-center space-x-4">
