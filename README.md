@@ -151,6 +151,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 50. 执行 `supabase/migrate-v7.0-store-invoice-fields.sql`
 51. 执行 `supabase/migrate-v7.1-finance-city-binding.sql`
 52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
+53. 执行 `supabase/migrate-v7.3-retail-single-pool-and-log-completion.sql`
+54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -206,6 +208,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 50. 执行 `supabase/migrate-v7.0-store-invoice-fields.sql`
 51. 执行 `supabase/migrate-v7.1-finance-city-binding.sql`
 52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
+53. 执行 `supabase/migrate-v7.3-retail-single-pool-and-log-completion.sql`
+54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -221,7 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.6）
+### 5. 启动 Web 端（v1.3.7）
 
 ```bash
 npm run web:v2
@@ -414,6 +418,22 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.7 (2026-07-05) - 库存日志补齐与备注收敛
+
+- 本版按累计口径合并记录前序 Web 搜索跳转修复波次：包含“搜索结果跳转并高亮定位”与“未支付零售单 10 分钟超时清理修复”能力，避免跨版本阅读断层。
+- 数据库迁移延伸至 `migrate-v7.4-store-invoice-contact-fields.sql`：在 `v7.3` 零售单池/日志补齐基础上，新增开票联系电话/开票地址独立字段，并补齐 distribution 删单店铺池回滚日志（`删单回滚(店铺池)`）。
+- 补齐 Web 供货建单 fallback 扣减日志：`createBatchOrders` fallback 扣减库存后新增 `inventory_logs` 落库，避免“有扣减无日志”。
+- 补齐 Web 零售建单 fallback 扣减日志：收款台 fallback 扣减库存后新增 `sell` 动作日志，保证后续库存追踪完整。
+- 店铺开票信息纠偏：开票信息区域“联系电话/开票地址”切换为独立字段（`invoice_phone/invoice_address`），不再复用店铺联系人电话/店铺地址。
+- Web 侧库存日志备注统一简化为原因短语（如“零售售出”“供货建单扣减”“条码入库”“店铺池库存调整”），去除过长技术明细。
+
+### Mobile v2.2.5 (2026-07-05) - 库存日志链路补齐与文案收敛
+
+- 移动端库存手工调整/店铺池调整/条码入库/扫码出库/供货建单 fallback 扣减链路统一补齐 `inventory_logs` 写入。
+- 移动端库存日志备注改为统一短原因文案（如“库存编辑”“条码入库”“扫码出库”“供货建单扣减”），提升日志列表可读性。
+- 移动端店铺开票信息纠偏为独立字段（`invoice_phone/invoice_address`）：开票联系电话/开票地址与店铺联系人电话/店铺地址彻底解耦，编辑态与列表态复制口径一致。
+- 与 Web 对齐“后续日志准确、备注简洁”的库存日志口径。
 
 ### Web v1.3.6 (2026-07-05) - 搜索跳转落地 + 未支付超时清理修复
 

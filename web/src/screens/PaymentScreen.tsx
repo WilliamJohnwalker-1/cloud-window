@@ -21,6 +21,7 @@ const defaultScanResetThresholdMs = 420;
 const scanThresholdPresets = [300, 420, 650, 900] as const;
 const unpaidRetailAutoDeleteMs = 10 * 60 * 1000;
 const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_pending', 'refunded', 'refund_pending']);
+const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
 
 interface ActiveOrderItemDraft {
   id: string;
@@ -325,8 +326,12 @@ export const PaymentScreen: React.FC = () => {
 
     const matched = recentOrders.find((order) => {
       if (user && order.distributor_id !== user.id) return false;
+      if (order.order_kind !== 'retail') return false;
       const ageMs = now - new Date(order.created_at).getTime();
       if (ageMs > 3 * 60 * 1000) return false;
+      const paymentStatus = String(order.payment_status || '').toLowerCase();
+      if (paidRetailStatuses.has(paymentStatus)) return false;
+      if (!unpaidRetailStatuses.has(paymentStatus)) return false;
       return Math.abs(Number(order.total_discount_amount || 0) - amount) < 0.01;
     });
 
@@ -383,6 +388,12 @@ export const PaymentScreen: React.FC = () => {
       if (!detail || detail.items.length === 0) {
         setStatus('failed');
         setStatusMessage('订单已创建，但未能加载商品明细，请到订单页刷新后重试');
+        return;
+      }
+
+      if (detail.order_kind !== 'retail') {
+        setStatus('failed');
+        setStatusMessage('收银台仅允许绑定零售单，请在订单页核对后重试建单');
         return;
       }
 
@@ -632,8 +643,21 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
+      if (latest.order_kind !== 'retail') {
+        setActiveOrder(null);
+        setStatus('failed');
+        setStatusMessage('检测到非零售订单，已停止自动清理保护');
+        return;
+      }
+
       const paymentStatus = String(latest.payment_status || '').toLowerCase();
       if (paidRetailStatuses.has(paymentStatus)) {
+        return;
+      }
+      if (!unpaidRetailStatuses.has(paymentStatus)) {
+        setActiveOrder(null);
+        setStatus('failed');
+        setStatusMessage('订单状态不属于未支付范围，已停止自动清理');
         return;
       }
 

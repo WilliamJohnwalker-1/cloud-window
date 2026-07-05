@@ -70,6 +70,8 @@ export interface Store {
   tax_id?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
+  invoice_phone?: string | null;
+  invoice_address?: string | null;
   created_at: string;
   updated_at: string;
 }

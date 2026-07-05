@@ -175,6 +175,8 @@ interface StoreRow {
   tax_id?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
+  invoice_phone?: string | null;
+  invoice_address?: string | null;
   status?: Store['status'] | null;
   created_at: string;
   updated_at: string;
@@ -223,6 +225,8 @@ interface StoreCreateInput {
   tax_id?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
+  invoice_phone?: string | null;
+  invoice_address?: string | null;
 }
 
 interface StoreUpdateInput {
@@ -242,6 +246,8 @@ interface StoreUpdateInput {
   tax_id?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
+  invoice_phone?: string | null;
+  invoice_address?: string | null;
   status?: Store['status'];
 }
 
@@ -288,7 +294,7 @@ const isMissingStoreInvoiceColumnError = (error: unknown): boolean => {
   const raw = error as DetailedErrorLike;
   const code = String(raw.code || '');
   const message = `${raw.message || ''} ${raw.details || ''} ${raw.hint || ''}`.toLowerCase();
-  const hasInvoiceColumn = ['invoice_title', 'tax_id', 'bank_name', 'bank_account'].some((column) => message.includes(column));
+  const hasInvoiceColumn = ['invoice_title', 'tax_id', 'bank_name', 'bank_account', 'invoice_phone', 'invoice_address'].some((column) => message.includes(column));
   const hasMissingHint = message.includes('does not exist') || message.includes('could not find the') || message.includes('schema cache');
 
   return hasInvoiceColumn && (hasMissingHint || code === '42703' || code === 'PGRST204');
@@ -495,13 +501,18 @@ interface AppState {
   updateInventory: (
     productId: string,
     quantity: number,
-    options?: { skipRefresh?: boolean },
+    options?: {
+      skipRefresh?: boolean;
+      action?: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce';
+      note?: string;
+      beforeQuantity?: number;
+    },
   ) => Promise<{ error: Error | null }>;
   updateStoreInventory: (
     storeId: string,
     productId: string,
     quantity: number,
-    options?: { skipRefresh?: boolean },
+    options?: { skipRefresh?: boolean; note?: string; beforeQuantity?: number },
   ) => Promise<{ error: Error | null }>;
   updateInventorySettings: (
     productId: string,
@@ -586,6 +597,8 @@ const mapStore = (raw: StoreRow): Store => {
     tax_id: raw.tax_id ?? null,
     bank_name: raw.bank_name ?? null,
     bank_account: raw.bank_account ?? null,
+    invoice_phone: raw.invoice_phone ?? null,
+    invoice_address: raw.invoice_address ?? null,
     status: raw.status || 'active',
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -1626,12 +1639,14 @@ export const useAppStore = create<AppState>()(
             tax_id: store.tax_id ?? null,
             bank_name: store.bank_name ?? null,
             bank_account: store.bank_account ?? null,
+            invoice_phone: store.invoice_phone ?? null,
+            invoice_address: store.invoice_address ?? null,
           };
 
           const { error } = await supabase.from('stores').insert(payload);
           if (error) {
             if (isMissingStoreInvoiceColumnError(error)) {
-              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.0-store-invoice-fields.sql 后再保存开票信息');
+              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.4-store-invoice-contact-fields.sql 后再保存开票信息');
             }
             throw error;
           }
@@ -1670,11 +1685,13 @@ export const useAppStore = create<AppState>()(
           if (updates.tax_id !== undefined) payload.tax_id = updates.tax_id;
           if (updates.bank_name !== undefined) payload.bank_name = updates.bank_name;
           if (updates.bank_account !== undefined) payload.bank_account = updates.bank_account;
+          if (updates.invoice_phone !== undefined) payload.invoice_phone = updates.invoice_phone;
+          if (updates.invoice_address !== undefined) payload.invoice_address = updates.invoice_address;
 
           const { error } = await supabase.from('stores').update(payload).eq('id', id);
           if (error) {
             if (isMissingStoreInvoiceColumnError(error)) {
-              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.0-store-invoice-fields.sql 后再保存开票信息');
+              throw new Error('数据库缺少开票字段，请先在 Supabase SQL Editor 执行 supabase/migrate-v7.4-store-invoice-contact-fields.sql 后再保存开票信息');
             }
             throw error;
           }
@@ -1995,11 +2012,28 @@ export const useAppStore = create<AppState>()(
 
       updateInventory: async (productId, quantity, options) => {
         try {
+          const { user, products } = get();
+          const beforeQty = options?.beforeQuantity ?? Number(products.find((item) => item.id === productId)?.quantity || 0);
           const { error } = await supabase
             .from('inventory')
             .update({ quantity, updated_at: new Date().toISOString() })
             .eq('product_id', productId);
           if (error) throw error;
+
+          const delta = quantity - beforeQty;
+          if (user && delta !== 0) {
+            const { error: logError } = await supabase.from('inventory_logs').insert({
+              product_id: productId,
+              operator_id: user.id,
+              action: options?.action || 'manual_adjust',
+              delta_quantity: delta,
+              before_quantity: beforeQty,
+              after_quantity: quantity,
+              note: options?.note || null,
+            });
+            if (logError) throw logError;
+          }
+
           if (!options?.skipRefresh) {
             await get().fetchProducts();
           }
@@ -2011,9 +2045,13 @@ export const useAppStore = create<AppState>()(
 
       updateStoreInventory: async (storeId, productId, quantity, options) => {
         try {
-          const { user } = get();
+          const { user, storeInventory } = get();
           if (!user) throw new Error('未登录');
           if (user.role !== 'super_admin') throw new Error('仅超级管理员可调整店铺库存');
+
+          const beforeQty = options?.beforeQuantity ?? Number(
+            storeInventory.find((item) => item.store_id === storeId && item.product_id === productId)?.quantity || 0,
+          );
 
           const { error } = await supabase
             .from('store_inventory')
@@ -2029,6 +2067,20 @@ export const useAppStore = create<AppState>()(
 
           if (error) throw error;
 
+          const delta = quantity - beforeQty;
+          if (delta !== 0) {
+            const { error: logError } = await supabase.from('inventory_logs').insert({
+              product_id: productId,
+              operator_id: user.id,
+              action: 'manual_adjust',
+              delta_quantity: delta,
+              before_quantity: beforeQty,
+              after_quantity: quantity,
+              note: options?.note || '店铺池库存调整',
+            });
+            if (logError) throw logError;
+          }
+
           if (!options?.skipRefresh) {
             await get().fetchStoreInventory(storeId);
           }
@@ -2041,6 +2093,9 @@ export const useAppStore = create<AppState>()(
 
       updateInventorySettings: async (productId, quantity, minQuantity) => {
         try {
+          const { user, products } = get();
+          const beforeQty = Number(products.find((item) => item.id === productId)?.quantity || 0);
+
           const { data, error } = await supabase
             .from('inventory')
             .update({
@@ -2053,6 +2108,21 @@ export const useAppStore = create<AppState>()(
 
           if (error) throw error;
           if (!data || data.length === 0) throw new Error('未找到库存记录，请先初始化库存');
+
+          const delta = quantity - beforeQty;
+          if (user && delta !== 0) {
+            const { error: logError } = await supabase.from('inventory_logs').insert({
+              product_id: productId,
+              operator_id: user.id,
+              action: 'manual_adjust',
+              delta_quantity: delta,
+              before_quantity: beforeQty,
+              after_quantity: quantity,
+              note: '库存编辑',
+            });
+            if (logError) throw logError;
+          }
+
           await get().fetchProducts();
           return { error: null };
         } catch (error) {
@@ -2072,7 +2142,11 @@ export const useAppStore = create<AppState>()(
           const product = get().findProductByBarcode(barcode);
           if (!product) throw new Error('未找到对应条码商品');
           const currentQty = Number(product.quantity || 0);
-          return await get().updateInventory(product.id, currentQty + quantity);
+          return await get().updateInventory(product.id, currentQty + quantity, {
+            action: 'inbound',
+            note: '条码入库',
+            beforeQuantity: currentQty,
+          });
         } catch (error) {
           return { error: error as Error };
         }
@@ -2136,7 +2210,11 @@ export const useAppStore = create<AppState>()(
             });
           if (orderItemError) throw orderItemError;
 
-          const inventoryResult = await get().updateInventory(product.id, currentQty - quantity);
+          const inventoryResult = await get().updateInventory(product.id, currentQty - quantity, {
+            action: 'manual_adjust',
+            note: '扫码出库',
+            beforeQuantity: currentQty,
+          });
           if (inventoryResult.error) throw inventoryResult.error;
 
           await get().fetchOrders();
@@ -2918,7 +2996,12 @@ export const useAppStore = create<AppState>()(
             items.map(async (item) => {
               const product = products.find((p) => p.id === item.productId);
               if (!product) return;
-              await get().updateInventory(item.productId, (product.quantity || 0) - item.quantity, { skipRefresh: true });
+              await get().updateInventory(item.productId, (product.quantity || 0) - item.quantity, {
+                skipRefresh: true,
+                action: 'manual_adjust',
+                note: '供货建单扣减',
+                beforeQuantity: Number(product.quantity || 0),
+              });
             }),
           );
 
