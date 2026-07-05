@@ -19,6 +19,8 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
 
 const defaultScanResetThresholdMs = 420;
 const scanThresholdPresets = [300, 420, 650, 900] as const;
+const unpaidRetailAutoDeleteMs = 10 * 60 * 1000;
+const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_pending', 'refunded', 'refund_pending']);
 
 interface ActiveOrderItemDraft {
   id: string;
@@ -68,11 +70,11 @@ const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | nul
 };
 
 export const PaymentScreen: React.FC = () => {
-  const { user, products, createRetailOrders, fetchOrders, fetchOrderDetail, orders } = useAppStore();
+  const { user, products, createRetailOrders, fetchOrders, fetchOrderDetail, deleteOrder, orders } = useAppStore();
   const [productScanCode, setProductScanCode] = useState('');
   const [paymentAuthCode, setPaymentAuthCode] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
-  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number; items: ActiveOrderItemDraft[] } | null>(null);
+  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number; items: ActiveOrderItemDraft[]; createdAtMs: number } | null>(null);
   const [isApplyingItemRounding, setIsApplyingItemRounding] = useState(false);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
@@ -404,6 +406,7 @@ export const PaymentScreen: React.FC = () => {
         amount: discountedAmount,
         originalAmount,
         items: orderItems,
+        createdAtMs: Number.isFinite(new Date(detail.created_at).getTime()) ? new Date(detail.created_at).getTime() : Date.now(),
       });
       setTransactionId('');
       setPaymentAuthCode('');
@@ -430,6 +433,7 @@ export const PaymentScreen: React.FC = () => {
       if (latest.status === 'paid') {
         setStatusMessage('收款成功，订单已标记为已支付');
         playSuccessSpeech(amount);
+        await fetchOrders();
         return;
       }
 
@@ -442,7 +446,7 @@ export const PaymentScreen: React.FC = () => {
     }
 
     setStatusMessage('仍在等待支付结果，请稍后在订单页刷新状态');
-  }, []);
+  }, [fetchOrders]);
 
   const handleCollect = useCallback(async (inputCode?: string): Promise<void> => {
     if (!activeOrder) {
@@ -504,6 +508,7 @@ export const PaymentScreen: React.FC = () => {
         setStatusMessage('收款成功，订单已完成支付');
         setCart(new Map());
         playSuccessSpeech(activeOrder.amount);
+        await fetchOrders();
         return;
       }
 
@@ -522,7 +527,7 @@ export const PaymentScreen: React.FC = () => {
         commitOperationLog('payment');
       }
     }
-  }, [activeOrder, commitOperationLog, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
+  }, [activeOrder, commitOperationLog, fetchOrders, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
 
   const updateItemDraftPrice = (itemId: string, value: string): void => {
     if (!activeOrder || isApplyingItemRounding) return;
@@ -608,6 +613,50 @@ export const PaymentScreen: React.FC = () => {
       await handleCollect(code);
     };
   }, [handleCollect]);
+
+  useEffect(() => {
+    if (!activeOrder) return;
+
+    const checkAndCleanupUnpaidOrder = async (): Promise<void> => {
+      if (Date.now() - activeOrder.createdAtMs < unpaidRetailAutoDeleteMs) {
+        return;
+      }
+
+      const latest = await fetchOrderDetail(activeOrder.id);
+      if (!latest) {
+        setActiveOrder(null);
+        setStatus('timeout');
+        setStatusMessage('未支付订单已超时清理，请重新建单');
+        setTransactionId('');
+        setPaymentAuthCode('');
+        return;
+      }
+
+      const paymentStatus = String(latest.payment_status || '').toLowerCase();
+      if (paidRetailStatuses.has(paymentStatus)) {
+        return;
+      }
+
+      const { error } = await deleteOrder(activeOrder.id);
+      if (!error) {
+        setActiveOrder(null);
+        setCart(new Map());
+        setStatus('timeout');
+        setStatusMessage('未支付订单已超时自动删除，请重新建单');
+        setTransactionId('');
+        setPaymentAuthCode('');
+      }
+    };
+
+    void checkAndCleanupUnpaidOrder();
+    const timer = window.setInterval(() => {
+      void checkAndCleanupUnpaidOrder();
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeOrder, deleteOrder, fetchOrderDetail]);
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent): void => {

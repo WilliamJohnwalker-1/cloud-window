@@ -268,7 +268,7 @@ const requiredSchemaVersion = '4.3.0';
 const sessionActivationGraceMs = 20000;
 const sessionRetryDelayMs = 600;
 const sessionRetryTimes = 2;
-const unpaidRetailAutoDeleteMs = 30 * 60 * 1000;
+const unpaidRetailAutoDeleteMs = 10 * 60 * 1000;
 const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_pending', 'refunded', 'refund_pending']);
 
 let sessionGraceUntil = 0;
