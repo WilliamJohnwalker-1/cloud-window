@@ -33,6 +33,8 @@ export const InventoryScreen: React.FC = () => {
   const [purchaseSearchKeyword, setPurchaseSearchKeyword] = React.useState('');
   const [purchaseCart, setPurchaseCart] = React.useState<Map<string, number>>(new Map());
   const [submittingPurchase, setSubmittingPurchase] = React.useState(false);
+  const [highlightedInventoryProductId, setHighlightedInventoryProductId] = React.useState<string | null>(null);
+  const inventoryRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const isSuperAdmin = user?.role === 'super_admin';
@@ -67,6 +69,42 @@ export const InventoryScreen: React.FC = () => {
     if (!showPurchaseModal || !canPurchase) return;
     void fetchSuppliers();
   }, [canPurchase, fetchSuppliers, showPurchaseModal]);
+
+  React.useEffect(() => {
+    const handleSearchJump = (event: Event): void => {
+      const customEvent = event as CustomEvent<{
+        tab: 'products' | 'inventory' | 'orders';
+        resultType: 'product' | 'inventory' | 'order';
+        entityId: string;
+      }>;
+
+      if (customEvent.detail.tab !== 'inventory' || customEvent.detail.resultType !== 'inventory') {
+        return;
+      }
+
+      setViewMode('main');
+      setShowWarningOnly(false);
+      setProvinceFilter(null);
+      setCityFilter('all');
+
+      window.setTimeout(() => {
+        const targetId = customEvent.detail.entityId;
+        const targetNode = inventoryRowRefs.current[targetId];
+        if (!targetNode) return;
+
+        targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedInventoryProductId(targetId);
+        window.setTimeout(() => {
+          setHighlightedInventoryProductId((prev) => (prev === targetId ? null : prev));
+        }, 2200);
+      }, 80);
+    };
+
+    window.addEventListener('app:search-jump', handleSearchJump as EventListener);
+    return () => {
+      window.removeEventListener('app:search-jump', handleSearchJump as EventListener);
+    };
+  }, []);
 
   const storeFilterCities = React.useMemo(
     () => cities.filter((city) => stores.some((store) => store.city_id === city.id)),
@@ -417,10 +455,13 @@ export const InventoryScreen: React.FC = () => {
                 return (
                   <motion.tr
                     key={product.id}
+                    ref={(node) => {
+                      inventoryRowRefs.current[product.id] = node;
+                    }}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.02 }}
-                    className="group hover:bg-white/[0.03] transition-colors border-b border-white/5 last:border-0"
+                    className={`group hover:bg-white/[0.03] transition-colors border-b border-white/5 last:border-0 ${highlightedInventoryProductId === product.id ? 'bg-accent/10 ring-1 ring-accent/40' : ''}`}
                   >
                     <td className="px-8 py-5">
                       <div className="flex items-center space-x-4">

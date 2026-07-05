@@ -46,6 +46,12 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v6.5-inventory-slow-moving-alert.sql`: slow-moving inventory alert notifications.
 - `migrate-v6.6-inventory-log-completion.sql`: complete inventory_logs coverage for outbound/sell/refund_restore flows.
 - `migrate-v6.7-refund-reversal-backfill.sql`: net-only refund reversal backfill and legacy correction.
+- `migrate-v6.8-retail-income-category-normalization.sql`: normalize retail income category mapping.
+- `migrate-v7.0-store-invoice-fields.sql`: add store invoice fields.
+- `migrate-v7.1-finance-city-binding.sql`: bind finance transactions to city dimension.
+- `migrate-v7.2-purchase-order-separation.sql`: separate V2 purchase order tables and RPCs.
+- `migrate-v7.3-retail-single-pool-and-log-completion.sql`: enforce retail single-pool semantics and complete missing inventory log coverage.
+- `migrate-v7.4-store-invoice-contact-fields.sql`: add dedicated store invoice phone/address fields.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -91,6 +97,12 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 38. `migrate-v6.5-inventory-slow-moving-alert.sql`
 39. `migrate-v6.6-inventory-log-completion.sql`
 40. `migrate-v6.7-refund-reversal-backfill.sql`
+41. `migrate-v6.8-retail-income-category-normalization.sql`
+42. `migrate-v7.0-store-invoice-fields.sql`
+43. `migrate-v7.1-finance-city-binding.sql`
+44. `migrate-v7.2-purchase-order-separation.sql`
+45. `migrate-v7.3-retail-single-pool-and-log-completion.sql`
+46. `migrate-v7.4-store-invoice-contact-fields.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -133,6 +145,12 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 38. `migrate-v6.5-inventory-slow-moving-alert.sql`
 39. `migrate-v6.6-inventory-log-completion.sql`
 40. `migrate-v6.7-refund-reversal-backfill.sql`
+41. `migrate-v6.8-retail-income-category-normalization.sql`
+42. `migrate-v7.0-store-invoice-fields.sql`
+43. `migrate-v7.1-finance-city-binding.sql`
+44. `migrate-v7.2-purchase-order-separation.sql`
+45. `migrate-v7.3-retail-single-pool-and-log-completion.sql`
+46. `migrate-v7.4-store-invoice-contact-fields.sql`
 
 ## TABLES
 

@@ -31,6 +31,8 @@ interface SearchResultItem {
   title: string;
   subtitle: string;
   tab: TabKey;
+  entityId: string;
+  resultType: 'product' | 'inventory' | 'order';
 }
 
 function App() {
@@ -179,6 +181,8 @@ function App() {
         title: item.name,
         subtitle: `商品 · ${item.city_name || '未知城市'} · 库存 ${item.quantity || 0}`,
         tab: 'products',
+        entityId: item.id,
+        resultType: 'product' as const,
       }));
 
     const orderResults: SearchResultItem[] = orders
@@ -200,6 +204,8 @@ function App() {
         title: `订单 #${item.id.slice(0, 8)}`,
         subtitle: `订单 · ${item.status} · ${item.distributor_store || item.distributor_email || '未知客户'}`,
         tab: 'orders',
+        entityId: item.id,
+        resultType: 'order' as const,
       }));
 
     const inventoryResults: SearchResultItem[] = products
@@ -211,6 +217,8 @@ function App() {
         title: item.name,
         subtitle: `库存 · 当前 ${item.quantity ?? 0} · 预警 ${item.min_quantity ?? 10}`,
         tab: 'inventory',
+        entityId: item.id,
+        resultType: 'inventory' as const,
       }));
 
     return [...productResults, ...orderResults, ...inventoryResults]
@@ -337,6 +345,16 @@ function App() {
                       key={result.id}
                       onClick={() => {
                         switchToTab(result.tab);
+                        window.setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('app:search-jump', {
+                            detail: {
+                              tab: result.tab,
+                              resultType: result.resultType,
+                              entityId: result.entityId,
+                            },
+                          }));
+                        }, 0);
+                        setSearchKeyword('');
                         setSearchOpen(false);
                       }}
                       className="w-full px-4 py-3 text-left hover:bg-white/5 border-b border-white/5 last:border-b-0"

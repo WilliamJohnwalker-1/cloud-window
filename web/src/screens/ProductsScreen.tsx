@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Edit2, Filter, Package, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { BarcodePreview } from '../components/BarcodePreview';
@@ -25,6 +25,8 @@ export const ProductsScreen: React.FC = () => {
   const [customStorePrice, setCustomStorePrice] = useState<string>('');
   const [seriesName, setSeriesName] = useState<string>('');
   const [seriesSortIndex, setSeriesSortIndex] = useState<string>('');
+  const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const productCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -68,6 +70,40 @@ export const ProductsScreen: React.FC = () => {
       }
     }
   }, [selectedStoreId, editingProductId, storeProductPrices, stores, products]);
+
+  useEffect(() => {
+    const handleSearchJump = (event: Event): void => {
+      const customEvent = event as CustomEvent<{
+        tab: 'products' | 'inventory' | 'orders';
+        resultType: 'product' | 'inventory' | 'order';
+        entityId: string;
+      }>;
+
+      if (customEvent.detail.tab !== 'products' || customEvent.detail.resultType !== 'product') {
+        return;
+      }
+
+      setProvinceFilter(null);
+      setCityFilter('all');
+
+      window.setTimeout(() => {
+        const targetId = customEvent.detail.entityId;
+        const targetNode = productCardRefs.current[targetId];
+        if (!targetNode) return;
+
+        targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedProductId(targetId);
+        window.setTimeout(() => {
+          setHighlightedProductId((prev) => (prev === targetId ? null : prev));
+        }, 2200);
+      }, 80);
+    };
+
+    window.addEventListener('app:search-jump', handleSearchJump as EventListener);
+    return () => {
+      window.removeEventListener('app:search-jump', handleSearchJump as EventListener);
+    };
+  }, []);
 
 
   const filteredProducts = useMemo(() => {
@@ -300,10 +336,13 @@ export const ProductsScreen: React.FC = () => {
         {filteredProducts.map((product, index) => (
           <motion.div
             key={product.id}
+            ref={(node) => {
+              productCardRefs.current[product.id] = node;
+            }}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.03 }}
-            className="group bg-white/5 border border-white/10 rounded-3xl overflow-hidden hover:border-accent/50 transition-all duration-300 flex flex-col"
+            className={`group bg-white/5 border border-white/10 rounded-3xl overflow-hidden hover:border-accent/50 transition-all duration-300 flex flex-col ${highlightedProductId === product.id ? 'ring-2 ring-accent/40 border-accent/60' : ''}`}
             onClick={() => {
               if (!isAdminOrManager) return;
               openEditModal(product.id);

@@ -217,6 +217,8 @@ export default function ProfileScreen() {
     tax_id: '',
     bank_name: '',
     bank_account: '',
+    invoice_phone: '',
+    invoice_address: '',
     status: 'active' as 'active' | 'inactive',
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -461,7 +463,7 @@ export default function ProfileScreen() {
   }, [stores, cities, storeFilterProvinceId, storeFilterCityId]);
 
   const hasInvoiceInfo = React.useCallback((store: Store): boolean => {
-    return Boolean(store.invoice_title || store.tax_id || store.bank_name || store.bank_account);
+    return Boolean(store.invoice_title || store.tax_id || store.bank_name || store.bank_account || store.invoice_phone || store.invoice_address);
   }, []);
 
   const buildInvoiceText = React.useCallback((store: Store): string => {
@@ -470,6 +472,8 @@ export default function ProfileScreen() {
       `纳税人识别号：${store.tax_id || '-'}`,
       `开户行：${store.bank_name || '-'}`,
       `账号：${store.bank_account || '-'}`,
+      `联系电话：${store.invoice_phone || '-'}`,
+      `开票地址：${store.invoice_address || '-'}`,
     ].join('\n');
   }, []);
 
@@ -1018,6 +1022,8 @@ export default function ProfileScreen() {
       tax_id: '',
       bank_name: '',
       bank_account: '',
+      invoice_phone: '',
+      invoice_address: '',
       status: 'active',
     });
   };
@@ -1047,6 +1053,8 @@ export default function ProfileScreen() {
       tax_id: store.tax_id || '',
       bank_name: store.bank_name || '',
       bank_account: store.bank_account || '',
+      invoice_phone: store.invoice_phone || '',
+      invoice_address: store.invoice_address || '',
       status: store.status,
     });
   };
@@ -1095,6 +1103,8 @@ export default function ProfileScreen() {
         tax_id: editStoreData.tax_id.trim() || null,
         bank_name: editStoreData.bank_name.trim() || null,
         bank_account: editStoreData.bank_account.trim() || null,
+        invoice_phone: editStoreData.invoice_phone.trim() || null,
+        invoice_address: editStoreData.invoice_address.trim() || null,
       });
       if (error) {
         Toast.show({ type: 'error', text1: '错误', text2: error.message });
@@ -1119,6 +1129,8 @@ export default function ProfileScreen() {
         tax_id: editStoreData.tax_id.trim() || null,
         bank_name: editStoreData.bank_name.trim() || null,
         bank_account: editStoreData.bank_account.trim() || null,
+        invoice_phone: editStoreData.invoice_phone.trim() || null,
+        invoice_address: editStoreData.invoice_address.trim() || null,
         status: editStoreData.status,
       });
       if (error) {
@@ -2795,7 +2807,25 @@ export default function ProfileScreen() {
                   placeholderTextColor={theme.textTertiary}
                 />
 
-                {(editStoreData.invoice_title || editStoreData.tax_id || editStoreData.bank_name || editStoreData.bank_account) ? (
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="开票联系电话 (选填)"
+                  value={editStoreData.invoice_phone}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, invoice_phone: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                <TextInput
+                  style={[styles.cityInput, { backgroundColor: theme.surface, color: theme.textPrimary, marginBottom: 10 }]}
+                  placeholder="开票地址 (选填)"
+                  value={editStoreData.invoice_address}
+                  editable={isSuperAdmin}
+                  onChangeText={(text) => setEditStoreData({ ...editStoreData, invoice_address: text })}
+                  placeholderTextColor={theme.textTertiary}
+                />
+
+                {(editStoreData.invoice_title || editStoreData.tax_id || editStoreData.bank_name || editStoreData.bank_account || editStoreData.invoice_phone || editStoreData.invoice_address) ? (
                   <View style={[styles.invoiceBox, { backgroundColor: theme.surfaceSecondary, borderColor: theme.divider }]}> 
                     <View style={styles.invoiceHeaderRow}>
                       <TouchableOpacity
@@ -2817,6 +2847,8 @@ export default function ProfileScreen() {
                             `纳税人识别号：${editStoreData.tax_id || '-'}`,
                             `开户行：${editStoreData.bank_name || '-'}`,
                             `账号：${editStoreData.bank_account || '-'}`,
+                            `联系电话：${editStoreData.invoice_phone || '-'}`,
+                            `开票地址：${editStoreData.invoice_address || '-'}`,
                           ].join('\n'), 'store-editor:all');
                         }}
                       >
@@ -2855,6 +2887,24 @@ export default function ProfileScreen() {
                           </Text>
                           <TouchableOpacity onPress={() => { void copyInvoiceText(`${editStoreData.bank_name || '-'} / ${editStoreData.bank_account || '-'}`, 'store-editor:bank'); }}>
                             {copiedInvoiceKey === 'store-editor:bank' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.invoiceDetailRow}>
+                          <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                            联系电话：{editStoreData.invoice_phone || '-'}
+                          </Text>
+                          <TouchableOpacity onPress={() => { void copyInvoiceText(editStoreData.invoice_phone || '', 'store-editor:phone'); }}>
+                            {copiedInvoiceKey === 'store-editor:phone' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.invoiceDetailRow}>
+                          <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                            开票地址：{editStoreData.invoice_address || '-'}
+                          </Text>
+                          <TouchableOpacity onPress={() => { void copyInvoiceText(editStoreData.invoice_address || '', 'store-editor:address'); }}>
+                            {copiedInvoiceKey === 'store-editor:address' ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -2996,6 +3046,24 @@ export default function ProfileScreen() {
                                 </Text>
                                 <TouchableOpacity onPress={() => { void copyInvoiceText(`${item.bank_name || '-'} / ${item.bank_account || '-'}`, `${item.id}:bank`); }}>
                                   {copiedInvoiceKey === `${item.id}:bank` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                                </TouchableOpacity>
+                              </View>
+
+                              <View style={styles.invoiceDetailRow}>
+                                <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  联系电话：{item.invoice_phone || '-'}
+                                </Text>
+                                <TouchableOpacity onPress={() => { void copyInvoiceText(item.invoice_phone || '', `${item.id}:phone`); }}>
+                                  {copiedInvoiceKey === `${item.id}:phone` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
+                                </TouchableOpacity>
+                              </View>
+
+                              <View style={styles.invoiceDetailRow}>
+                                <Text style={[styles.distributorSubText, styles.invoiceDetailText, { color: theme.textSecondary }]} numberOfLines={1}>
+                                  开票地址：{item.invoice_address || '-'}
+                                </Text>
+                                <TouchableOpacity onPress={() => { void copyInvoiceText(item.invoice_address || '', `${item.id}:address`); }}>
+                                  {copiedInvoiceKey === `${item.id}:address` ? <Check size={14} color={theme.blue} /> : <Copy size={14} color={theme.textSecondary} />}
                                 </TouchableOpacity>
                               </View>
                             </View>
