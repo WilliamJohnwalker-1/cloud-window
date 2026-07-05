@@ -221,7 +221,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.5）
+### 5. 启动 Web 端（v1.3.6）
 
 ```bash
 npm run web:v2
@@ -414,6 +414,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.6 (2026-07-05) - 搜索跳转落地 + 未支付超时清理修复
+
+- 全局搜索结果支持点击后自动跳转到商品/库存/订单对应内容，并在目标项滚动定位后短暂高亮。
+- 修复收银台未支付零售单超时清理回归：支付成功路径补回订单刷新触发，确保自动清理逻辑稳定生效。
+- 未支付零售单超时规则由 30 分钟调整为 **10 分钟**（含收银台页面兜底检查）。
 
 ### Web v1.3.5 (2026-07-04) - 订单统计卡补齐 + 收银台耗时监控面板
 
