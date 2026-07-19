@@ -713,6 +713,19 @@ async function resolveFinanceCreatedByUserId(env, order) {
   throw new Error(`finance created_by unavailable for order ${String(order?.id || '').trim()}`);
 }
 
+async function resolveFinanceCityId(env, order) {
+  if (order?.store_id) {
+    const storeRows = await supabaseRequest(
+      env,
+      `/stores?id=eq.${encodeURIComponent(String(order.store_id))}&select=city_id&limit=1`,
+    );
+    if (Array.isArray(storeRows) && storeRows.length > 0) {
+      return storeRows[0]?.city_id || null;
+    }
+  }
+  return null;
+}
+
 async function listFinanceTransactionsByOrder(env, orderId) {
   const rows = await supabaseRequest(
     env,
@@ -771,10 +784,11 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
     const createdBy = await resolveFinanceCreatedByUserId(env, order);
     const feeAmount = roundMoney(paymentAmount * 0.006);
     const transactionDate = String(paymentPaidAt || order?.payment_paid_at || new Date().toISOString()).slice(0, 10);
-    const [incomeCategoryId, expenseCategoryId, existingRows] = await Promise.all([
+    const [incomeCategoryId, expenseCategoryId, existingRows, cityId] = await Promise.all([
       getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' }),
       financeMode.shouldCreateOnlineFee ? getFinanceCategoryId(env, { name: '线上佣金', type: 'expense' }) : Promise.resolve(null),
       listFinanceTransactionsByOrder(env, orderId),
+      resolveFinanceCityId(env, order),
     ]);
 
     const incomeDescription = `零售支付自动记账-收入-${orderId}`;
@@ -790,6 +804,7 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
         amount: paymentAmount,
         transaction_date: transactionDate,
         store_id: order?.store_id || null,
+        city_id: cityId,
         channel_name: financeMode.incomeChannelName,
         description: incomeDescription,
         is_recurring: false,
@@ -823,6 +838,7 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
           amount: feeAmount,
           transaction_date: transactionDate,
           store_id: order?.store_id || null,
+          city_id: cityId,
           channel_name: financeMode.feeChannelName,
           description: expenseDescription,
           is_recurring: false,
@@ -945,6 +961,7 @@ async function ensureRetailRefundFinanceRecords(env, order, {
     }
 
     const createdBy = await resolveFinanceCreatedByUserId(env, order);
+    const cityId = await resolveFinanceCityId(env, order);
     const transactionDate = String(refundAt || new Date().toISOString()).slice(0, 10);
     const incomeCategoryId = await getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' });
     const description = normalizedRefundNo
@@ -966,6 +983,7 @@ async function ensureRetailRefundFinanceRecords(env, order, {
           amount,
           transaction_date: transactionDate,
           store_id: order?.store_id || null,
+          city_id: cityId,
           channel_name: financeMode.incomeChannelName,
           description,
           is_recurring: false,
@@ -1099,7 +1117,7 @@ function getMobileLatestPayload(env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
       return json({ ok: true });
     }
@@ -1320,12 +1338,6 @@ export default {
           }, { status: 400 });
         }
 
-        await patchOrderPayment(env, orderId, {
-          payment_method: 'wechat',
-          payment_status: 'pending',
-          payment_amount: amount,
-        });
-
         const wechatOutTradeNo = toWechatOutTradeNo(orderId);
         const storeId = String(env.WECHAT_STORE_ID || 'STORE-001').trim().slice(0, 32);
         const wechatCollectPayload = {
@@ -1351,7 +1363,11 @@ export default {
         try {
           collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', wechatCollectPayload);
         } catch (error) {
-          await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+          await patchOrderPayment(env, orderId, {
+            payment_method: 'wechat',
+            payment_status: 'failed',
+            payment_amount: amount,
+          });
           const message = error instanceof Error ? error.message : 'wechat request failed';
           return json({
             success: false,
@@ -1366,7 +1382,11 @@ export default {
           try {
             collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/codepay', wechatCollectPayload);
           } catch (error) {
-            await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+            await patchOrderPayment(env, orderId, {
+              payment_method: 'wechat',
+              payment_status: 'failed',
+              payment_amount: amount,
+            });
             const message = error instanceof Error ? error.message : 'wechat codepay request failed';
             return json({
               success: false,
@@ -1380,31 +1400,69 @@ export default {
 
         const wechatTransactionId = collectResult.data?.transaction_id || null;
         const finalStatus = collectResult.ok ? collectResult.status : mapWechatErrorCodeToStatus(collectResult.code);
-        let financeWarning = null;
-
         if (finalStatus === 'paid') {
           const paymentPaidAt = new Date().toISOString();
-          await patchOrderPayment(env, orderId, {
-            payment_status: 'paid',
-            payment_transaction_id: wechatTransactionId,
-            payment_paid_at: paymentPaidAt,
-          });
-          try {
-            await ensureRetailPaymentFinanceRecords(env, order, {
+          await Promise.all([
+            patchOrderPayment(env, orderId, {
+              payment_method: 'wechat',
+              payment_status: 'paid',
+              payment_amount: amount,
+              payment_transaction_id: wechatTransactionId,
+              payment_paid_at: paymentPaidAt,
+            }),
+            upsertPaymentEvent(env, {
+              idempotency_key: buildPaymentEventKey({
+                channel: 'wechat',
+                eventType: 'collect',
+                outTradeNo: wechatOutTradeNo,
+                tradeNo: wechatTransactionId,
+              }),
+              channel: 'wechat',
+              out_trade_no: wechatOutTradeNo,
+              transaction_id: wechatTransactionId,
+              notify_id: null,
+              event_type: 'collect',
+              status: finalStatus,
+              amount,
+              processed: true,
+              payload: collectResult.data || { code: collectResult.code, error: collectResult.error },
+            }),
+          ]);
+          ctx.waitUntil(
+            ensureRetailPaymentFinanceRecords(env, order, {
               amount,
               paymentMethod: 'wechat',
               outTradeNo: wechatOutTradeNo,
               transactionId: wechatTransactionId,
               paymentPaidAt,
-            });
-          } catch (error) {
-            financeWarning = `支付已成功，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
-          }
-        } else if (finalStatus === 'pending') {
-          await patchOrderPayment(env, orderId, { payment_status: 'pending' });
-        } else {
-          await patchOrderPayment(env, orderId, { payment_status: finalStatus === 'timeout' ? 'timeout' : 'failed' });
+            }).catch((error) => {
+              console.error('[payment][collect][wechat][finance] async sync failed', {
+                orderId,
+                outTradeNo: wechatOutTradeNo,
+                transactionId: wechatTransactionId,
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+              });
+            })
+          );
+          return json({
+            success: true,
+            status: 'paid',
+            orderId,
+            outTradeNo: wechatOutTradeNo,
+            transactionId: wechatTransactionId || undefined,
+          });
         }
+
+        const finalPaymentStatus = finalStatus === 'pending'
+          ? 'pending'
+          : (finalStatus === 'timeout' ? 'timeout' : 'failed');
+
+        await patchOrderPayment(env, orderId, {
+          payment_method: 'wechat',
+          payment_status: finalPaymentStatus,
+          payment_amount: amount,
+        });
 
         await upsertPaymentEvent(env, {
           idempotency_key: buildPaymentEventKey({
@@ -1431,17 +1489,6 @@ export default {
             orderId,
             outTradeNo: wechatOutTradeNo,
             transactionId: wechatTransactionId || undefined,
-          });
-        }
-
-        if (finalStatus === 'paid') {
-          return json({
-            success: true,
-            status: 'paid',
-            orderId,
-            outTradeNo: wechatOutTradeNo,
-            transactionId: wechatTransactionId || undefined,
-            warning: financeWarning || undefined,
           });
         }
 
@@ -1489,12 +1536,6 @@ export default {
         }, { status: 400 });
       }
 
-      await patchOrderPayment(env, orderId, {
-        payment_method: 'alipay',
-        payment_status: 'pending',
-        payment_amount: amount,
-      });
-
       const alipayResult = await postAlipayRequest(env, 'alipay.trade.pay', {
         out_trade_no: orderId,
         scene: 'bar_code',
@@ -1504,14 +1545,16 @@ export default {
         product_code: 'FACE_TO_FACE_PAYMENT',
       });
 
-      let financeWarning = null;
-
       if (!alipayResult.ok) {
         const alipayError = String(alipayResult.error || '支付宝请求失败');
         const signatureHint = alipayError.includes('验签')
           ? `；请确认 ALIPAY_PRIVATE_KEY 与应用公钥配对，并使用包含 sign_type 的待签名串。sign_content=${alipayResult.signContent || ''}`
           : '';
-        await patchOrderPayment(env, orderId, { payment_status: 'failed' });
+        await patchOrderPayment(env, orderId, {
+          payment_method: 'alipay',
+          payment_status: 'failed',
+          payment_amount: amount,
+        });
         await upsertPaymentEvent(env, {
           idempotency_key: buildPaymentEventKey({
             channel: 'alipay',
@@ -1534,24 +1577,65 @@ export default {
 
       if (alipayResult.status === 'paid') {
         const paymentPaidAt = new Date().toISOString();
-        await patchOrderPayment(env, orderId, {
-          payment_status: 'paid',
-          payment_transaction_id: alipayResult.data.trade_no || null,
-          payment_paid_at: paymentPaidAt,
-        });
-        try {
-          await ensureRetailPaymentFinanceRecords(env, order, {
+        const alipayOutTradeNo = alipayResult.data.out_trade_no || orderId;
+        const alipayTransactionId = alipayResult.data.trade_no || null;
+        await Promise.all([
+          patchOrderPayment(env, orderId, {
+            payment_method: 'alipay',
+            payment_status: 'paid',
+            payment_amount: amount,
+            payment_transaction_id: alipayTransactionId,
+            payment_paid_at: paymentPaidAt,
+          }),
+          upsertPaymentEvent(env, {
+            idempotency_key: buildPaymentEventKey({
+              channel: 'alipay',
+              eventType: 'collect',
+              outTradeNo: orderId,
+              tradeNo: alipayResult.data.trade_no,
+            }),
+            channel: 'alipay',
+            out_trade_no: orderId,
+            transaction_id: alipayResult.data.trade_no || null,
+            notify_id: null,
+            event_type: 'collect',
+            status: alipayResult.status,
+            amount,
+            processed: true,
+            payload: alipayResult.data,
+          }),
+        ]);
+        ctx.waitUntil(
+          ensureRetailPaymentFinanceRecords(env, order, {
             amount: Number(alipayResult.data?.total_amount || amount),
             paymentMethod: 'alipay',
-            outTradeNo: alipayResult.data.out_trade_no || orderId,
-            transactionId: alipayResult.data.trade_no || null,
+            outTradeNo: alipayOutTradeNo,
+            transactionId: alipayTransactionId,
             paymentPaidAt,
-          });
-        } catch (error) {
-          financeWarning = `支付已成功，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
-        }
+          }).catch((error) => {
+            console.error('[payment][collect][alipay][finance] async sync failed', {
+              orderId,
+              outTradeNo: alipayOutTradeNo,
+              transactionId: alipayTransactionId,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            });
+          })
+        );
+
+        return json({
+          success: true,
+          status: 'paid',
+          orderId,
+          outTradeNo: alipayResult.data.out_trade_no || orderId,
+          transactionId: alipayResult.data.trade_no,
+        });
       } else {
-        await patchOrderPayment(env, orderId, { payment_status: 'pending' });
+        await patchOrderPayment(env, orderId, {
+          payment_method: 'alipay',
+          payment_status: 'pending',
+          payment_amount: amount,
+        });
       }
 
       await upsertPaymentEvent(env, {
@@ -1581,14 +1665,7 @@ export default {
         });
       }
 
-      return json({
-        success: true,
-        status: 'paid',
-        orderId,
-        outTradeNo: alipayResult.data.out_trade_no || orderId,
-        transactionId: alipayResult.data.trade_no,
-        warning: financeWarning || undefined,
-      });
+      return json({ success: false, status: 'failed', error: '支付宝收款状态异常' }, { status: 400 });
     }
 
     if (url.pathname === '/api/payment/refund-requests' && request.method === 'GET') {
@@ -2416,20 +2493,56 @@ export default {
       const order = await getOrderById(env, orderId);
       if (!order) return json({ status: 'failed', error: 'order not found' }, { status: 404 });
       const currentStatus = String(order.payment_status || '').toLowerCase();
-      let financeWarning = null;
+
+      const queueFinanceEnsureIfNeeded = async ({
+        amount,
+        paymentMethod,
+        outTradeNo,
+        transactionId,
+        paymentPaidAt,
+        source,
+      }) => {
+        const financeEventKey = buildPaymentEventKey({
+          channel: paymentMethod,
+          eventType: 'finance',
+          outTradeNo,
+          notifyId: null,
+          tradeNo: null,
+        });
+        const existingFinanceEvent = await getPaymentEventByKey(env, financeEventKey);
+        if (existingFinanceEvent?.processed) {
+          return;
+        }
+
+        ctx.waitUntil(
+          ensureRetailPaymentFinanceRecords(env, order, {
+            amount,
+            paymentMethod,
+            outTradeNo,
+            transactionId,
+            paymentPaidAt,
+          }).catch((error) => {
+            console.error('[payment][status][finance] async sync failed', {
+              source,
+              orderId,
+              outTradeNo,
+              transactionId,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            });
+          })
+        );
+      };
 
       if (currentStatus === 'paid' && order.payment_method) {
-        try {
-          await ensureRetailPaymentFinanceRecords(env, order, {
-            amount: Number(order.payment_amount || order.total_retail_amount || 0),
-            paymentMethod: String(order.payment_method || '').trim(),
-            outTradeNo: order.payment_method === 'wechat' ? toWechatOutTradeNo(orderId) : orderId,
-            transactionId: order.payment_transaction_id || null,
-            paymentPaidAt: order.payment_paid_at || null,
-          });
-        } catch (error) {
-          financeWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
-        }
+        await queueFinanceEnsureIfNeeded({
+          amount: Number(order.payment_amount || order.total_retail_amount || 0),
+          paymentMethod: String(order.payment_method || '').trim(),
+          outTradeNo: order.payment_method === 'wechat' ? toWechatOutTradeNo(orderId) : orderId,
+          transactionId: order.payment_transaction_id || null,
+          paymentPaidAt: order.payment_paid_at || null,
+          source: 'already_paid',
+        });
       }
 
       if (currentStatus === 'refunded'
@@ -2439,14 +2552,12 @@ export default {
         return json({
           status: currentStatus,
           transactionId: order.payment_transaction_id || undefined,
-          warning: financeWarning || undefined,
         });
       }
       if (order.payment_status === 'paid') {
         return json({
           status: 'paid',
           transactionId: order.payment_transaction_id || undefined,
-          warning: financeWarning || undefined,
         });
       }
 
@@ -2473,19 +2584,15 @@ export default {
           payment_paid_at: paymentPaidAt,
         });
 
-        let queryFinanceWarning = null;
         if (status === 'paid') {
-          try {
-            await ensureRetailPaymentFinanceRecords(env, order, {
-              amount: queryAmount,
-              paymentMethod: 'wechat',
-              outTradeNo: wechatOutTradeNo,
-              transactionId,
-              paymentPaidAt,
-            });
-          } catch (error) {
-            queryFinanceWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
-          }
+          await queueFinanceEnsureIfNeeded({
+            amount: queryAmount,
+            paymentMethod: 'wechat',
+            outTradeNo: wechatOutTradeNo,
+            transactionId,
+            paymentPaidAt,
+            source: 'wechat_query_paid',
+          });
         }
 
         await upsertPaymentEvent(env, {
@@ -2520,7 +2627,6 @@ export default {
           status,
           transactionId: transactionId || undefined,
           error: queryError,
-          warning: queryFinanceWarning || undefined,
         });
       }
 
@@ -2540,19 +2646,15 @@ export default {
         payment_paid_at: paymentPaidAt,
       });
 
-      let queryFinanceWarning = null;
       if (status === 'paid') {
-        try {
-          await ensureRetailPaymentFinanceRecords(env, order, {
-            amount: Number(queryResult.data.total_amount || order.payment_amount || order.total_retail_amount || 0),
-            paymentMethod: 'alipay',
-            outTradeNo: orderId,
-            transactionId: queryResult.data.trade_no || null,
-            paymentPaidAt,
-          });
-        } catch (error) {
-          queryFinanceWarning = `支付状态已确认，但自动记账失败：${error instanceof Error ? error.message : 'unknown finance error'}`;
-        }
+        await queueFinanceEnsureIfNeeded({
+          amount: Number(queryResult.data.total_amount || order.payment_amount || order.total_retail_amount || 0),
+          paymentMethod: 'alipay',
+          outTradeNo: orderId,
+          transactionId: queryResult.data.trade_no || null,
+          paymentPaidAt,
+          source: 'alipay_query_paid',
+        });
       }
 
       await upsertPaymentEvent(env, {
@@ -2576,7 +2678,6 @@ export default {
       return json({
         status,
         transactionId: queryResult.data.trade_no,
-        warning: queryFinanceWarning || undefined,
       });
     }
 

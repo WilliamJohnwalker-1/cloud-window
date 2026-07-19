@@ -225,7 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.7）
+### 5. 启动 Web 端（v1.3.9）
 
 ```bash
 npm run web:v2
@@ -418,6 +418,28 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.9 (2026-07-19) - 收银台收款链路提速与稳定性修复
+
+- 收银台详情与支付链路性能优化：`fetchOrderDetail` 并行拉取订单/支付事件/订单行，商品映射改走本地缓存，降低详情查询串行耗时。
+- Worker 收款链路优化：`/collect` 财务补写改为 `ctx.waitUntil` 异步，`/status` 增加 finance processed 门控并异步化，减少重复/阻塞调用。
+- 收银台前端优化：收款成功后的订单刷新改为非阻塞；60s 保活检查改为轻量订单状态查询。
+- 收银台轮询稳定性修复：查询异常默认按 `pending` 处理并增加 failed 去抖，避免“实际收款成功但前端误报 failed”。
+- 收款成功收口改为单次幂等：统一 paid 终态处理，修复成功语音重复播报问题；并优化早期轮询节奏以压缩状态确认延迟。
+
+### Web v1.3.8 (2026-07-07) - 外部渠道订单录入 + 零售财务城市修复
+
+- 新增外部渠道订单录入功能（Web 端）：支持小红书/淘宝渠道手动录入订单，两阶段流程（创建→确认签收），确认时自动扣库存+建财务收入。
+- 新增 `migrate-v7.5-external-channel-orders.sql`：扩展 `order_kind` 支持 `external`，新增 `create_external_order_atomic` 与 `confirm_external_order_atomic` 原子 RPC，删除 RPC 新增外部渠道显式分支。
+- 双端订单页支持外部单展示：Web 和移动端均新增"外部单"筛选、标签、渠道徽章与外部单号展示。
+- 修复零售单财务流水缺失 `city_id`：Worker 自动记账路径补齐城市绑定，确保未来零售支付/退款财务记录包含城市维度。
+- 数据库迁移延伸至 `migrate-v7.5-external-channel-orders.sql`。
+
+### Mobile v2.2.6 (2026-07-07) - 外部订单展示 + 启动更新弹窗
+
+- 移动端订单页支持外部渠道订单只读展示：新增"外部单"筛选标签、渠道徽章、外部单号详情展示，接单按钮已屏蔽。
+- 新增启动更新弹窗：应用启动时自动检测 OTA 与 APK 二进制更新，弹窗提示用户选择"立即更新"或"稍后再说"。
+- 更新检查逻辑提取为共享工具（`src/utils/update.ts`），个人页手动检查按钮保持不变。
 
 ### Web v1.3.7 (2026-07-05) - 库存日志补齐与备注收敛
 

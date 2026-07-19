@@ -22,6 +22,7 @@ import Toast from 'react-native-toast-message';
 import { useAppStore } from '../store/useAppStore';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
+import { EXTERNAL_CHANNEL_LABELS } from '../types';
 import type { City, Order, OrderKind, ProductWithDetails, PurchaseOrder } from '../types';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import { resolvePrice } from '../utils/priceResolver';
@@ -138,6 +139,7 @@ export default function OrdersScreen() {
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
     if (kind === 'retail') return '零售单';
     if (kind === 'settlement') return '结算单';
+    if (kind === 'external') return '外部单';
     if (kind === 'purchase') return '进货单';
     return '供货单';
   };
@@ -145,8 +147,20 @@ export default function OrdersScreen() {
   const getOrderTotalLabel = (kind: Order['order_kind']): string => {
     if (kind === 'retail') return '收款总价';
     if (kind === 'settlement') return '结算总价';
+    if (kind === 'external') return '零售总价';
     if (kind === 'purchase') return '进货总价';
     return '折扣总价';
+  };
+
+  const getAcceptedOrderStatusLabel = (kind: Order['order_kind']): string => {
+    if (kind === 'purchase') return '已到货';
+    if (kind === 'external') return '已签收';
+    return '已接单';
+  };
+
+  const getOrderKindTagColor = (kind: Order['order_kind']): string => {
+    if (kind === 'external') return theme.gradientMid;
+    return theme.blue;
   };
 
   const getPaymentMethodLabel = (method?: Order['payment_method']): string => {
@@ -1042,7 +1056,7 @@ export default function OrdersScreen() {
       <View style={styles.orderHeader}>
         <View>
           <Text style={[styles.orderId, { color: theme.textPrimary }]}>订单 #{item.id.slice(0, 8)}</Text>
-          <Text style={[styles.orderKindTag, { color: theme.blue }]}>{getOrderKindLabel(item.order_kind)}</Text>
+          <Text style={[styles.orderKindTag, { color: getOrderKindTagColor(item.order_kind) }]}>{getOrderKindLabel(item.order_kind)}</Text>
         </View>
         <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
       </View>
@@ -1087,7 +1101,7 @@ export default function OrdersScreen() {
           <Download size={14} color={Colors.blue} />
           <Text style={styles.exportButtonText}>导出</Text>
         </TouchableOpacity>
-        {isAdmin && item.status === 'pending' && item.order_kind !== 'purchase' && (
+        {isAdmin && item.status === 'pending' && item.order_kind !== 'purchase' && item.order_kind !== 'external' && (
           <TouchableOpacity
             style={styles.acceptOrderButton}
             onPress={async () => {
@@ -1100,7 +1114,7 @@ export default function OrdersScreen() {
         )}
         {item.status === 'accepted' && (
           <View style={styles.acceptedTag}>
-            <Text style={styles.acceptedTagText}>{item.order_kind === 'purchase' ? '已到货' : '已接单'}</Text>
+            <Text style={styles.acceptedTagText}>{getAcceptedOrderStatusLabel(item.order_kind)}</Text>
           </View>
         )}
         {isAdmin && item.status === 'accepted' && item.order_kind === 'distribution' && item.store_id && (
@@ -1753,6 +1767,7 @@ export default function OrdersScreen() {
                     { key: 'distribution', label: '供货单' },
                     { key: 'settlement', label: '结算单' },
                     { key: 'retail', label: '零售单' },
+                    { key: 'external', label: '外部单' },
                     { key: 'purchase', label: '进货单' },
                   ] as Array<{ key: OrderKind; label: string }>
                 ).map((item) => (
@@ -2089,6 +2104,21 @@ export default function OrdersScreen() {
                     {detailOrder.distributor_store ? ` · ${detailOrder.distributor_store}` : ''}
                   </Text>
                 </View>
+
+                {detailOrder.order_kind === 'external' && (
+                  <>
+                    <View style={styles.detailSection}>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>外部渠道</Text>
+                      <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
+                        {detailOrder.external_channel ? EXTERNAL_CHANNEL_LABELS[detailOrder.external_channel] : '-'}
+                      </Text>
+                    </View>
+                    <View style={styles.detailSection}>
+                      <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>外部单号</Text>
+                      <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{detailOrder.external_order_no || '-'}</Text>
+                    </View>
+                  </>
+                )}
 
                 {(detailOrder.order_kind === 'retail' || detailOrder.payment_method) && (
                   <View style={styles.detailSection}>

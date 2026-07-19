@@ -215,7 +215,7 @@ export async function queryPaymentStatus(orderId: string): Promise<{ status: Web
     });
   } catch {
     return {
-      status: 'failed',
+      status: 'pending',
     };
   }
 

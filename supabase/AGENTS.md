@@ -52,6 +52,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v7.2-purchase-order-separation.sql`: separate V2 purchase order tables and RPCs.
 - `migrate-v7.3-retail-single-pool-and-log-completion.sql`: enforce retail single-pool semantics and complete missing inventory log coverage.
 - `migrate-v7.4-store-invoice-contact-fields.sql`: add dedicated store invoice phone/address fields.
+- `migrate-v7.5-external-channel-orders.sql`: External channel order support (order_kind='external', create/confirm/delete atomic RPCs).
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -103,6 +104,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 44. `migrate-v7.2-purchase-order-separation.sql`
 45. `migrate-v7.3-retail-single-pool-and-log-completion.sql`
 46. `migrate-v7.4-store-invoice-contact-fields.sql`
+47. `migrate-v7.5-external-channel-orders.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -151,6 +153,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 44. `migrate-v7.2-purchase-order-separation.sql`
 45. `migrate-v7.3-retail-single-pool-and-log-completion.sql`
 46. `migrate-v7.4-store-invoice-contact-fields.sql`
+47. `migrate-v7.5-external-channel-orders.sql`
 
 ## TABLES
 

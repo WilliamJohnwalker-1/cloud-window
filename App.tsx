@@ -8,6 +8,7 @@ import type { ToastConfig } from 'react-native-toast-message';
 import { BarChart2, Package, ShoppingCart, TrendingUp, User, Wallet } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
 import * as Updates from 'expo-updates';
+import Constants from 'expo-constants';
 
 import LoginScreen from './src/screens/LoginScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
@@ -18,7 +19,8 @@ import FinanceScreen from './src/screens/FinanceScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import KnowledgeBaseFloatingBall from './src/components/KnowledgeBaseFloatingBall';
 import { useAppStore } from './src/store/useAppStore';
-import AppConfirmModal from './src/components/AppConfirmModal';
+import UpdatePrompt, { UpdateType } from './src/components/UpdatePrompt';
+import { compareVersion, resolveBinaryUpdateInfo } from './src/utils/update';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
 import { canEditFinance, canViewInventory, canViewOrders, canViewProducts, canViewReports } from './src/utils/permissions';
@@ -190,7 +192,10 @@ const toastConfig: ToastConfig = {
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const [launchUpdateVisible, setLaunchUpdateVisible] = useState(false);
+  const [updatePromptVisible, setUpdatePromptVisible] = useState(false);
+  const [updateType, setUpdateType] = useState<UpdateType>(null);
+  const [binaryApkUrl, setBinaryApkUrl] = useState('');
+  const [binaryVersion, setBinaryVersion] = useState('');
   const [storeSelectionVisible, setStoreSelectionVisible] = useState(false);
   const [storeSelectionChecking, setStoreSelectionChecking] = useState(false);
   const [storeSelectionSubmitting, setStoreSelectionSubmitting] = useState(false);
@@ -294,13 +299,28 @@ export default function App() {
       if (__DEV__) return;
 
       try {
+        const appVersion = Constants.expoConfig?.version || '未知版本';
+        const binaryUpdateInfo = await resolveBinaryUpdateInfo();
+        const needBinaryUpdate = binaryUpdateInfo
+          ? compareVersion(appVersion, binaryUpdateInfo.latestVersion) < 0
+          : false;
+
+        if (needBinaryUpdate && binaryUpdateInfo) {
+          setBinaryApkUrl(binaryUpdateInfo.androidApkUrl);
+          setBinaryVersion(binaryUpdateInfo.latestVersion);
+          setUpdateType('binary');
+          setUpdatePromptVisible(true);
+          return;
+        }
+
         const update = await Updates.checkForUpdateAsync();
         if (!update.isAvailable) return;
 
         await Updates.fetchUpdateAsync();
-        setLaunchUpdateVisible(true);
+        setUpdateType('ota');
+        setUpdatePromptVisible(true);
       } catch (error) {
-        console.warn('Failed checking OTA updates on launch:', error);
+        console.warn('Failed checking updates on launch:', error);
       }
     };
 
@@ -408,18 +428,13 @@ export default function App() {
         isSubmitting={storeSelectionSubmitting}
         onSelect={handleSelectDefaultStore}
       />
-      <AppConfirmModal
-        visible={launchUpdateVisible}
+      <UpdatePrompt
+        visible={updatePromptVisible}
+        updateType={updateType}
         isDarkMode={isDarkMode}
-        title="发现新版本"
-        message="更新已下载，是否立即重启应用完成更新？"
-        confirmText="立即更新"
-        cancelText="稍后"
-        onCancel={() => setLaunchUpdateVisible(false)}
-        onConfirm={() => {
-          setLaunchUpdateVisible(false);
-          void Updates.reloadAsync();
-        }}
+        binaryApkUrl={binaryApkUrl}
+        binaryVersion={binaryVersion}
+        onClose={() => setUpdatePromptVisible(false)}
       />
       <KnowledgeBaseFloatingBall />
       <Toast config={toastConfig} />
