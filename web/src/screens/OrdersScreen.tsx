@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock, Copy, Download, MapPin, Plus, ShoppingCart, Store, Trash2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ExternalOrderForm } from '../components/ExternalOrderForm';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
+import { EXTERNAL_CHANNEL_LABELS } from '../types';
 import type { City, OrderKind, PurchaseOrder } from '../types';
 import { getPaymentApiEndpoint } from '../lib/payment';
 import { resolvePrice } from '../utils/priceResolver';
@@ -77,6 +79,7 @@ export const OrdersScreen: React.FC = () => {
     acceptOrder,
     createBatchOrders,
     createSettlementOrder,
+    confirmExternalOrder,
     confirmPurchaseDelivery,
     confirmPurchaseItemDelivery,
     fetchOrderDetail,
@@ -95,6 +98,7 @@ export const OrdersScreen: React.FC = () => {
   } = useAppStore();
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'finance';
+  const canCreateExternalOrder = user?.role === 'admin' || user?.role === 'super_admin';
   const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
   const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
   const [filter, setFilter] = useState<OrderFilter>('all');
@@ -104,6 +108,7 @@ export const OrdersScreen: React.FC = () => {
   const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [externalOrderFormVisible, setExternalOrderFormVisible] = useState(false);
   const [settlementStoreId, setSettlementStoreId] = useState<string | null>(null);
   const [settlementCart, setSettlementCart] = useState<Map<string, number>>(new Map());
   const [submittingSettlementOrder, setSubmittingSettlementOrder] = useState(false);
@@ -197,11 +202,13 @@ export const OrdersScreen: React.FC = () => {
     if (kind === 'purchase') return '进货单';
     if (kind === 'settlement') return '结算单';
     if (kind === 'retail') return '零售单';
+    if (kind === 'external') return '外部单';
     return '供货单';
   };
 
   const getOrderStatusLabel = (order: (typeof orders)[number]): string => {
     if (order.order_kind === 'purchase') return order.status === 'accepted' ? '已到货' : '待到货';
+    if (order.order_kind === 'external') return order.status === 'accepted' ? '已签收' : '待签收';
     return order.status === 'accepted' ? '已接单' : '待处理';
   };
 
@@ -400,6 +407,7 @@ export const OrdersScreen: React.FC = () => {
   const revenueTypeLabel = useMemo(() => {
     if (selectedOrderKind === 'distribution') return '供货';
     if (selectedOrderKind === 'purchase') return '进货';
+    if (selectedOrderKind === 'external') return '外部';
     if (selectedOrderKind === 'retail' || selectedOrderKind === 'settlement') return '营收';
     return '营收';
   }, [selectedOrderKind]);
@@ -601,7 +609,25 @@ export const OrdersScreen: React.FC = () => {
   };
 
   const deleteTargetOrder = deleteConfirmOrderId ? getResolvedOrder(deleteConfirmOrderId) : null;
+  const deleteIsPendingExternal = deleteTargetOrder?.order_kind === 'external' && deleteTargetOrder.status === 'pending';
   const deleteWillRestoreStock = String(deleteTargetOrder?.payment_status || '').toLowerCase() !== 'refunded';
+
+  const handleCopy = async (text: string): Promise<void> => {
+    if (!text.trim()) {
+      setPageNotice({ type: 'error', text: '无可复制内容' });
+      return;
+    }
+
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('当前浏览器不支持剪贴板 API');
+      }
+      await navigator.clipboard.writeText(text);
+      setPageNotice({ type: 'success', text: '已复制到剪贴板' });
+    } catch (error) {
+      setPageNotice({ type: 'error', text: `复制失败：${error instanceof Error ? error.message : '未知错误'}` });
+    }
+  };
 
   useEffect(() => {
     const candidates = filteredOrders.filter((order) => (order.items?.length || 0) === 0).slice(0, 12);
@@ -1197,6 +1223,7 @@ export const OrdersScreen: React.FC = () => {
   };
 
   const handleDeleteOrder = async (orderId: string): Promise<void> => {
+    const targetOrder = getResolvedOrder(orderId);
     setDeletingOrderId(orderId);
     const { error } = await deleteOrder(orderId);
     setDeletingOrderId(null);
@@ -1207,7 +1234,13 @@ export const OrdersScreen: React.FC = () => {
       return;
     }
 
-    setPageNotice({ type: 'success', text: '订单已删除并恢复库存' });
+    if (targetOrder?.order_kind === 'external' && targetOrder.status === 'pending') {
+      setPageNotice({ type: 'success', text: '待确认外部订单已删除' });
+    } else if (String(targetOrder?.payment_status || '').toLowerCase() === 'refunded') {
+      setPageNotice({ type: 'success', text: '订单已删除' });
+    } else {
+      setPageNotice({ type: 'success', text: '订单已删除并恢复库存' });
+    }
     if (detailOrderId === orderId) {
       closeOrderDetail();
     }
@@ -1421,6 +1454,7 @@ export const OrdersScreen: React.FC = () => {
               { key: 'distribution', label: '供货单' },
               { key: 'settlement', label: '结算单' },
               { key: 'retail', label: '零售单' },
+              { key: 'external', label: '外部单' },
               { key: 'purchase', label: '进货单' },
             ].map((item) => (
               <button
@@ -1438,6 +1472,16 @@ export const OrdersScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {canCreateExternalOrder && (
+            <button
+              type="button"
+              onClick={() => setExternalOrderFormVisible(true)}
+              className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
+            >
+              <Plus size={18} />
+              <span>录入外部订单</span>
+            </button>
+          )}
           {canCreateSettlement && (
             <button
               type="button"
@@ -1789,9 +1833,14 @@ export const OrdersScreen: React.FC = () => {
                 <div>
                   <div className="flex items-center space-x-3">
                     <h3 className="text-lg font-bold">订单 #{order.id.slice(0, 8)}</h3>
-                    <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.order_kind === 'retail' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : order.order_kind === 'purchase' ? 'text-amber-300 bg-amber-500/10 border-amber-500/20' : 'text-violet-300 bg-violet-500/10 border-violet-500/20'}`}>
+                    <div className={`px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.order_kind === 'retail' ? 'text-sky-300 bg-sky-500/10 border-sky-500/20' : order.order_kind === 'purchase' ? 'text-amber-300 bg-amber-500/10 border-amber-500/20' : order.order_kind === 'external' ? 'text-indigo-300 bg-indigo-500/20 border-indigo-500/30' : 'text-violet-300 bg-violet-500/10 border-violet-500/20'}`}>
                       {getOrderKindLabel(order.order_kind)}
                     </div>
+                    {order.order_kind === 'external' && order.external_channel && (
+                      <div className="px-3 py-1 rounded-full border text-[10px] font-black tracking-widest text-pink-200 bg-pink-500/10 border-pink-500/20">
+                        {EXTERNAL_CHANNEL_LABELS[order.external_channel]}
+                      </div>
+                    )}
                     <div className={`flex items-center space-x-1 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest ${order.status === 'accepted' ? 'text-green-500 bg-green-500/10 border-green-500/20' : 'text-orange-500 bg-orange-500/10 border-orange-500/20'}`}>
                       {order.status === 'accepted' ? <CheckCircle2 size={14} /> : <Clock size={14} />}
                       <span>{getOrderStatusLabel(order)}</span>
@@ -1802,6 +1851,19 @@ export const OrdersScreen: React.FC = () => {
                     <div className="flex items-center space-x-1"><MapPin size={12} /><span>{order.city_name || '-'}</span></div>
                     <div className="flex items-center space-x-1"><Store size={12} /><span>配送店铺：{order.store_name || '未指定店铺'}</span></div>
                     <div className="flex items-center space-x-1"><span>分销商：{order.distributor_store || order.distributor_email || '-'}</span></div>
+                    {order.order_kind === 'external' && order.external_order_no && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleCopy(order.external_order_no || '');
+                        }}
+                        className="flex items-center space-x-1 text-left text-white/60 hover:text-white"
+                        title="复制外部订单号"
+                      >
+                        <Copy size={12} />
+                        <span>外部单号：{order.external_order_no}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1809,7 +1871,7 @@ export const OrdersScreen: React.FC = () => {
               <div className="text-right space-y-2">
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest">订单总额</p>
                 <p className="text-2xl font-black text-white">¥{order.total_discount_amount}</p>
-                {order.status === 'pending' && order.order_kind !== 'purchase' && (user?.role === 'admin' || user?.role === 'super_admin') && (
+                {order.status === 'pending' && order.order_kind !== 'purchase' && order.order_kind !== 'external' && (user?.role === 'admin' || user?.role === 'super_admin') && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1823,6 +1885,22 @@ export const OrdersScreen: React.FC = () => {
                     className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold"
                   >
                     确认接单
+                  </button>
+                )}
+                {order.status === 'pending' && order.order_kind === 'external' && canCreateExternalOrder && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const { error } = await confirmExternalOrder(order.id);
+                      if (error) {
+                        setPageNotice({ type: 'error', text: `确认签收失败：${error.message}` });
+                        return;
+                      }
+                      setPageNotice({ type: 'success', text: '外部订单已确认签收' });
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-100 border border-cyan-500/30 text-xs font-bold"
+                  >
+                    确认签收
                   </button>
                 )}
                 {order.status === 'pending' && order.order_kind === 'purchase' && canConfirmPurchase && (
@@ -1895,7 +1973,9 @@ export const OrdersScreen: React.FC = () => {
                     <span>修改订单</span>
                   </button>
                 )}
-                {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id) && (
+                {((order.order_kind === 'external' && order.status === 'pending')
+                  ? canCreateExternalOrder
+                  : (user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.id === order.distributor_id)) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1924,6 +2004,11 @@ export const OrdersScreen: React.FC = () => {
           })()
         ))}
       </div>
+
+      <ExternalOrderForm
+        visible={externalOrderFormVisible}
+        onClose={() => setExternalOrderFormVisible(false)}
+      />
 
       {purchaseConfirmPayload && (
         <div className="fixed inset-0 bg-black/70 z-[95] flex items-center justify-center p-4 overflow-y-auto">
@@ -2354,6 +2439,32 @@ export const OrdersScreen: React.FC = () => {
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">交易号：</span>{detailOrder.payment_transaction_id || '-'}</div>
+                {detailOrder.order_kind === 'external' && (
+                  <>
+                    <div className="bg-white/5 rounded-xl px-4 py-3">
+                      <span className="text-white/50">外部渠道：</span>
+                      {detailOrder.external_channel ? EXTERNAL_CHANNEL_LABELS[detailOrder.external_channel] : '-'}
+                    </div>
+                    <div className="bg-white/5 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-white/50">外部订单号：</span>
+                        <span className="truncate">{detailOrder.external_order_no || '-'}</span>
+                      </div>
+                      {detailOrder.external_order_no && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCopy(detailOrder.external_order_no || '');
+                          }}
+                          className="shrink-0 inline-flex items-center gap-1 text-xs text-white/70 hover:text-white"
+                        >
+                          <Copy size={12} />
+                          <span>复制</span>
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
                 {detailOrder.payment_note && <div className="bg-white/5 rounded-xl px-4 py-3 col-span-2"><span className="text-white/50">收款备注：</span>{detailOrder.payment_note}</div>}
               </div>
 
@@ -2453,7 +2564,9 @@ export const OrdersScreen: React.FC = () => {
               </button>
             </div>
             <p className="text-sm text-white/60">
-              {deleteWillRestoreStock
+              {deleteIsPendingExternal
+                ? `确定删除待确认外部订单 #${deleteConfirmOrderId.slice(0, 8)} 吗？删除后不会触发库存回退。`
+                : deleteWillRestoreStock
                 ? `确定删除订单 #${deleteConfirmOrderId.slice(0, 8)} 吗？删除后会自动恢复对应库存。`
                 : `确定删除订单 #${deleteConfirmOrderId.slice(0, 8)} 吗？该订单已退款，删除时不会再次回退库存。`}
             </p>
