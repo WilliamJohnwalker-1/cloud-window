@@ -225,7 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.7）
+### 5. 启动 Web 端（v1.3.9）
 
 ```bash
 npm run web:v2
@@ -418,6 +418,14 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.9 (2026-07-19) - 收银台收款链路提速与稳定性修复
+
+- 收银台详情与支付链路性能优化：`fetchOrderDetail` 并行拉取订单/支付事件/订单行，商品映射改走本地缓存，降低详情查询串行耗时。
+- Worker 收款链路优化：`/collect` 财务补写改为 `ctx.waitUntil` 异步，`/status` 增加 finance processed 门控并异步化，减少重复/阻塞调用。
+- 收银台前端优化：收款成功后的订单刷新改为非阻塞；60s 保活检查改为轻量订单状态查询。
+- 收银台轮询稳定性修复：查询异常默认按 `pending` 处理并增加 failed 去抖，避免“实际收款成功但前端误报 failed”。
+- 收款成功收口改为单次幂等：统一 paid 终态处理，修复成功语音重复播报问题；并优化早期轮询节奏以压缩状态确认延迟。
 
 ### Web v1.3.8 (2026-07-07) - 外部渠道订单录入 + 零售财务城市修复
 

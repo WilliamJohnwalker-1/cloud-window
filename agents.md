@@ -249,7 +249,7 @@ Before committing:
 ## RELEASE NOTES
 
 - Current mobile baseline: `v2.2.6`
-- Current web baseline: `v1.3.8`
+- Current web baseline: `v1.3.9`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -262,6 +262,7 @@ Before committing:
 - Latest post-v7 hotfixes: 修复 Web 店铺编辑弹层滚动与关闭可达性；补齐 `financial_transactions.recurring_frequency` 缺列降级兼容；修复店铺开票保存后回显映射缺口
 - Latest web cashier wave: Web 订单页新增商品数量统计卡（范围/累计双列，admin/super_admin 可见，进货单隐藏）；收银台移除扫码调试模块并新增性能分段耗时监控面板（建单/收款计时、20条历史、阈值预设、扫码状态重置）
 - Latest web search+cashier hotfix: 全局搜索结果点击支持跳转并定位高亮到商品/库存/订单；未支付零售单超时自动删除规则由 30 分钟调整为 10 分钟，并补回支付成功后的清理触发链路
+- Latest cashier perf hardening: 收银台 `fetchOrderDetail` 并行化、Worker `/collect` 财务补写异步化与 `/status` 去冗余门控已落地；前端收款后刷新改非阻塞、轮询容错与单次 paid 收口修复（避免误报 failed 与成功语音重复）
 - Latest inventory-log hardening wave: 重写 `migrate-v7.3-retail-single-pool-and-log-completion.sql` 对齐零售单池语义；补齐 Web 供货/零售 fallback 扣减日志；双端库存日志备注统一短原因文案，确保后续日志准确可读
 - Latest invoice+rollback hotfix: 新增 `migrate-v7.4-store-invoice-contact-fields.sql`，店铺开票联系电话/开票地址改为独立字段（不再复用联系人电话/店铺地址）；补齐 distribution 删单店铺池回滚日志（`删单回滚(店铺池)`）。
 - Latest external-channel wave: 外部渠道订单录入（Web）+ 双端展示兼容 + 零售财务 city_id 修复 + 移动端启动更新弹窗，迁移链延伸至 v7.5
