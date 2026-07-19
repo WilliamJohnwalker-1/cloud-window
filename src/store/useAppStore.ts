@@ -94,6 +94,8 @@ interface OrderRow {
   cities?: { name: string } | Array<{ name: string }> | null;
   status?: Order['status'];
   order_kind?: Order['order_kind'] | null;
+  external_channel?: Order['external_channel'] | null;
+  external_order_no?: string | null;
   payment_method?: Order['payment_method'];
   payment_status?: Order['payment_status'];
   payment_transaction_id?: string | null;
@@ -365,6 +367,7 @@ const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
   kind === 'retail' ? 'retail' :
   kind === 'settlement' ? 'settlement' :
   kind === 'purchase' ? 'purchase' :
+  kind === 'external' ? 'external' :
   'distribution'
 );
 
@@ -687,6 +690,8 @@ const mapOrder = (raw: OrderRow): Order => {
     supplier_id: raw.supplier_id ?? null,
     status: raw.status || 'pending',
     order_kind: coalesceOrderKind(raw.order_kind),
+    external_channel: raw.external_channel ?? null,
+    external_order_no: raw.external_order_no ?? null,
     payment_method: raw.payment_method ?? null,
     payment_status: raw.payment_status ?? null,
     payment_transaction_id: raw.payment_transaction_id ?? null,

@@ -8,10 +8,12 @@ import { calculateRetailOrderTotals, getRetailUnitPrice } from '../utils/orderPr
 import { resolvePrice } from '../utils/priceResolver';
 import type {
   City,
+  ExternalChannel,
   FinancialTransaction,
   InventoryLog,
   Notification,
   Order,
+  OrderKind,
   OrderItem,
   PurchaseOrder,
   RefundedOrderItem,
@@ -82,6 +84,8 @@ interface OrderRow {
   cities?: { name: string } | Array<{ name: string }> | null;
   status: Order['status'];
   order_kind?: Order['order_kind'] | null;
+  external_channel?: Order['external_channel'] | null;
+  external_order_no?: string | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   payment_amount?: number | string | null;
@@ -349,8 +353,16 @@ const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
     || message.includes('could not find the function');
 };
 
+const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
+  kind === 'retail' ? 'retail' :
+  kind === 'settlement' ? 'settlement' :
+  kind === 'purchase' ? 'purchase' :
+  kind === 'external' ? 'external' :
+  'distribution'
+);
+
 const shouldAutoDeleteStaleRetailOrder = (row: Pick<OrderRow, 'order_kind' | 'payment_status' | 'created_at'>): boolean => {
-  if ((row.order_kind || 'distribution') !== 'retail') return false;
+  if (coalesceOrderKind(row.order_kind) !== 'retail') return false;
 
   const paymentStatus = String(row.payment_status || '').toLowerCase();
   if (paidRetailStatuses.has(paymentStatus)) return false;
@@ -439,6 +451,13 @@ interface AppState {
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
   createSettlementOrder: (storeId: string, items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
+  createExternalOrder: (
+    items: CashierCreateItem[],
+    channel: ExternalChannel,
+    externalOrderNo: string,
+    storeId?: string,
+  ) => Promise<{ orderId?: string; error: Error | null }>;
+  confirmExternalOrder: (orderId: string) => Promise<{ error: Error | null }>;
   createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
@@ -629,7 +648,9 @@ const mapOrder = (row: OrderRow): Order => {
     city_name: cityData?.name,
     supplier_id: row.supplier_id ?? null,
     status: row.status,
-    order_kind: row.order_kind || 'distribution',
+    order_kind: coalesceOrderKind(row.order_kind),
+    external_channel: row.external_channel ?? null,
+    external_order_no: row.external_order_no ?? null,
     total_retail_amount: Number(row.total_retail_amount || 0),
     total_discount_amount: Number(row.total_discount_amount || 0),
     payment_amount: row.payment_amount !== undefined && row.payment_amount !== null ? Number(row.payment_amount) : undefined,
@@ -2786,6 +2807,64 @@ export const useAppStore = create<AppState>()(
 
           await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
           return { orderId: orderData ? String(orderData.id) : undefined, error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      createExternalOrder: async (items, channel, externalOrderNo, storeId) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!Array.isArray(items) || items.length === 0) return { error: new Error('购物车为空') };
+
+        const normalizedExternalOrderNo = externalOrderNo.trim();
+        if (!normalizedExternalOrderNo) return { error: new Error('外部订单号不能为空') };
+
+        const payload = items.map((item) => ({
+          product_id: item.productId,
+          quantity: Number(item.quantity),
+        }));
+
+        const invalidItem = payload.find((item) => !item.product_id || !Number.isFinite(item.quantity) || item.quantity <= 0);
+        if (invalidItem) return { error: new Error('订单商品参数无效') };
+
+        const requestId = createRequestId(user.id);
+
+        try {
+          const { data: orderId, error } = await supabase.rpc('create_external_order_atomic', {
+            p_items: payload,
+            p_external_channel: channel,
+            p_external_order_no: normalizedExternalOrderNo,
+            p_store_id: storeId ?? null,
+            p_request_id: requestId,
+          });
+          if (error) throw error;
+
+          await get().fetchOrders();
+          return { orderId: orderId ? String(orderId) : undefined, error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      confirmExternalOrder: async (orderId) => {
+        try {
+          const { orders } = get();
+          const targetOrder = orders.find((order) => order.id === orderId) || null;
+          const { error } = await supabase.rpc('confirm_external_order_atomic', {
+            p_order_id: orderId,
+          });
+          if (error) throw error;
+
+          const refreshTasks: Array<Promise<void>> = [
+            get().fetchOrders(),
+            get().fetchProducts(),
+          ];
+          if (targetOrder?.store_id) {
+            refreshTasks.push(get().fetchStoreInventory(targetOrder.store_id));
+          }
+          await Promise.all(refreshTasks);
+          return { error: null };
         } catch (error) {
           return { error: error as Error };
         }
