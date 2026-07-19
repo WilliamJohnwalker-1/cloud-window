@@ -20,6 +20,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => {
 const defaultScanResetThresholdMs = 420;
 const scanThresholdPresets = [300, 420, 650, 900] as const;
 const unpaidRetailAutoDeleteMs = 10 * 60 * 1000;
+const collectSoftWaitMs = 2500;
 const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_pending', 'refunded', 'refund_pending']);
 const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
 
@@ -61,6 +62,11 @@ const playSuccessSpeech = (amount: number): void => {
 
 const normalizeDigits = (input: string): string => input.replace(/\D/g, '');
 const normalizeProductBarcode = (input: string): string => normalizeDigits(input).slice(0, 13);
+const getPaymentPollDelayMs = (attemptIndex: number): number => {
+  if (attemptIndex < 16) return 200;
+  if (attemptIndex < 26) return 500;
+  return 1500;
+};
 const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | null => {
   const digits = normalizeDigits(input).slice(0, 24);
   if (digits.length < 16 || digits.length > 24) return null;
@@ -100,6 +106,7 @@ export const PaymentScreen: React.FC = () => {
   const currentTimingRef = useRef<TimingEntry[]>([]);
   const addProductByBarcodeRef = useRef<(code: string) => void>(() => undefined);
   const collectByCodeRef = useRef<(code: string) => Promise<void>>(async () => undefined);
+  const finalizedPaidOrderIdRef = useRef<string | null>(null);
 
   const canUseCashier = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const canAdjustAmount = user?.role === 'admin' || user?.role === 'super_admin';
@@ -165,6 +172,20 @@ export const PaymentScreen: React.FC = () => {
     setStatus('pending');
     setStatusMessage('已重置扫码状态');
   }, [scheduleScanDisplaySync]);
+
+  const finalizePaid = useCallback((orderId: string, amount: number, message: string): boolean => {
+    if (finalizedPaidOrderIdRef.current === orderId) {
+      return false;
+    }
+
+    finalizedPaidOrderIdRef.current = orderId;
+    setStatus('paid');
+    setStatusMessage(message);
+    setCart(new Map());
+    playSuccessSpeech(amount);
+    void fetchOrders();
+    return true;
+  }, [fetchOrders]);
 
   const productById = useMemo(() => {
     const byId = new Map<string, (typeof products)[number]>();
@@ -419,6 +440,7 @@ export const PaymentScreen: React.FC = () => {
         items: orderItems,
         createdAtMs: Number.isFinite(new Date(detail.created_at).getTime()) ? new Date(detail.created_at).getTime() : Date.now(),
       });
+      finalizedPaidOrderIdRef.current = null;
       setTransactionId('');
       setPaymentAuthCode('');
       setScanTarget('payment');
@@ -433,31 +455,56 @@ export const PaymentScreen: React.FC = () => {
     }
   };
 
-  const pollUntilSettled = useCallback(async (orderId: string, amount: number): Promise<void> => {
+  const pollUntilSettled = useCallback(async (
+    orderId: string,
+    amount: number,
+    shouldStop?: () => boolean,
+  ): Promise<void> => {
+    let consecutiveFailedCount = 0;
     for (let index = 0; index < 30; index += 1) {
+      if (shouldStop?.()) {
+        return;
+      }
+
       const latest = await queryPaymentStatus(orderId);
-      setStatus(latest.status);
+      const isTransientFailed = latest.status === 'failed' && consecutiveFailedCount < 3;
+      if (!isTransientFailed) {
+        setStatus(latest.status);
+      }
       if (latest.transactionId) {
         setTransactionId(latest.transactionId);
       }
 
       if (latest.status === 'paid') {
-        setStatusMessage('收款成功，订单已标记为已支付');
-        playSuccessSpeech(amount);
-        await fetchOrders();
+        finalizePaid(orderId, amount, '收款成功，订单已标记为已支付');
         return;
       }
 
       if (latest.status === 'failed' || latest.status === 'timeout') {
+        if (latest.status === 'failed') {
+          consecutiveFailedCount += 1;
+          if (consecutiveFailedCount < 4) {
+            setStatus('pending');
+            setStatusMessage('支付处理中，状态查询中...');
+            await wait(getPaymentPollDelayMs(index));
+            continue;
+          }
+        }
         setStatusMessage(latest.status === 'timeout' ? '收款超时，请重试扫码收款' : '收款失败，请重试');
         return;
       }
 
-      await wait(1500);
+      if (shouldStop?.()) {
+        return;
+      }
+
+      consecutiveFailedCount = 0;
+
+      await wait(getPaymentPollDelayMs(index));
     }
 
     setStatusMessage('仍在等待支付结果，请稍后在订单页刷新状态');
-  }, [fetchOrders]);
+  }, [finalizePaid]);
 
   const handleCollect = useCallback(async (inputCode?: string): Promise<void> => {
     if (!activeOrder) {
@@ -491,16 +538,57 @@ export const PaymentScreen: React.FC = () => {
 
     setIsCollecting(true);
     resetCurrentTiming();
+    finalizedPaidOrderIdRef.current = null;
     let shouldCommitLog = false;
     try {
       shouldCommitLog = true;
       const collectStart = performance.now();
-      const result = await collectByAuthCode({
+      const collectPromise = collectByAuthCode({
         orderId: activeOrder.id,
         amount: activeOrder.amount,
         paymentMethod: resolvedPaymentMethod,
         authCode,
       });
+      const racedCollect = await Promise.race([
+        collectPromise.then((result) => ({ timedOut: false as const, result })),
+        wait(collectSoftWaitMs).then(() => ({ timedOut: true as const })),
+      ]);
+
+      if (racedCollect.timedOut) {
+        let settledByLateCollect = false;
+
+        pushTimingEntry('收款 (gateway-short-wait)', collectStart);
+        void collectPromise
+          .then((lateResult) => {
+            if (settledByLateCollect || !lateResult.success || lateResult.status !== 'paid') {
+              return;
+            }
+
+            settledByLateCollect = true;
+            setStatus(lateResult.status);
+            if (lateResult.transactionId) {
+              setTransactionId(lateResult.transactionId);
+            }
+
+            if (lateResult.status === 'paid') {
+              if (finalizePaid(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付')) {
+                settledByLateCollect = true;
+              }
+            }
+          })
+          .catch((error) => {
+            console.warn('[PaymentScreen] collect settled after short-wait with error', error);
+          });
+
+        setStatus('pending');
+        setStatusMessage('支付处理中，正在查询最终状态...');
+        const pollingStart = performance.now();
+        await pollUntilSettled(activeOrder.id, activeOrder.amount, () => settledByLateCollect);
+        pushTimingEntry('支付状态轮询', pollingStart);
+        return;
+      }
+
+      const { result } = racedCollect;
       pushTimingEntry('收款 (gateway)', collectStart, !result.success);
 
       if (!result.success) {
@@ -516,10 +604,7 @@ export const PaymentScreen: React.FC = () => {
       }
 
       if (result.status === 'paid') {
-        setStatusMessage('收款成功，订单已完成支付');
-        setCart(new Map());
-        playSuccessSpeech(activeOrder.amount);
-        await fetchOrders();
+        finalizePaid(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付');
         return;
       }
 
@@ -538,7 +623,7 @@ export const PaymentScreen: React.FC = () => {
         commitOperationLog('payment');
       }
     }
-  }, [activeOrder, commitOperationLog, fetchOrders, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
+  }, [activeOrder, commitOperationLog, finalizePaid, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
 
   const updateItemDraftPrice = (itemId: string, value: string): void => {
     if (!activeOrder || isApplyingItemRounding) return;
@@ -633,8 +718,19 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
-      const latest = await fetchOrderDetail(activeOrder.id);
-      if (!latest) {
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('id, payment_status, order_kind')
+        .eq('id', activeOrder.id)
+        .maybeSingle();
+
+      if (queryError) {
+        // Transient query error — skip this round, do not masquerade as auto-deleted
+        return;
+      }
+
+      if (!data) {
+        // Row missing — order was auto-deleted by cleanup elsewhere
         setActiveOrder(null);
         setStatus('timeout');
         setStatusMessage('未支付订单已超时清理，请重新建单');
@@ -643,14 +739,14 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
-      if (latest.order_kind !== 'retail') {
+      if (data.order_kind !== 'retail') {
         setActiveOrder(null);
         setStatus('failed');
         setStatusMessage('检测到非零售订单，已停止自动清理保护');
         return;
       }
 
-      const paymentStatus = String(latest.payment_status || '').toLowerCase();
+      const paymentStatus = String(data.payment_status || '').toLowerCase();
       if (paidRetailStatuses.has(paymentStatus)) {
         return;
       }
@@ -680,7 +776,7 @@ export const PaymentScreen: React.FC = () => {
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeOrder, deleteOrder, fetchOrderDetail]);
+  }, [activeOrder, deleteOrder]);
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent): void => {

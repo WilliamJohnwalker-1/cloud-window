@@ -1631,24 +1631,35 @@ export const useAppStore = create<AppState>()(
       },
 
       fetchOrderDetail: async (orderId) => {
-        const { data: orderRow, error: orderError } = await supabase
-          .from('orders')
-          .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
-          .eq('id', orderId)
-          .maybeSingle();
+        const wechatOutTradeNo = orderId.replace(/-/g, '');
+
+        const [ordersResult, paymentEventsResult, orderItemsResult] = await Promise.all([
+          supabase
+            .from('orders')
+            .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
+            .eq('id', orderId)
+            .maybeSingle(),
+          supabase
+            .from('payment_events')
+            .select('created_at,payload,status,out_trade_no,event_type,processed')
+            .eq('event_type', 'refund')
+            .eq('processed', true)
+            .in('out_trade_no', [orderId, wechatOutTradeNo])
+            .order('created_at', { ascending: false })
+            .limit(50),
+          supabase
+            .from('order_items')
+            .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost, is_sample')
+            .eq('order_id', orderId)
+            .order('id', { ascending: true }),
+        ]);
+
+        const { data: orderRow, error: orderError } = ordersResult;
         if (orderError || !orderRow) return null;
 
         const base = mapOrder(orderRow as OrderRow);
         const row = orderRow as OrderRow;
-        const wechatOutTradeNo = orderId.replace(/-/g, '');
-        const { data: refundEvents } = await supabase
-          .from('payment_events')
-          .select('created_at,payload,status,out_trade_no,event_type,processed')
-          .eq('event_type', 'refund')
-          .eq('processed', true)
-          .in('out_trade_no', [orderId, wechatOutTradeNo])
-          .order('created_at', { ascending: false })
-          .limit(50);
+        const { data: refundEvents } = paymentEventsResult;
 
         const refundedItemsFromEvents: RefundedOrderItem[] = (refundEvents || [])
           .flatMap((event: {
@@ -1677,23 +1688,12 @@ export const useAppStore = create<AppState>()(
           })
           .filter((item) => item.order_item_id && item.product_id && item.quantity > 0);
 
-        const { data: itemRows, error: itemError } = await supabase
-          .from('order_items')
-          .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost, is_sample')
-          .eq('order_id', orderId)
-          .order('id', { ascending: true });
+        const { data: itemRows, error: itemError } = orderItemsResult;
 
         if (!itemError && itemRows && itemRows.length > 0) {
-          const productIds = Array.from(new Set(itemRows.map((row) => row.product_id)));
-          const { data: productRows } = await supabase
-            .from('products')
-            .select('id, name, cities(name)')
-            .in('id', productIds);
-
           const productMap = new Map<string, { name?: string; city?: string }>();
-          (productRows || []).forEach((product: { id: string; name?: string; cities?: { name: string }[] | { name: string } }) => {
-            const cityName = Array.isArray(product.cities) ? product.cities[0]?.name : product.cities?.name;
-            productMap.set(product.id, { name: product.name, city: cityName });
+          get().products.forEach((product) => {
+            productMap.set(product.id, { name: product.name, city: product.city_name });
           });
 
           const items: OrderItem[] = itemRows.map((item) => {
