@@ -132,6 +132,8 @@ export interface Order {
   created_at: string;
   items: OrderItem[];
   refunded_items?: RefundedOrderItem[];
+  external_channel?: ExternalChannel | null;
+  external_order_no?: string | null;
 }
 
 export interface ProductWithDetails extends Product {
@@ -201,7 +203,14 @@ export interface InventoryReport {
 
 export type OrderStatus = 'pending' | 'accepted';
 
-export type OrderKind = 'distribution' | 'retail' | 'settlement' | 'purchase';
+export type OrderKind = 'distribution' | 'retail' | 'settlement' | 'purchase' | 'external';
+
+export type ExternalChannel = 'xiaohongshu' | 'taobao';
+
+export const EXTERNAL_CHANNEL_LABELS: Record<ExternalChannel, string> = {
+  xiaohongshu: '小红书',
+  taobao: '淘宝',
+};
 
 export type NotificationType =
   | 'new_order'
