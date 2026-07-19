@@ -713,6 +713,19 @@ async function resolveFinanceCreatedByUserId(env, order) {
   throw new Error(`finance created_by unavailable for order ${String(order?.id || '').trim()}`);
 }
 
+async function resolveFinanceCityId(env, order) {
+  if (order?.store_id) {
+    const storeRows = await supabaseRequest(
+      env,
+      `/stores?id=eq.${encodeURIComponent(String(order.store_id))}&select=city_id&limit=1`,
+    );
+    if (Array.isArray(storeRows) && storeRows.length > 0) {
+      return storeRows[0]?.city_id || null;
+    }
+  }
+  return null;
+}
+
 async function listFinanceTransactionsByOrder(env, orderId) {
   const rows = await supabaseRequest(
     env,
@@ -771,10 +784,11 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
     const createdBy = await resolveFinanceCreatedByUserId(env, order);
     const feeAmount = roundMoney(paymentAmount * 0.006);
     const transactionDate = String(paymentPaidAt || order?.payment_paid_at || new Date().toISOString()).slice(0, 10);
-    const [incomeCategoryId, expenseCategoryId, existingRows] = await Promise.all([
+    const [incomeCategoryId, expenseCategoryId, existingRows, cityId] = await Promise.all([
       getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' }),
       financeMode.shouldCreateOnlineFee ? getFinanceCategoryId(env, { name: '线上佣金', type: 'expense' }) : Promise.resolve(null),
       listFinanceTransactionsByOrder(env, orderId),
+      resolveFinanceCityId(env, order),
     ]);
 
     const incomeDescription = `零售支付自动记账-收入-${orderId}`;
@@ -790,6 +804,7 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
         amount: paymentAmount,
         transaction_date: transactionDate,
         store_id: order?.store_id || null,
+        city_id: cityId,
         channel_name: financeMode.incomeChannelName,
         description: incomeDescription,
         is_recurring: false,
@@ -823,6 +838,7 @@ async function ensureRetailPaymentFinanceRecords(env, order, {
           amount: feeAmount,
           transaction_date: transactionDate,
           store_id: order?.store_id || null,
+          city_id: cityId,
           channel_name: financeMode.feeChannelName,
           description: expenseDescription,
           is_recurring: false,
@@ -945,6 +961,7 @@ async function ensureRetailRefundFinanceRecords(env, order, {
     }
 
     const createdBy = await resolveFinanceCreatedByUserId(env, order);
+    const cityId = await resolveFinanceCityId(env, order);
     const transactionDate = String(refundAt || new Date().toISOString()).slice(0, 10);
     const incomeCategoryId = await getFinanceCategoryId(env, { name: financeMode.incomeCategoryName, type: 'income' });
     const description = normalizedRefundNo
@@ -966,6 +983,7 @@ async function ensureRetailRefundFinanceRecords(env, order, {
           amount,
           transaction_date: transactionDate,
           store_id: order?.store_id || null,
+          city_id: cityId,
           channel_name: financeMode.incomeChannelName,
           description,
           is_recurring: false,
