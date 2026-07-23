@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.6`
-- Current web baseline: `v1.3.9`
+- Current mobile baseline: `v2.2.7`
+- Current web baseline: `v1.3.10`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -266,6 +266,7 @@ Before committing:
 - Latest inventory-log hardening wave: 重写 `migrate-v7.3-retail-single-pool-and-log-completion.sql` 对齐零售单池语义；补齐 Web 供货/零售 fallback 扣减日志；双端库存日志备注统一短原因文案，确保后续日志准确可读
 - Latest invoice+rollback hotfix: 新增 `migrate-v7.4-store-invoice-contact-fields.sql`，店铺开票联系电话/开票地址改为独立字段（不再复用联系人电话/店铺地址）；补齐 distribution 删单店铺池回滚日志（`删单回滚(店铺池)`）。
 - Latest external-channel wave: 外部渠道订单录入（Web）+ 双端展示兼容 + 零售财务 city_id 修复 + 移动端启动更新弹窗，迁移链延伸至 v7.5
+- Latest payment-guard wave: Worker `/collect` 与 `/status` 增加支付/退款态门禁与状态防降级；Web 收银台补齐 collecting/paid 防重入；双端订单页补齐已支付订单删单拦截，收款幂等与支付态一致性进一步加固
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

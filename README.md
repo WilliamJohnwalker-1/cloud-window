@@ -225,7 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.9）
+### 5. 启动 Web 端（v1.3.10）
 
 ```bash
 npm run web:v2
@@ -419,6 +419,13 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
+### Web v1.3.10 (2026-07-23) - 收款幂等与状态门禁加固
+
+- Worker 支付状态机加固：`/collect` 与 `/status` 新增已支付/退款态前置门禁，已支付订单不再重复收款，退款相关状态统一拒绝重复收款请求。
+- Worker 状态回写防降级：`paid/partial_refunded/refunded/refund_pending/partial_refund_pending` 终态与退款态不允许被低优先级状态覆盖。
+- 收银台防重入加固：前端新增 `isCollecting` 与 paid 终态双门禁，收款按钮与 Enter 触发在收款中/已支付时统一禁用，避免重复触发 collect。
+- 订单删除安全收口：Web 与移动端订单页均新增已支付订单删除拦截，避免支付完成后误删。
+
 ### Web v1.3.9 (2026-07-19) - 收银台收款链路提速与稳定性修复
 
 - 收银台详情与支付链路性能优化：`fetchOrderDetail` 并行拉取订单/支付事件/订单行，商品映射改走本地缓存，降低详情查询串行耗时。
@@ -440,6 +447,11 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 移动端订单页支持外部渠道订单只读展示：新增"外部单"筛选标签、渠道徽章、外部单号详情展示，接单按钮已屏蔽。
 - 新增启动更新弹窗：应用启动时自动检测 OTA 与 APK 二进制更新，弹窗提示用户选择"立即更新"或"稍后再说"。
 - 更新检查逻辑提取为共享工具（`src/utils/update.ts`），个人页手动检查按钮保持不变。
+
+### Mobile v2.2.7 (2026-07-23) - 订单删除支付态门禁补齐
+
+- 移动端订单页补齐已支付订单删除拦截：`paid/refund_pending/partial_refund_pending/partial_refunded/refunded` 状态下禁止删单，并提示先走退款流程。
+- 与 Web 端删除口径保持一致，降低支付后误操作导致的订单风险。
 
 ### Web v1.3.7 (2026-07-05) - 库存日志补齐与备注收敛
 
