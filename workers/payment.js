@@ -497,7 +497,13 @@ async function getRefundRequestById(env, requestId) {
 }
 
 async function patchOrderPayment(env, orderId, patch) {
-  await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}`, {
+  const protectedStatuses = ['paid', 'partial_refunded', 'refunded', 'refund_pending', 'partial_refund_pending'];
+  const nextStatus = String(patch?.payment_status || '').toLowerCase();
+  const downgradeGuard = nextStatus && !protectedStatuses.includes(nextStatus)
+    ? `&payment_status=not.in.(${protectedStatuses.join(',')})`
+    : '';
+
+  await supabaseRequest(env, `/orders?id=eq.${encodeURIComponent(orderId)}${downgradeGuard}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(patch),
@@ -1329,6 +1335,24 @@ export default {
           return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
         }
 
+        const orderPaymentStatus = String(order.payment_status || '').toLowerCase();
+        if (orderPaymentStatus === 'paid') {
+          return json({
+            success: true,
+            status: 'paid',
+            orderId,
+            outTradeNo: toWechatOutTradeNo(orderId),
+            transactionId: order.payment_transaction_id || undefined,
+          });
+        }
+        if (['partial_refunded', 'refund_pending', 'partial_refund_pending', 'refunded'].includes(orderPaymentStatus)) {
+          return json({
+            success: false,
+            status: 'failed',
+            error: '订单支付状态不允许重复收款',
+          }, { status: 409 });
+        }
+
         const expectedAmount = Number(order.payment_amount || order.total_retail_amount || 0);
         if (!almostEqualAmount(expectedAmount, amount)) {
           return json({
@@ -1525,6 +1549,24 @@ export default {
       const order = await getOrderById(env, orderId);
       if (!order) {
         return json({ success: false, status: 'failed', error: '订单不存在' }, { status: 404 });
+      }
+
+      const orderPaymentStatus = String(order.payment_status || '').toLowerCase();
+      if (orderPaymentStatus === 'paid') {
+        return json({
+          success: true,
+          status: 'paid',
+          orderId,
+          outTradeNo: orderId,
+          transactionId: order.payment_transaction_id || undefined,
+        });
+      }
+      if (['partial_refunded', 'refund_pending', 'partial_refund_pending', 'refunded'].includes(orderPaymentStatus)) {
+        return json({
+          success: false,
+          status: 'failed',
+          error: '订单支付状态不允许重复收款',
+        }, { status: 409 });
       }
 
       const expectedAmount = Number(order.payment_amount || order.total_retail_amount || 0);
