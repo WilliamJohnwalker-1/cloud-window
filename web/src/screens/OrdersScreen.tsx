@@ -1224,6 +1224,13 @@ export const OrdersScreen: React.FC = () => {
 
   const handleDeleteOrder = async (orderId: string): Promise<void> => {
     const targetOrder = getResolvedOrder(orderId);
+    const paymentStatus = String(targetOrder?.payment_status || '').toLowerCase();
+    if (['paid', 'partial_refunded', 'refund_pending', 'partial_refund_pending'].includes(paymentStatus)) {
+      setDeleteConfirmOrderId(null);
+      setPageNotice({ type: 'error', text: '已支付订单不可删除，请先退款' });
+      return;
+    }
+
     setDeletingOrderId(orderId);
     const { error } = await deleteOrder(orderId);
     setDeletingOrderId(null);

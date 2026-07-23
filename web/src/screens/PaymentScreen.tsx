@@ -187,6 +187,26 @@ export const PaymentScreen: React.FC = () => {
     return true;
   }, [fetchOrders]);
 
+  const confirmPaidSettlement = useCallback(async (
+    orderId: string,
+    amount: number,
+    message: string,
+  ): Promise<boolean> => {
+    const latest = await queryPaymentStatus(orderId);
+    if (latest.transactionId) {
+      setTransactionId(latest.transactionId);
+    }
+
+    if (latest.status !== 'paid') {
+      setStatus('pending');
+      setStatusMessage('支付处理中，等待支付网关最终确认...');
+      return false;
+    }
+
+    finalizePaid(orderId, amount, message);
+    return true;
+  }, [finalizePaid]);
+
   const productById = useMemo(() => {
     const byId = new Map<string, (typeof products)[number]>();
     products.forEach((product) => {
@@ -513,6 +533,16 @@ export const PaymentScreen: React.FC = () => {
       return;
     }
 
+    if (isCollecting) {
+      return;
+    }
+
+    if (status === 'paid' || finalizedPaidOrderIdRef.current === activeOrder.id) {
+      setStatus('paid');
+      setStatusMessage('该订单已完成支付，请新建订单后再收款');
+      return;
+    }
+
     const authCode = normalizeDigits((inputCode ?? paymentAuthCode).trim()).slice(0, 24);
     if (!validateAuthCode(authCode)) {
       setStatus('failed');
@@ -538,7 +568,6 @@ export const PaymentScreen: React.FC = () => {
 
     setIsCollecting(true);
     resetCurrentTiming();
-    finalizedPaidOrderIdRef.current = null;
     let shouldCommitLog = false;
     try {
       shouldCommitLog = true;
@@ -564,17 +593,19 @@ export const PaymentScreen: React.FC = () => {
               return;
             }
 
-            settledByLateCollect = true;
-            setStatus(lateResult.status);
             if (lateResult.transactionId) {
               setTransactionId(lateResult.transactionId);
             }
 
-            if (lateResult.status === 'paid') {
-              if (finalizePaid(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付')) {
-                settledByLateCollect = true;
-              }
-            }
+            void confirmPaidSettlement(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付')
+              .then((confirmed) => {
+                if (confirmed) {
+                  settledByLateCollect = true;
+                }
+              })
+              .catch((error) => {
+                console.warn('[PaymentScreen] late collect paid confirmation failed', error);
+              });
           })
           .catch((error) => {
             console.warn('[PaymentScreen] collect settled after short-wait with error', error);
@@ -604,8 +635,10 @@ export const PaymentScreen: React.FC = () => {
       }
 
       if (result.status === 'paid') {
-        finalizePaid(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付');
-        return;
+        const confirmed = await confirmPaidSettlement(activeOrder.id, activeOrder.amount, '收款成功，订单已完成支付');
+        if (confirmed) {
+          return;
+        }
       }
 
       setStatusMessage('支付处理中，正在查询最终状态...');
@@ -623,7 +656,7 @@ export const PaymentScreen: React.FC = () => {
         commitOperationLog('payment');
       }
     }
-  }, [activeOrder, commitOperationLog, finalizePaid, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming]);
+  }, [activeOrder, commitOperationLog, confirmPaidSettlement, isCollecting, paymentAuthCode, paymentMethod, pollUntilSettled, pushTimingEntry, resetCurrentTiming, status]);
 
   const updateItemDraftPrice = (itemId: string, value: string): void => {
     if (!activeOrder || isApplyingItemRounding) return;
@@ -714,6 +747,10 @@ export const PaymentScreen: React.FC = () => {
     if (!activeOrder) return;
 
     const checkAndCleanupUnpaidOrder = async (): Promise<void> => {
+      if (isCollecting) {
+        return;
+      }
+
       if (Date.now() - activeOrder.createdAtMs < unpaidRetailAutoDeleteMs) {
         return;
       }
@@ -757,6 +794,20 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
+      const latest = await queryPaymentStatus(activeOrder.id);
+      if (latest.transactionId) {
+        setTransactionId(latest.transactionId);
+      }
+
+      if (latest.status === 'paid') {
+        finalizePaid(activeOrder.id, activeOrder.amount, '收款成功，订单已标记为已支付');
+        return;
+      }
+
+      if (latest.status !== 'timeout') {
+        return;
+      }
+
       const { error } = await deleteOrder(activeOrder.id);
       if (!error) {
         setActiveOrder(null);
@@ -776,7 +827,7 @@ export const PaymentScreen: React.FC = () => {
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeOrder, deleteOrder]);
+  }, [activeOrder, deleteOrder, finalizePaid, isCollecting]);
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent): void => {
@@ -1101,7 +1152,7 @@ export const PaymentScreen: React.FC = () => {
             }}
             onKeyDown={(event) => {
               event.stopPropagation();
-              if (event.key === 'Enter') {
+              if (event.key === 'Enter' && !isCollecting && status !== 'paid') {
                 event.preventDefault();
                 void handleCollect();
               }
@@ -1115,7 +1166,7 @@ export const PaymentScreen: React.FC = () => {
             onClick={() => {
               void handleCollect();
             }}
-            disabled={isCollecting || !activeOrder}
+            disabled={isCollecting || !activeOrder || status === 'paid'}
             className="w-full py-2.5 rounded-xl bg-emerald-500/90 font-bold disabled:opacity-50"
           >
             {isCollecting ? '收款处理中...' : '确认收款'}

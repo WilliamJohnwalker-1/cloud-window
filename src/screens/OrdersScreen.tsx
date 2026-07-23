@@ -692,6 +692,12 @@ export default function OrdersScreen() {
   };
 
   const handleDeleteOrder = (order: Order) => {
+    const paymentStatus = String(order.payment_status || '').toLowerCase();
+    if (['paid', 'partial_refunded', 'refund_pending', 'partial_refund_pending'].includes(paymentStatus)) {
+      Toast.show({ type: 'error', text1: '不可删除', text2: '已支付订单请先退款' });
+      return;
+    }
+
     Alert.alert('确认删除', `确定删除订单 #${order.id.slice(0, 8)} 吗？删除后会恢复库存。`, [
       { text: '取消', style: 'cancel' },
       {
