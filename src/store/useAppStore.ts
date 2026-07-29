@@ -41,7 +41,7 @@ interface PurchaseOrderCreateItem {
   store_id: string;
   city_id: string;
   supplier_id?: string | null;
-  products: Array<{ product_id: string; quantity: number }>;
+  products: Array<{ product_id: string; quantity: number; lineTotal?: number }>;
 }
 
 interface SlowMovingAlertNotificationInput {
@@ -145,6 +145,8 @@ interface ProductRow {
   price?: number | string | null;
   cost?: number | string | null;
   one_time_cost?: number | string | null;
+  cumulative_cost_quantity?: number | string | null;
+  cumulative_cost_amount?: number | string | null;
   discount_price?: number | string | null;
   city_id: string;
   sku?: string | null;
@@ -1296,6 +1298,12 @@ export const useAppStore = create<AppState>()(
               price: Number(p.price || 0),
               cost: Number(p.cost || 0),
               one_time_cost: Number(p.one_time_cost || 0),
+              cumulative_cost_quantity: p.cumulative_cost_quantity !== undefined && p.cumulative_cost_quantity !== null
+                ? Number(p.cumulative_cost_quantity)
+                : null,
+              cumulative_cost_amount: p.cumulative_cost_amount !== undefined && p.cumulative_cost_amount !== null
+                ? Number(p.cumulative_cost_amount)
+                : null,
               discount_price: distributorDiscount ?? baseDiscount,
               city_name: p.cities?.name,
               quantity: p.inventory?.[0]?.quantity !== null && p.inventory?.[0]?.quantity !== undefined
@@ -1891,10 +1899,18 @@ export const useAppStore = create<AppState>()(
           if (Number.isNaN(unitCost)) {
             throw new Error('单个成本为必填项');
           }
+          const cumulativeCostQuantity = product.cumulative_cost_quantity === undefined || product.cumulative_cost_quantity === null
+            ? null
+            : Number(product.cumulative_cost_quantity);
+          const cumulativeCostAmount = product.cumulative_cost_amount === undefined || product.cumulative_cost_amount === null
+            ? null
+            : Number(product.cumulative_cost_amount);
           const payload = {
             ...product,
             cost: unitCost,
             one_time_cost: Number(product.one_time_cost || 0),
+            cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity,
+            cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount,
             discount_price: Number(product.discount_price || product.price),
             sku: product.sku?.trim() || null,
             category: product.category?.trim() || null,
@@ -1941,9 +1957,21 @@ export const useAppStore = create<AppState>()(
           if (updates.cost !== undefined && Number.isNaN(Number(updates.cost))) {
             throw new Error('单个成本为必填项');
           }
+          const cumulativeCostQuantity = updates.cumulative_cost_quantity === undefined || updates.cumulative_cost_quantity === null
+            ? null
+            : Number(updates.cumulative_cost_quantity);
+          const cumulativeCostAmount = updates.cumulative_cost_amount === undefined || updates.cumulative_cost_amount === null
+            ? null
+            : Number(updates.cumulative_cost_amount);
           const payload = {
             ...updates,
             cost: updates.cost !== undefined ? Number(updates.cost) : updates.cost,
+            cumulative_cost_quantity: updates.cumulative_cost_quantity !== undefined
+              ? (Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity)
+              : updates.cumulative_cost_quantity,
+            cumulative_cost_amount: updates.cumulative_cost_amount !== undefined
+              ? (Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount)
+              : updates.cumulative_cost_amount,
             sku: updates.sku !== undefined ? (updates.sku?.trim() || null) : updates.sku,
             category: updates.category !== undefined ? (updates.category?.trim() || null) : updates.category,
             updated_at: new Date().toISOString(),
@@ -2645,12 +2673,19 @@ export const useAppStore = create<AppState>()(
 
             const payload = group.products.map((product) => {
               const quantity = Number(product.quantity);
+              const lineTotal = product.lineTotal === undefined || product.lineTotal === null
+                ? null
+                : Number(product.lineTotal);
               if (!product.product_id || !Number.isFinite(quantity) || quantity <= 0) {
                 throw new Error('进货商品参数无效');
+              }
+              if (lineTotal !== null && (!Number.isFinite(lineTotal) || lineTotal <= 0)) {
+                throw new Error('进货商品总价参数无效');
               }
               return {
                 product_id: product.product_id,
                 quantity,
+                line_total: lineTotal,
               };
             });
 
