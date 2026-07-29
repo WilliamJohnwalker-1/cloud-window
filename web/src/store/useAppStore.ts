@@ -45,6 +45,8 @@ interface ProductRow {
   price?: number | string | null;
   cost?: number | string | null;
   one_time_cost?: number | string | null;
+  cumulative_cost_quantity?: number | string | null;
+  cumulative_cost_amount?: number | string | null;
   discount_price?: number | string | null;
   barcode?: string | null;
   image_url?: string | null;
@@ -252,6 +254,7 @@ interface PurchaseOrderCreateItem {
   products: Array<{
     productId: string;
     quantity: number;
+    lineTotal?: number;
   }>;
 }
 
@@ -508,6 +511,12 @@ const mapProducts = (rows: ProductRow[]): ProductWithDetails[] => {
     price: Number(row.price || 0),
     cost: Number(row.cost || 0),
     one_time_cost: Number(row.one_time_cost || 0),
+    cumulative_cost_quantity: row.cumulative_cost_quantity !== undefined && row.cumulative_cost_quantity !== null
+      ? Number(row.cumulative_cost_quantity)
+      : null,
+    cumulative_cost_amount: row.cumulative_cost_amount !== undefined && row.cumulative_cost_amount !== null
+      ? Number(row.cumulative_cost_amount)
+      : null,
     discount_price: Number(row.discount_price || row.price || 0),
     barcode: row.barcode ?? undefined,
     image_url: row.image_url ?? undefined,
@@ -1337,12 +1346,19 @@ export const useAppStore = create<AppState>()(
 
             const payload = group.products.map((product) => {
               const quantity = Number(product.quantity);
+              const lineTotal = product.lineTotal === undefined || product.lineTotal === null
+                ? null
+                : Number(product.lineTotal);
               if (!product.productId || !Number.isFinite(quantity) || quantity <= 0) {
                 throw new Error('进货商品参数无效');
+              }
+              if (lineTotal !== null && (!Number.isFinite(lineTotal) || lineTotal < 0)) {
+                throw new Error('进货商品总价参数无效');
               }
               return {
                 product_id: product.productId,
                 quantity,
+                line_total: lineTotal,
               };
             });
 
@@ -1963,11 +1979,19 @@ export const useAppStore = create<AppState>()(
 
       addProduct: async (payload) => {
         try {
+          const cumulativeCostQuantity = payload.cumulative_cost_quantity === undefined || payload.cumulative_cost_quantity === null
+            ? null
+            : Number(payload.cumulative_cost_quantity);
+          const cumulativeCostAmount = payload.cumulative_cost_amount === undefined || payload.cumulative_cost_amount === null
+            ? null
+            : Number(payload.cumulative_cost_amount);
           const { data: createdProduct, error: insertError } = await supabase.from('products').insert({
             name: payload.name,
             price: Number(payload.price),
             cost: Number(payload.cost),
             one_time_cost: Number(payload.one_time_cost || 0),
+            cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity,
+            cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount,
             discount_price: Number(payload.discount_price),
             city_id: payload.city_id,
             image_url: payload.image_url ?? null,
@@ -2013,6 +2037,12 @@ export const useAppStore = create<AppState>()(
 
       updateProduct: async (productId, payload) => {
         try {
+          const cumulativeCostQuantity = payload.cumulative_cost_quantity === undefined || payload.cumulative_cost_quantity === null
+            ? null
+            : Number(payload.cumulative_cost_quantity);
+          const cumulativeCostAmount = payload.cumulative_cost_amount === undefined || payload.cumulative_cost_amount === null
+            ? null
+            : Number(payload.cumulative_cost_amount);
           const { error } = await supabase
             .from('products')
             .update({
@@ -2020,6 +2050,8 @@ export const useAppStore = create<AppState>()(
               price: Number(payload.price),
               cost: Number(payload.cost),
               one_time_cost: Number(payload.one_time_cost || 0),
+              cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity,
+              cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount,
               discount_price: Number(payload.discount_price),
               city_id: payload.city_id,
               image_url: payload.image_url ?? null,
@@ -2813,7 +2845,7 @@ export const useAppStore = create<AppState>()(
       },
 
       createExternalOrder: async (items, channel, externalOrderNo, storeId) => {
-        const { user } = get();
+        const { user, stores, products } = get();
         if (!user) return { error: new Error('未登录') };
         if (!Array.isArray(items) || items.length === 0) return { error: new Error('购物车为空') };
 
@@ -2843,7 +2875,148 @@ export const useAppStore = create<AppState>()(
           await get().fetchOrders();
           return { orderId: orderId ? String(orderId) : undefined, error: null };
         } catch (error) {
-          return { error: error as Error };
+          if (!shouldFallbackToLegacyFlow(error as RpcErrorLike)) {
+            return { error: error as Error };
+          }
+
+          try {
+            let effectiveStoreId = storeId ?? null;
+            if (!effectiveStoreId) {
+              const yunChuangStore = stores.find((store) => store.name === '云窗' && store.status === 'active') || null;
+              if (!yunChuangStore) {
+                throw new Error('默认外部渠道店铺不存在');
+              }
+              effectiveStoreId = yunChuangStore.id;
+            }
+
+            const selectedStore = stores.find((store) => store.id === effectiveStoreId) || null;
+            if (!selectedStore) throw new Error('店铺不存在或未加载');
+            if (selectedStore.status !== 'active') throw new Error('店铺已停用');
+
+            const orderItemsPayload = items.map((item) => {
+              const product = products.find((entry) => entry.id === item.productId) || null;
+              if (!product) throw new Error('商品不存在');
+              const quantity = Number(item.quantity);
+              if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('订单商品参数无效');
+              if (product.city_id !== selectedStore.city_id) throw new Error('店铺只能销售所属城市商品');
+
+              const retailPrice = Number(product.price || 0);
+              const discountPrice = Number(product.discount_price || product.price || 0);
+
+              return {
+                product_id: product.id,
+                quantity,
+                retail_price: retailPrice,
+                discount_price: discountPrice,
+                unit_cost: Number(product.cost || 0),
+                one_time_cost: Number(product.one_time_cost || 0),
+              };
+            });
+
+            const totalRetail = orderItemsPayload.reduce((sum, item) => sum + item.retail_price * item.quantity, 0);
+            const totalDiscount = orderItemsPayload.reduce((sum, item) => sum + item.discount_price * item.quantity, 0);
+            const totalQuantity = orderItemsPayload.reduce((sum, item) => sum + item.quantity, 0);
+
+            const baseOrderPayload = {
+              distributor_id: user.id,
+              city_id: selectedStore.city_id,
+              store_id: selectedStore.id,
+              request_id: requestId,
+              order_kind: 'external' as const,
+              status: 'pending' as const,
+              payment_status: 'unpaid' as const,
+              external_channel: channel,
+              external_order_no: normalizedExternalOrderNo,
+              total_retail_amount: totalRetail,
+              total_discount_amount: totalDiscount,
+              quantity: totalQuantity,
+            };
+
+            let orderInsert = await supabase
+              .from('orders')
+              .insert(baseOrderPayload)
+              .select('id')
+              .single();
+
+            if (orderInsert.error && orderItemsPayload.length > 0) {
+              const message = String(orderInsert.error.message || '').toLowerCase();
+              const details = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+              const combined = `${message} ${details}`;
+              const legacyColumnHit =
+                combined.includes('column "quantity"')
+                || combined.includes('column "unit_price"')
+                || combined.includes('column "product_id"')
+                || combined.includes('column "total_amount"')
+                || combined.includes('column "total-amount"')
+                || combined.includes('column quantity')
+                || combined.includes('column unit_price')
+                || combined.includes('column product_id')
+                || combined.includes('column total_amount')
+                || combined.includes('column total-amount');
+              const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+              const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+              if (legacyConstraintHit) {
+                const primaryItem = orderItemsPayload[0];
+                const legacyOrderPayload = {
+                  ...baseOrderPayload,
+                  product_id: primaryItem.product_id,
+                  quantity: primaryItem.quantity,
+                  unit_price: primaryItem.retail_price,
+                  total_amount: totalDiscount,
+                };
+
+                orderInsert = await supabase
+                  .from('orders')
+                  .insert(legacyOrderPayload)
+                  .select('id')
+                  .single();
+
+                if (orderInsert.error) {
+                  const retryMessage = String(orderInsert.error.message || '').toLowerCase();
+                  const retryDetails = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+                  const retryCombined = `${retryMessage} ${retryDetails}`;
+                  const legacyDashTotalAmountHit =
+                    orderInsert.error.code === '23502'
+                    && (retryCombined.includes('column "total-amount"') || retryCombined.includes('column total-amount'))
+                    && (retryCombined.includes('relation "orders"') || retryCombined.includes('table "orders"'));
+
+                  if (legacyDashTotalAmountHit) {
+                    const legacyDashPayloadBase = {
+                      distributor_id: legacyOrderPayload.distributor_id,
+                      city_id: legacyOrderPayload.city_id,
+                      total_retail_amount: legacyOrderPayload.total_retail_amount,
+                      total_discount_amount: legacyOrderPayload.total_discount_amount,
+                      product_id: legacyOrderPayload.product_id,
+                      quantity: legacyOrderPayload.quantity,
+                      unit_price: legacyOrderPayload.unit_price,
+                    };
+                    orderInsert = await supabase
+                      .from('orders')
+                      .insert({
+                        ...legacyDashPayloadBase,
+                        'total-amount': totalDiscount,
+                      })
+                      .select('id')
+                      .single();
+                  }
+                }
+              }
+            }
+
+            const { data: orderData, error: orderError } = orderInsert;
+            if (orderError) throw orderError;
+
+            const { error: itemError } = await supabase
+              .from('order_items')
+              .insert(orderItemsPayload.map((item) => ({ ...item, order_id: orderData.id })));
+            if (itemError) throw itemError;
+
+            await get().fetchOrders();
+            return { orderId: orderData ? String(orderData.id) : undefined, error: null };
+          } catch (fallbackError) {
+            return { error: fallbackError as Error };
+          }
         }
       },
 

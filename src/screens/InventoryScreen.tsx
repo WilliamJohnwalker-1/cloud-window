@@ -77,6 +77,7 @@ export default function InventoryScreen() {
   const [purchaseStoreId, setPurchaseStoreId] = useState<string | null>(null);
   const [purchaseSupplierId, setPurchaseSupplierId] = useState<string | null>(null);
   const [purchaseCart, setPurchaseCart] = useState<Map<string, number>>(new Map());
+  const [purchaseLineTotals, setPurchaseLineTotals] = useState<Map<string, string>>(new Map());
   const [submittingPurchase, setSubmittingPurchase] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState<'main' | 'store'>('main');
@@ -198,13 +199,17 @@ export default function InventoryScreen() {
   const purchaseCartEntries = Array.from(purchaseCart.entries()).filter(([, qty]) => qty > 0);
   const purchaseTotalQuantity = purchaseCartEntries.reduce((sum, [, qty]) => sum + qty, 0);
   const purchaseStoreCount = new Set(purchaseCartEntries.map(([key]) => key.split(':')[0])).size;
+  const purchaseTotalCost = purchaseCartEntries.reduce((sum, [key]) => {
+    const value = Number(purchaseLineTotals.get(key) || '0');
+    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+  }, 0);
 
   const getPurchaseCartKey = (storeId: string, productId: string): string => `${storeId}:${productId}`;
 
   const updatePurchaseQuantity = (storeId: string, productId: string, quantity: number) => {
+    const key = getPurchaseCartKey(storeId, productId);
     setPurchaseCart((prev) => {
       const next = new Map(prev);
-      const key = getPurchaseCartKey(storeId, productId);
       if (!Number.isFinite(quantity) || quantity <= 0) {
         next.delete(key);
       } else {
@@ -212,6 +217,13 @@ export default function InventoryScreen() {
       }
       return next;
     });
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setPurchaseLineTotals((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+    }
   };
 
   const handleUpdateStock = (product: ProductWithDetails, adjustment: number) => {
@@ -317,6 +329,7 @@ export default function InventoryScreen() {
 
   const resetPurchaseForm = () => {
     setPurchaseCart(new Map());
+    setPurchaseLineTotals(new Map());
     setPurchaseStoreId(null);
     setPurchaseSupplierId(null);
   };
@@ -328,13 +341,33 @@ export default function InventoryScreen() {
       return;
     }
 
-    const groupMap = new Map<string, { store_id: string; city_id: string; supplier_id: string | null; products: Array<{ product_id: string; quantity: number }> }>();
+    const invalidEntry = purchaseCartEntries.find(([key]) => {
+      const value = Number(purchaseLineTotals.get(key) || '');
+      return !Number.isFinite(value) || value <= 0;
+    });
+    if (invalidEntry) {
+      const [, productId] = invalidEntry[0].split(':');
+      const productName = products.find((item) => item.id === productId)?.name || '商品';
+      Toast.show({ type: 'error', text1: '错误', text2: `${productName} 请填写大于0的进货总价` });
+      return;
+    }
+
+    const groupMap = new Map<string, {
+      store_id: string;
+      city_id: string;
+      supplier_id: string | null;
+      products: Array<{ product_id: string; quantity: number; lineTotal?: number }>;
+    }>();
     purchaseCartEntries.forEach(([key, quantity]) => {
       const [storeId, productId] = key.split(':');
       const store = activePurchaseStores.find((item) => item.id === storeId);
       if (!store || !productId) return;
       const group = groupMap.get(storeId) || { store_id: storeId, city_id: store.city_id, supplier_id: purchaseSupplierId ?? null, products: [] };
-      group.products.push({ product_id: productId, quantity });
+      group.products.push({
+        product_id: productId,
+        quantity,
+        lineTotal: Number(purchaseLineTotals.get(key) || 0),
+      });
       groupMap.set(storeId, group);
     });
 
@@ -1068,12 +1101,34 @@ export default function InventoryScreen() {
                 keyExtractor={(item) => item.id}
                 style={styles.purchaseProductList}
                 renderItem={({ item }) => {
-                  const qty = purchaseCart.get(getPurchaseCartKey(selectedPurchaseStore.id, item.id)) || 0;
+                  const cartKey = getPurchaseCartKey(selectedPurchaseStore.id, item.id);
+                  const qty = purchaseCart.get(cartKey) || 0;
+                  const lineTotalText = purchaseLineTotals.get(cartKey) || '';
                   return (
                     <View style={[styles.purchaseProductRow, { borderBottomColor: theme.divider }] }>
                       <View style={styles.purchaseProductInfo}>
                         <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
                         <Text style={[styles.cityName, { color: theme.textSecondary }]}>成本 {Number(item.cost || 0).toFixed(2)}元 · {item.city_name || selectedPurchaseStore.city_name || '未知城市'}</Text>
+                        {qty > 0 ? (
+                          <View style={styles.purchaseLineTotalRow}>
+                            <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>本行总价</Text>
+                            <TextInput
+                              style={[styles.purchaseLineTotalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                              value={lineTotalText}
+                              onChangeText={(text) => {
+                                const sanitized = text.replace(/[^0-9.]/g, '');
+                                setPurchaseLineTotals((prev) => {
+                                  const next = new Map(prev);
+                                  next.set(cartKey, sanitized);
+                                  return next;
+                                });
+                              }}
+                              keyboardType="decimal-pad"
+                              placeholder="手填总价"
+                              placeholderTextColor={theme.textTertiary}
+                            />
+                          </View>
+                        ) : null}
                       </View>
                       <View style={styles.purchaseQtyControls}>
                         <TouchableOpacity style={styles.purchaseQtyButton} onPress={() => updatePurchaseQuantity(selectedPurchaseStore.id, item.id, qty - 1)}>
@@ -1110,6 +1165,7 @@ export default function InventoryScreen() {
 
             <View style={styles.purchaseSummaryBox}>
               <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>已选 {purchaseStoreCount} 个店铺，共 {purchaseTotalQuantity} 件</Text>
+              <Text style={[styles.scanResultStock, { color: theme.textSecondary }]}>本次成本总额 ¥{purchaseTotalCost.toFixed(2)}</Text>
             </View>
 
             <View style={styles.modalActions}>
@@ -1576,6 +1632,24 @@ const styles = StyleSheet.create({
   purchaseProductInfo: {
     flex: 1,
     marginRight: 10,
+  },
+  purchaseLineTotalRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  purchaseLineTotalInput: {
+    width: 110,
+    height: 30,
+    borderRadius: Radius.sm,
+    textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 18,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    color: Colors.textPrimary,
   },
   purchaseQtyControls: {
     flexDirection: 'row',

@@ -515,21 +515,28 @@ async function increaseInventoryByProduct(env, productId, deltaQuantity) {
     env,
     `/inventory?product_id=eq.${encodeURIComponent(productId)}&select=product_id,quantity&limit=1`,
   );
-  if (!Array.isArray(rows) || rows.length === 0) return;
+  if (!Array.isArray(rows) || rows.length === 0) return null;
   const currentQuantity = Number(rows[0]?.quantity || 0);
+  const nextQuantity = currentQuantity + Number(deltaQuantity || 0);
   await supabaseRequest(env, `/inventory?product_id=eq.${encodeURIComponent(productId)}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({
-      quantity: currentQuantity + Number(deltaQuantity || 0),
+      quantity: nextQuantity,
       updated_at: new Date().toISOString(),
     }),
   });
+
+  return {
+    beforeQuantity: currentQuantity,
+    afterQuantity: nextQuantity,
+  };
 }
 
 async function applyRetailRefundItemsFallback(env, order, refundItemIds, operatorUserId = null) {
   const orderId = String(order?.id || '').trim();
   if (!orderId) throw new Error('fallback missing order id');
+  const effectiveOperatorId = String(operatorUserId || order?.distributor_id || '').trim() || null;
 
   try {
     const rpcResult = await supabaseRequest(env, '/rpc/apply_retail_refund_items_atomic', {
@@ -538,22 +545,15 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds, operato
       body: JSON.stringify({
         p_order_id: orderId,
         p_order_item_ids: refundItemIds,
-        p_operator_id: operatorUserId || order?.distributor_id || null,
+        p_operator_id: effectiveOperatorId,
       }),
     });
 
     if (rpcResult && typeof rpcResult === 'object' && !Array.isArray(rpcResult)) {
       return rpcResult;
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || '');
-    const missingRpc = message.includes('apply_retail_refund_items_atomic')
-      || message.includes('PGRST202')
-      || message.toLowerCase().includes('could not find the function');
-
-    if (!missingRpc) {
-      throw error;
-    }
+  } catch {
+    // Fall through to JS fallback mutation on any RPC failure.
   }
 
   const orderItems = Array.isArray(order?.items) ? order.items : [];
@@ -568,8 +568,35 @@ async function applyRetailRefundItemsFallback(env, order, refundItemIds, operato
     restoreByProduct.set(productId, Number(restoreByProduct.get(productId) || 0) + quantity);
   });
 
+  const restoreLogs = [];
   for (const [productId, quantity] of restoreByProduct.entries()) {
-    await increaseInventoryByProduct(env, productId, quantity);
+    const inventoryChange = await increaseInventoryByProduct(env, productId, quantity);
+    if (!inventoryChange) continue;
+    restoreLogs.push({
+      product_id: productId,
+      delta_quantity: quantity,
+      before_quantity: inventoryChange.beforeQuantity,
+      after_quantity: inventoryChange.afterQuantity,
+    });
+  }
+
+  if (effectiveOperatorId && restoreLogs.length > 0) {
+    try {
+      await supabaseRequest(env, '/inventory_logs', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(
+          restoreLogs.map((log) => ({
+            ...log,
+            operator_id: effectiveOperatorId,
+            action: 'refund_restore',
+            note: `零售退款库存恢复；order_id=${orderId}；item_count=${refundItemIds.length}；inventory_pool=inventory`,
+          })),
+        ),
+      });
+    } catch {
+      // Keep refund success even if log insert fails.
+    }
   }
 
   const encodedIds = refundItemIds.map((id) => encodeURIComponent(id)).join(',');

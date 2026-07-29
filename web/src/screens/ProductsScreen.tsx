@@ -32,6 +32,8 @@ export const ProductsScreen: React.FC = () => {
     price: '',
     cost: '',
     one_time_cost: '0',
+    cumulative_cost_quantity: '',
+    cumulative_cost_amount: '',
     city_id: '',
     sku: '',
     category: '',
@@ -127,11 +129,24 @@ export const ProductsScreen: React.FC = () => {
       window.alert('请输入商品名称');
       return;
     }
+    const parsedCumulativeQuantity = form.cumulative_cost_quantity.trim() ? Number(form.cumulative_cost_quantity) : null;
+    const parsedCumulativeAmount = form.cumulative_cost_amount.trim() ? Number(form.cumulative_cost_amount) : null;
+    if (parsedCumulativeQuantity !== null && Number.isNaN(parsedCumulativeQuantity)) {
+      window.alert('累计数量必须是数字');
+      return;
+    }
+    if (parsedCumulativeAmount !== null && Number.isNaN(parsedCumulativeAmount)) {
+      window.alert('累计成本必须是数字');
+      return;
+    }
+
     const payload = {
       name: form.name.trim(),
       price: Number(form.price),
       cost: Number(form.cost),
       one_time_cost: Number(form.one_time_cost || 0),
+      cumulative_cost_quantity: parsedCumulativeQuantity,
+      cumulative_cost_amount: parsedCumulativeAmount,
       discount_price: Number(form.price),
       city_id: form.city_id,
       sku: form.sku.trim() || null,
@@ -151,12 +166,12 @@ export const ProductsScreen: React.FC = () => {
     }
     await fetchProducts();
     setShowCreate(false);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '', series_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '' });
   };
 
   const openCreateModal = (): void => {
     setEditingProductId(null);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', city_id: '', sku: '', category: '', series_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
     setShowPricingPanel(false);
@@ -173,6 +188,12 @@ export const ProductsScreen: React.FC = () => {
       price: String(product.price),
       cost: String(product.cost),
       one_time_cost: String(product.one_time_cost || 0),
+      cumulative_cost_quantity: product.cumulative_cost_quantity !== undefined && product.cumulative_cost_quantity !== null
+        ? String(product.cumulative_cost_quantity)
+        : '',
+      cumulative_cost_amount: product.cumulative_cost_amount !== undefined && product.cumulative_cost_amount !== null
+        ? String(product.cumulative_cost_amount)
+        : '',
       city_id: product.city_id,
       sku: product.sku || '',
       category: product.category || '',
@@ -186,11 +207,24 @@ export const ProductsScreen: React.FC = () => {
 
   const handleSaveProduct = async (): Promise<void> => {
     if (editingProductId) {
+      const parsedCumulativeQuantity = form.cumulative_cost_quantity.trim() ? Number(form.cumulative_cost_quantity) : null;
+      const parsedCumulativeAmount = form.cumulative_cost_amount.trim() ? Number(form.cumulative_cost_amount) : null;
+      if (parsedCumulativeQuantity !== null && Number.isNaN(parsedCumulativeQuantity)) {
+        window.alert('累计数量必须是数字');
+        return;
+      }
+      if (parsedCumulativeAmount !== null && Number.isNaN(parsedCumulativeAmount)) {
+        window.alert('累计成本必须是数字');
+        return;
+      }
+
       const payload = {
         name: form.name.trim(),
         price: Number(form.price),
         cost: Number(form.cost),
         one_time_cost: Number(form.one_time_cost || 0),
+        cumulative_cost_quantity: parsedCumulativeQuantity,
+        cumulative_cost_amount: parsedCumulativeAmount,
         discount_price: Number(form.price),
         city_id: form.city_id,
         sku: form.sku.trim() || null,
@@ -493,6 +527,14 @@ export const ProductsScreen: React.FC = () => {
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">一次性成本</span>
                 <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">累计数量</span>
+                <input value={form.cumulative_cost_quantity} onChange={(event) => setForm((prev) => ({ ...prev, cumulative_cost_quantity: event.target.value }))} placeholder="管理员统计历史总数量" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">累计成本</span>
+                <input value={form.cumulative_cost_amount} onChange={(event) => setForm((prev) => ({ ...prev, cumulative_cost_amount: event.target.value }))} placeholder="管理员统计历史总成本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               </label>
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">SKU</span>

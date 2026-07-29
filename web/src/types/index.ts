@@ -29,6 +29,8 @@ export interface Product {
   price: number;
   cost: number;
   one_time_cost: number;
+  cumulative_cost_quantity?: number | null;
+  cumulative_cost_amount?: number | null;
   discount_price: number;
   barcode?: string;
   image_url?: string;
@@ -171,6 +173,8 @@ export interface ProductCreateInput {
   price: number;
   cost: number;
   one_time_cost: number;
+  cumulative_cost_quantity?: number | null;
+  cumulative_cost_amount?: number | null;
   discount_price: number;
   city_id: string;
   series_id?: string | null;

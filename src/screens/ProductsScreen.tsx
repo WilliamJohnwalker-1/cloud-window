@@ -100,6 +100,8 @@ export default function ProductsScreen() {
   const [price, setPrice] = useState('');
   const [cost, setCost] = useState('');
   const [oneTimeCost, setOneTimeCost] = useState('');
+  const [cumulativeCostQuantity, setCumulativeCostQuantity] = useState('');
+  const [cumulativeCostAmount, setCumulativeCostAmount] = useState('');
   const [sku, setSku] = useState('');
   const [category, setCategory] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
@@ -186,6 +188,8 @@ export default function ProductsScreen() {
     setPrice('');
     setCost('');
     setOneTimeCost('');
+    setCumulativeCostQuantity('');
+    setCumulativeCostAmount('');
     setSku('');
     setCategory('');
     setSelectedCity('');
@@ -211,6 +215,8 @@ export default function ProductsScreen() {
     setPrice(product.price.toString());
     setCost(product.cost?.toString() || '');
     setOneTimeCost(product.one_time_cost?.toString() || '');
+    setCumulativeCostQuantity(product.cumulative_cost_quantity !== undefined && product.cumulative_cost_quantity !== null ? product.cumulative_cost_quantity.toString() : '');
+    setCumulativeCostAmount(product.cumulative_cost_amount !== undefined && product.cumulative_cost_amount !== null ? product.cumulative_cost_amount.toString() : '');
     setSku(product.sku || '');
     setCategory(product.category || '');
     setSelectedSeriesId(product.series_id || '');
@@ -230,11 +236,26 @@ export default function ProductsScreen() {
       return;
     }
 
+    const parsedCumulativeCostQuantity = cumulativeCostQuantity.trim() ? Number(cumulativeCostQuantity) : null;
+    const parsedCumulativeCostAmount = cumulativeCostAmount.trim() ? Number(cumulativeCostAmount) : null;
+
+    if (parsedCumulativeCostQuantity !== null && Number.isNaN(parsedCumulativeCostQuantity)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '累计数量必须是数字' });
+      return;
+    }
+
+    if (parsedCumulativeCostAmount !== null && Number.isNaN(parsedCumulativeCostAmount)) {
+      Toast.show({ type: 'error', text1: '错误', text2: '累计成本必须是数字' });
+      return;
+    }
+
     const productData = {
       name,
       price: parseFloat(price),
       cost: parseFloat(cost) || 0,
       one_time_cost: parseFloat(oneTimeCost) || 0,
+      cumulative_cost_quantity: parsedCumulativeCostQuantity,
+      cumulative_cost_amount: parsedCumulativeCostAmount,
       discount_price: parseFloat(price) || 0,
       sku: sku.trim() || null,
       category: category.trim() || null,
@@ -606,6 +627,28 @@ export default function ProductsScreen() {
                       value={oneTimeCost}
                       onChangeText={setOneTimeCost}
                       keyboardType="numeric"
+                      placeholderTextColor={theme.textTertiary}
+                    />
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>累计数量</Text>
+                    <TextInput
+                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                      value={cumulativeCostQuantity}
+                      onChangeText={setCumulativeCostQuantity}
+                      keyboardType="numeric"
+                      placeholder="管理员统计历史总数量"
+                      placeholderTextColor={theme.textTertiary}
+                    />
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>累计成本</Text>
+                    <TextInput
+                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                      value={cumulativeCostAmount}
+                      onChangeText={setCumulativeCostAmount}
+                      keyboardType="numeric"
+                      placeholder="管理员统计历史总成本"
                       placeholderTextColor={theme.textTertiary}
                     />
                   </View>

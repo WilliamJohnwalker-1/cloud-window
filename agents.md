@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.7`
-- Current web baseline: `v1.3.10`
+- Current mobile baseline: `v2.2.8`
+- Current web baseline: `v1.3.12`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -267,6 +267,8 @@ Before committing:
 - Latest invoice+rollback hotfix: 新增 `migrate-v7.4-store-invoice-contact-fields.sql`，店铺开票联系电话/开票地址改为独立字段（不再复用联系人电话/店铺地址）；补齐 distribution 删单店铺池回滚日志（`删单回滚(店铺池)`）。
 - Latest external-channel wave: 外部渠道订单录入（Web）+ 双端展示兼容 + 零售财务 city_id 修复 + 移动端启动更新弹窗，迁移链延伸至 v7.5
 - Latest payment-guard wave: Worker `/collect` 与 `/status` 增加支付/退款态门禁与状态防降级；Web 收银台补齐 collecting/paid 防重入；双端订单页补齐已支付订单删单拦截，收款幂等与支付态一致性进一步加固
+- Latest purchase-cost wave: 外部单建单补齐 legacy `unit_price` 兼容；双端进货支持“每行总价(line_total)”录入与汇总；双端商品补齐累计数量/累计成本字段映射；新增 `migrate-v7.6` / `migrate-v7.7` 草案覆盖云窗库存池口径与到货后累计成本更新。
+- Latest refund-rollback hotfix: 修复单商品全额退款偶发停留 `partial_refunded`（退款明细同步失败时自动 fallback 并重算状态）；补齐退款即时回退总库存与 `inventory_logs` 的 `refund_restore` 记录（无需删单才回退/记日志）
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

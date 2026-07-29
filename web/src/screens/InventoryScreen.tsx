@@ -32,6 +32,7 @@ export const InventoryScreen: React.FC = () => {
   const [purchaseSupplierId, setPurchaseSupplierId] = React.useState<string | null>(null);
   const [purchaseSearchKeyword, setPurchaseSearchKeyword] = React.useState('');
   const [purchaseCart, setPurchaseCart] = React.useState<Map<string, number>>(new Map());
+  const [purchaseLineTotals, setPurchaseLineTotals] = React.useState<Map<string, string>>(new Map());
   const [submittingPurchase, setSubmittingPurchase] = React.useState(false);
   const [highlightedInventoryProductId, setHighlightedInventoryProductId] = React.useState<string | null>(null);
   const inventoryRowRefs = React.useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -220,19 +221,35 @@ export const InventoryScreen: React.FC = () => {
         const store = stores.find((item) => item.id === storeId);
         const product = products.find((item) => item.id === productId);
         if (!store || !product || quantity <= 0) return null;
-        return { cartKey, store, product, quantity };
+        const lineTotalText = purchaseLineTotals.get(cartKey) ?? '';
+        const lineTotal = Number(lineTotalText);
+        return {
+          cartKey,
+          store,
+          product,
+          quantity,
+          lineTotalText,
+          lineTotal: Number.isFinite(lineTotal) ? lineTotal : null,
+        };
       })
-      .filter((item): item is { cartKey: string; store: (typeof stores)[number]; product: (typeof products)[number]; quantity: number } => item !== null);
-  }, [products, purchaseCart, stores]);
+      .filter((item): item is {
+        cartKey: string;
+        store: (typeof stores)[number];
+        product: (typeof products)[number];
+        quantity: number;
+        lineTotalText: string;
+        lineTotal: number | null;
+      } => item !== null);
+  }, [products, purchaseCart, purchaseLineTotals, stores]);
 
   const purchaseTotalCost = React.useMemo(() => {
-    return purchaseCartItems.reduce((sum, item) => sum + Number(item.product.cost || 0) * item.quantity, 0);
+    return purchaseCartItems.reduce((sum, item) => sum + (item.lineTotal && item.lineTotal > 0 ? item.lineTotal : 0), 0);
   }, [purchaseCartItems]);
 
   const setPurchaseQuantity = (storeId: string, productId: string, quantity: number): void => {
+    const cartKey = `${storeId}:${productId}`;
     setPurchaseCart((prev) => {
       const next = new Map(prev);
-      const cartKey = `${storeId}:${productId}`;
       if (quantity <= 0) {
         next.delete(cartKey);
       } else {
@@ -240,6 +257,13 @@ export const InventoryScreen: React.FC = () => {
       }
       return next;
     });
+    if (quantity <= 0) {
+      setPurchaseLineTotals((lineTotals) => {
+        const nextLineTotals = new Map(lineTotals);
+        nextLineTotals.delete(cartKey);
+        return nextLineTotals;
+      });
+    }
   };
 
   const handleCreatePurchaseOrder = async (): Promise<void> => {
@@ -248,14 +272,33 @@ export const InventoryScreen: React.FC = () => {
       return;
     }
 
-    const grouped = purchaseCartItems.reduce<Map<string, { store_id: string; city_id: string; supplier_id: string | null; products: Array<{ productId: string; quantity: number }> }>>((acc, item) => {
+    const invalidLineTotal = purchaseCartItems.find((item) => {
+      if (!item.lineTotalText.trim()) return true;
+      return item.lineTotal === null || item.lineTotal <= 0;
+    });
+
+    if (invalidLineTotal) {
+      setPageNotice({ type: 'error', text: `${invalidLineTotal.product.name} 请填写大于0的进货总价` });
+      return;
+    }
+
+    const grouped = purchaseCartItems.reduce<Map<string, {
+      store_id: string;
+      city_id: string;
+      supplier_id: string | null;
+      products: Array<{ productId: string; quantity: number; lineTotal?: number }>;
+    }>>((acc, item) => {
       const existing = acc.get(item.store.id) || {
         store_id: item.store.id,
         city_id: item.store.city_id,
         supplier_id: purchaseSupplierId ?? null,
         products: [],
       };
-      existing.products.push({ productId: item.product.id, quantity: item.quantity });
+      existing.products.push({
+        productId: item.product.id,
+        quantity: item.quantity,
+        lineTotal: Number(item.lineTotal || 0),
+      });
       acc.set(item.store.id, existing);
       return acc;
     }, new Map());
@@ -269,6 +312,7 @@ export const InventoryScreen: React.FC = () => {
     }
 
     setPurchaseCart(new Map());
+    setPurchaseLineTotals(new Map());
     setPurchaseSearchKeyword('');
     setPurchaseStoreId(null);
     setPurchaseSupplierId(null);
@@ -848,6 +892,7 @@ export const InventoryScreen: React.FC = () => {
                   setPurchaseStoreId(null);
                   setPurchaseSupplierId(null);
                   setPurchaseSearchKeyword('');
+                  setPurchaseLineTotals(new Map());
                 }}
                 className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
               >
@@ -948,9 +993,24 @@ export const InventoryScreen: React.FC = () => {
                     <div key={item.cartKey} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
                       <div>
                         <p className="text-sm font-medium">{item.product.name}</p>
-                        <p className="text-xs text-white/40">{item.store.name} · 数量 {item.quantity} · 成本小计 ¥{(Number(item.product.cost || 0) * item.quantity).toFixed(2)}</p>
+                        <p className="text-xs text-white/40">{item.store.name} · 数量 {item.quantity} · 本行总价 {item.lineTotal && item.lineTotal > 0 ? `¥${item.lineTotal.toFixed(2)}` : '待填写'}</p>
                       </div>
-                      <button type="button" onClick={() => setPurchaseQuantity(item.store.id, item.product.id, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={item.lineTotalText}
+                          onChange={(event) => {
+                            const next = event.target.value.replace(/[^0-9.]/g, '');
+                            setPurchaseLineTotals((prev) => {
+                              const map = new Map(prev);
+                              map.set(item.cartKey, next);
+                              return map;
+                            });
+                          }}
+                          placeholder="手填总价"
+                          className="w-28 bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-xs"
+                        />
+                        <button type="button" onClick={() => setPurchaseQuantity(item.store.id, item.product.id, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                      </div>
                     </div>
                   ))}
                   {purchaseCartItems.length === 0 && <p className="text-sm text-white/40">暂无商品</p>}
