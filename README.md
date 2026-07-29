@@ -225,7 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.10）
+### 5. 启动 Web 端（v1.3.12）
 
 ```bash
 npm run web:v2
@@ -418,6 +418,27 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.12 (2026-07-29) - 进货成本链路补齐 + 退款回滚一致性修复
+
+- 外部渠道建单兼容修复：补齐 `orders.unit_price` 旧库非空约束 fallback，避免 `null value in column "unit_price"` 导致建单失败。
+- 进货建单升级为“每行手填总价”：Web 进货单新增行总价输入并汇总，总价透传 `line_total`，后端按 `line_total/quantity` 固化 `unit_cost` 快照。
+- 商品基线字段补齐：双端商品类型/表单/Store 映射新增 `cumulative_cost_quantity`、`cumulative_cost_amount`，支持管理员维护累计成本基线。
+- 退款回滚一致性修复：修复单商品全额退款偶发停留 `partial_refunded`，并补齐退款即时回退总库存与 `inventory_logs.refund_restore`（无需删单后才回退/记日志）。
+- 新增迁移草案：
+  - `migrate-v7.6-purchase-cost-and-yunchuang-store-pool.sql`（进货行总价 + 云窗到货库存池口径）
+  - `migrate-v7.7-purchase-delivery-cost-cumulative.sql`（到货后按实到数量更新累计成本/商品成本）
+
+### Mobile v2.2.8 (2026-07-29) - 进货行总价与商品累计成本基线字段对齐
+
+- 移动端进货建单与 Web 对齐：支持每行录入进货总价并汇总成本，提交 `line_total` 到进货 RPC。
+- 移动端商品新增/编辑页补齐“累计数量/累计成本”录入，和 Store 字段映射保持一致。
+
+### Web v1.3.11 (2026-07-29) - 单商品退款状态与库存回退修复
+
+- 修复单商品全额退款后偶发停留在 `partial_refunded` 的问题：退款明细同步失败时改为自动走 fallback，同步后按剩余明细强制收敛为 `refunded/partial_refunded` 正确状态。
+- 修复退款后库存未即时回退的问题：`/api/payment/refund-items` 在 fallback 路径中立即回退 `inventory`，无需再依赖删单触发回退。
+- 修复退款后缺少库存日志的问题：fallback 路径新增 `inventory_logs` 的 `refund_restore` 写入（含 `order_id` 与 `item_count`），便于直接在日志中追踪退款回库。
 
 ### Web v1.3.10 (2026-07-23) - 收款幂等与状态门禁加固
 
