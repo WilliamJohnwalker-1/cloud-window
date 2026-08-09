@@ -107,6 +107,7 @@ export default function OrdersScreen() {
   const [submittingOutbound, setSubmittingOutbound] = useState(false);
   const [retailModalVisible, setRetailModalVisible] = useState(false);
   const [retailStoreId, setRetailStoreId] = useState<string | null>(null);
+  const [settlementOrderDate, setSettlementOrderDate] = useState('');
   const [retailCart, setRetailCart] = useState<Map<string, number>>(new Map());
   const [retailQtyInputMode, setRetailQtyInputMode] = useState<Map<string, string>>(new Map());
   const [retailQtyEditingKey, setRetailQtyEditingKey] = useState<string | null>(null);
@@ -793,6 +794,14 @@ export default function OrdersScreen() {
     setOutboundProduct(null);
   };
 
+  const resetSettlementForm = () => {
+    setRetailStoreId(null);
+    setSettlementOrderDate('');
+    setRetailCart(new Map());
+    setRetailQtyInputMode(new Map());
+    setRetailQtyEditingKey(null);
+  };
+
   const handleConfirmOutbound = async () => {
     const qty = Number.parseInt(outboundQuantity, 10);
     if (outboundBarcode.length !== 13) {
@@ -1064,7 +1073,10 @@ export default function OrdersScreen() {
           <Text style={[styles.orderId, { color: theme.textPrimary }]}>订单 #{item.id.slice(0, 8)}</Text>
           <Text style={[styles.orderKindTag, { color: getOrderKindTagColor(item.order_kind) }]}>{getOrderKindLabel(item.order_kind)}</Text>
         </View>
-        <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+        <View style={styles.orderDateGroup}>
+          <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+          {item.order_date ? <Text style={[styles.orderBusinessDate, { color: theme.textSecondary }]}>业务 {item.order_date}</Text> : null}
+        </View>
       </View>
 
       <View style={styles.orderMetaContainer}>
@@ -1075,11 +1087,17 @@ export default function OrdersScreen() {
       </View>
       <View style={styles.orderMetaContainer}>
         <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
-        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>
+        <Text style={[styles.orderMeta, { color: theme.textSecondary }]}> 
           下单账号: {item.distributor_email || item.distributor_id}
           {item.distributor_store ? ` · ${item.distributor_store}` : ''}
         </Text>
       </View>
+      {item.order_date ? (
+        <View style={styles.orderMetaContainer}>
+          <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+          <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>业务日期: {item.order_date}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.orderItemsSummary}>
         <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
@@ -1159,7 +1177,10 @@ export default function OrdersScreen() {
             <Text style={[styles.orderId, { color: theme.textPrimary }]}>进货单 #{item.id.slice(0, 8)}</Text>
             <Text style={[styles.orderKindTag, { color: theme.blue }]}>{item.status === 'delivered' ? '已到货' : item.status === 'partially_delivered' ? '部分到货' : '待到货'}</Text>
           </View>
-          <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+          <View style={styles.orderDateGroup}>
+            <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+            {item.order_date ? <Text style={[styles.orderBusinessDate, { color: theme.textSecondary }]}>业务 {item.order_date}</Text> : null}
+          </View>
         </View>
 
         <View style={styles.orderMetaContainer}>
@@ -1170,6 +1191,12 @@ export default function OrdersScreen() {
           <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
           <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>供应商: {item.supplier_name || '未绑定'}</Text>
         </View>
+        {item.order_date ? (
+          <View style={styles.orderMetaContainer}>
+            <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
+            <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>业务日期: {item.order_date}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.orderItemsSummary}>
           <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
@@ -1353,8 +1380,7 @@ export default function OrdersScreen() {
           {canCreateSettlement && (
             <TouchableOpacity
               onPress={() => {
-                setRetailStoreId(null);
-                setRetailCart(new Map());
+                resetSettlementForm();
                 setRetailModalVisible(true);
               }}
               activeOpacity={0.85}
@@ -2097,6 +2123,12 @@ export default function OrdersScreen() {
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>时间</Text>
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{new Date(detailOrder.created_at).toLocaleString('zh-CN')}</Text>
                 </View>
+                {detailOrder.order_date ? (
+                  <View style={styles.detailSection}>
+                    <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>业务日期</Text>
+                    <Text style={[styles.detailValue, { color: theme.textPrimary }]}>{detailOrder.order_date}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.detailSection}>
                   <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>配送店铺</Text>
                   <Text style={[styles.detailValue, { color: theme.textPrimary }]}>
@@ -2243,15 +2275,18 @@ export default function OrdersScreen() {
 
       <Modal visible={retailModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}> 
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>结算建单</Text>
-              <TouchableOpacity onPress={() => setRetailModalVisible(false)}>
+              <TouchableOpacity onPress={() => {
+                resetSettlementForm();
+                setRetailModalVisible(false);
+              }}>
                 <Text style={styles.modalClose}>取消</Text>
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}>
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
               <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>选择店铺</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
                 {stores.filter(s => s.status === 'active').map(store => (
@@ -2269,6 +2304,24 @@ export default function OrdersScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+              <TextInput
+                value={settlementOrderDate}
+                onChangeText={setSettlementOrderDate}
+                placeholder="业务日期 YYYY-MM-DD"
+                placeholderTextColor={theme.textTertiary}
+                style={[
+                  styles.modalInput,
+                  styles.businessDateInput,
+                  {
+                    backgroundColor: theme.surfaceSecondary,
+                    color: theme.textPrimary,
+                  },
+                ]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={10}
+                textAlignVertical="center"
+              />
             </View>
 
             {retailStoreId ? (
@@ -2420,14 +2473,14 @@ export default function OrdersScreen() {
                       price: p?.price || 0,
                     };
                   });
-                  const { error } = await createSettlementOrder(retailStoreId, items);
+                  const { error } = await createSettlementOrder(retailStoreId, items, settlementOrderDate);
                   setSubmittingRetailOrder(false);
                   if (error) {
                     Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
                   } else {
                     Toast.show({ type: 'success', text1: '成功', text2: '结算订单已创建' });
+                    resetSettlementForm();
                     setRetailModalVisible(false);
-                    setRetailCart(new Map());
                     fetchOrders();
                   }
                 }}
@@ -2656,7 +2709,9 @@ const styles = StyleSheet.create({
   orderHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   orderId: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   orderKindTag: { marginTop: 4, fontSize: 11, color: Colors.blue, fontWeight: '600' },
+  orderDateGroup: { alignItems: 'flex-end' },
   orderDate: { fontSize: 12, color: Colors.textTertiary },
+  orderBusinessDate: { fontSize: 11, marginTop: 2 },
   orderMetaContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   orderMeta: { fontSize: 12, color: Colors.textSecondary },
   orderItemsSummary: {
@@ -2750,6 +2805,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 16,
     color: Colors.textPrimary,
+  },
+  businessDateInput: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 18,
+    paddingVertical: 0,
+    includeFontPadding: false,
   },
   scanResultBox: {
     backgroundColor: Colors.surfaceSecondary,

@@ -5,7 +5,7 @@ import { Text, View, ActivityIndicator, StyleSheet, AppState, Modal, ScrollView,
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import type { ToastConfig } from 'react-native-toast-message';
-import { BarChart2, Package, ShoppingCart, TrendingUp, User, Wallet } from 'lucide-react-native';
+import { BarChart2, Package, ShoppingCart, TrendingUp, User, Wallet, Lightbulb } from 'lucide-react-native';
 import { useShallow } from 'zustand/react/shallow';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
@@ -17,13 +17,15 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import FinanceScreen from './src/screens/FinanceScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import ProductDevScreen from './src/screens/ProductDevScreen';
 import KnowledgeBaseFloatingBall from './src/components/KnowledgeBaseFloatingBall';
 import { useAppStore } from './src/store/useAppStore';
+import { useProductDevStore } from './src/store/useProductDevStore';
 import UpdatePrompt, { UpdateType } from './src/components/UpdatePrompt';
 import { compareVersion, resolveBinaryUpdateInfo } from './src/utils/update';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
-import { canEditFinance, canViewInventory, canViewOrders, canViewProducts, canViewReports } from './src/utils/permissions';
+import { canEditFinance, canViewInventory, canViewOrders, canViewProducts, canViewReports, canViewProductDev } from './src/utils/permissions';
 import type { Store } from './src/types';
 
 const Tab = createBottomTabNavigator();
@@ -38,6 +40,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     Orders: ShoppingCart,
     Reports: TrendingUp,
     Finance: Wallet,
+    ProductDev: Lightbulb,
     Profile: User,
   }[name] || Package;
 
@@ -64,12 +67,20 @@ function MainTabs() {
   const shouldShowOrders = canViewOrders(role);
   const shouldShowReports = canViewReports(role);
   const shouldShowFinance = canEditFinance(role);
+  const shouldShowProductDev = canViewProductDev(role);
+  const productDevUrgentCount = useProductDevStore((state) => state.getUrgentCount());
 
   useEffect(() => {
     if (storedUser) {
       fetchAllData();
     }
   }, [fetchAllData, storedUser]);
+
+  useEffect(() => {
+    if (storedUser && shouldShowProductDev) {
+      useProductDevStore.getState().fetchAllProjects();
+    }
+  }, [storedUser, shouldShowProductDev]);
 
   return (
     <Tab.Navigator
@@ -118,6 +129,17 @@ function MainTabs() {
           name="Finance"
           component={FinanceScreen}
           options={{ title: '财务' }}
+        />
+      )}
+      {shouldShowProductDev && (
+        <Tab.Screen
+          name="ProductDev"
+          component={ProductDevScreen}
+          options={{ 
+            title: '研发',
+            tabBarBadge: productDevUrgentCount > 0 ? productDevUrgentCount : undefined,
+            tabBarBadgeStyle: { backgroundColor: theme.danger, color: '#FFF', fontSize: 10 }
+          }}
         />
       )}
       <Tab.Screen 
