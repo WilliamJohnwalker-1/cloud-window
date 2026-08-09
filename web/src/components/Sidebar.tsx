@@ -9,9 +9,11 @@ import {
   User, 
   LogOut,
   Store,
-  Truck
+  Truck,
+  Lightbulb
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { useProductDevStore } from '../store/useProductDevStore';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { parseEmojiAvatar } from '../utils/avatar';
@@ -24,6 +26,7 @@ import {
   canViewReports,
   canViewStores,
   canViewSuppliers,
+  canViewProductDev,
 } from '../utils/permissions';
 
 interface SidebarProps {
@@ -36,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const unreadCount = notifications.filter((item) => !item.is_read).length;
   const selectedEmojiAvatar = parseEmojiAvatar(user?.avatar_url);
   const role = user?.role;
+  const urgentCount = useProductDevStore((state) => state.getUrgentCount());
 
   const menuItems = [
     { id: 'products', label: '商品', icon: Package, canView: canViewProducts(role) },
@@ -47,6 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'profile', label: '我的', icon: User, canView: true },
     { id: 'stores', label: '店铺', icon: Store, canView: canViewStores(role) },
     { id: 'suppliers', label: '供应商', icon: Truck, canView: canViewSuppliers(role) },
+    { id: 'productDev', label: '研发', icon: Lightbulb, canView: canViewProductDev(role) },
   ];
 
   const filteredItems = menuItems.filter((item) => item.canView);
@@ -81,7 +86,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                 "transition-transform duration-300 group-hover:scale-110",
                 isActive ? "text-white" : "text-white/40 group-hover:text-white"
               )} />
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium flex-1">{item.label}</span>
+              {item.id === 'productDev' && urgentCount > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  {urgentCount}
+                </span>
+              )}
             </button>
           );
         })}

@@ -105,6 +105,7 @@ interface OrderRow {
   refunded_items?: Order['refunded_items'] | null;
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
+  order_date?: string | null;
   created_at: string;
   order_items?: OrderItemRow[];
 }
@@ -131,6 +132,7 @@ interface PurchaseOrderRow {
   status?: string | null;
   created_by: string;
   notes?: string | null;
+  order_date?: string | null;
   created_at: string;
   updated_at: string;
   stores?: { name?: string | null; address?: string | null } | Array<{ name?: string | null; address?: string | null }> | null;
@@ -537,11 +539,12 @@ interface AppState {
   createSettlementOrder: (
     storeId: string,
     items: StoreRetailCreateItem[],
+    orderDate?: string,
   ) => Promise<{ error: Error | null }>;
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
   fetchPurchaseOrders: () => Promise<void>;
-  createPurchaseOrderV2: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
+  createPurchaseOrderV2: (items: PurchaseOrderCreateItem[], orderDate?: string) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseItemDelivery: (purchaseOrderId: string, itemId: string, deliveredQuantity: number) => Promise<{ error: Error | null }>;
   deletePurchaseOrderV2: (purchaseOrderId: string) => Promise<{ error: Error | null }>;
   fetchUndeliveredItems: () => Promise<Array<{
@@ -703,6 +706,7 @@ const mapOrder = (raw: OrderRow): Order => {
     refunded_items: raw.refunded_items ?? undefined,
     total_retail_amount: Number(raw.total_retail_amount || 0),
     total_discount_amount: Number(raw.total_discount_amount || 0),
+    order_date: raw.order_date ?? null,
     created_at: raw.created_at,
     items,
   };
@@ -730,6 +734,7 @@ const mapPurchaseOrder = (row: PurchaseOrderRow): PurchaseOrder => {
         : 'pending',
     created_by: row.created_by,
     notes: row.notes ?? null,
+    order_date: row.order_date ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     items: (row.purchase_order_items || []).map((item) => {
@@ -2338,7 +2343,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      createSettlementOrder: async (storeId, items) => {
+      createSettlementOrder: async (storeId, items, orderDate) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
 
@@ -2362,9 +2367,11 @@ export const useAppStore = create<AppState>()(
 
           const payload = buildStoreRetailOrderRpcItems(items);
           const requestId = createRequestId('batch', user.id);
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
 
           const { error: rpcError } = await supabase.rpc('create_settlement_order_atomic', {
             p_items: payload,
+            p_order_date: normalizedOrderDate,
             p_store_id: storeId,
             p_request_id: requestId,
           });
@@ -2432,6 +2439,7 @@ export const useAppStore = create<AppState>()(
             quantity: totalQuantity,
             total_retail_amount: totalRetail,
             total_discount_amount: totalDiscount,
+            order_date: normalizedOrderDate,
           };
 
           let orderInsert = await supabase
@@ -2489,6 +2497,7 @@ export const useAppStore = create<AppState>()(
                     city_id: legacyOrderPayload.city_id,
                     total_retail_amount: legacyOrderPayload.total_retail_amount,
                     total_discount_amount: legacyOrderPayload.total_discount_amount,
+                    order_date: legacyOrderPayload.order_date,
                     product_id: legacyOrderPayload.product_id,
                     quantity: legacyOrderPayload.quantity,
                     unit_price: legacyOrderPayload.unit_price,
@@ -2656,7 +2665,7 @@ export const useAppStore = create<AppState>()(
         set({ purchaseOrders: (data as PurchaseOrderRow[]).map(mapPurchaseOrder) });
       },
 
-      createPurchaseOrderV2: async (items) => {
+      createPurchaseOrderV2: async (items, orderDate) => {
         const { user, stores } = get();
         if (!user) return { error: new Error('未登录') };
         if (!(user.role === 'admin' || user.role === 'super_admin')) return { error: new Error('当前角色无进货建单权限') };
@@ -2664,6 +2673,7 @@ export const useAppStore = create<AppState>()(
 
         try {
           const orderIds: string[] = [];
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
           for (const group of items) {
             const selectedStore = stores.find((store) => store.id === group.store_id) || null;
             if (!selectedStore) throw new Error('店铺不存在或未加载');
@@ -2694,6 +2704,7 @@ export const useAppStore = create<AppState>()(
               p_store_id: group.store_id,
               p_city_id: group.city_id,
               p_items: payload,
+              p_order_date: normalizedOrderDate,
               p_supplier_id: group.supplier_id ?? null,
             });
             if (error) throw error;

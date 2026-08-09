@@ -11,7 +11,9 @@ import { ProfileScreen } from './screens/ProfileScreen';
 import { ReportsScreen } from './screens/ReportsScreen';
 import { StoresScreen } from './screens/StoresScreen';
 import { SuppliersScreen } from './screens/SuppliersScreen';
+import { ProductDevScreen } from './screens/ProductDevScreen';
 import { useAppStore } from './store/useAppStore';
+import { useProductDevStore } from './store/useProductDevStore';
 import { KnowledgeBasePanel } from './components/KnowledgeBasePanel';
 import {
   canViewFinance,
@@ -22,9 +24,10 @@ import {
   canViewReports,
   canViewStores,
   canViewSuppliers,
+  canViewProductDev,
 } from './utils/permissions';
 
-type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'finance' | 'reports' | 'profile' | 'stores' | 'suppliers';
+type TabKey = 'products' | 'inventory' | 'orders' | 'payment' | 'finance' | 'reports' | 'profile' | 'stores' | 'suppliers' | 'productDev';
 
 interface SearchResultItem {
   id: string;
@@ -73,6 +76,7 @@ function App() {
     if (canViewReports(role)) tabs.push('reports');
     if (canViewStores(role)) tabs.push('stores');
     if (canViewSuppliers(role)) tabs.push('suppliers');
+    if (canViewProductDev(role)) tabs.push('productDev');
     return tabs;
   }, [user]);
 
@@ -87,6 +91,9 @@ function App() {
   useEffect(() => {
     if (user) {
       void fetchAllData();
+      if (canViewProductDev(user.role)) {
+        void useProductDevStore.getState().fetchAllProjects();
+      }
     }
   }, [fetchAllData, user]);
 
@@ -277,6 +284,8 @@ function App() {
         return <StoresScreen />;
       case 'suppliers':
         return <SuppliersScreen />;
+      case 'productDev':
+        return <ProductDevScreen />;
       default:
         return <ProductsScreen />;
     }
@@ -302,6 +311,8 @@ function App() {
         return '店铺管理';
       case 'suppliers':
         return '供应商管理';
+      case 'productDev':
+        return '产品开发';
       default:
         return '云窗文创';
     }

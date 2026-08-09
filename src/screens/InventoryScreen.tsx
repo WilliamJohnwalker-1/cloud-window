@@ -75,6 +75,7 @@ export default function InventoryScreen() {
   const [submittingInbound, setSubmittingInbound] = useState(false);
   const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
   const [purchaseStoreId, setPurchaseStoreId] = useState<string | null>(null);
+  const [purchaseOrderDate, setPurchaseOrderDate] = useState('');
   const [purchaseSupplierId, setPurchaseSupplierId] = useState<string | null>(null);
   const [purchaseCart, setPurchaseCart] = useState<Map<string, number>>(new Map());
   const [purchaseLineTotals, setPurchaseLineTotals] = useState<Map<string, string>>(new Map());
@@ -331,6 +332,7 @@ export default function InventoryScreen() {
     setPurchaseCart(new Map());
     setPurchaseLineTotals(new Map());
     setPurchaseStoreId(null);
+    setPurchaseOrderDate('');
     setPurchaseSupplierId(null);
   };
 
@@ -378,7 +380,7 @@ export default function InventoryScreen() {
     }
 
     setSubmittingPurchase(true);
-    const { error } = await createPurchaseOrderV2(groupedItems);
+    const { error } = await createPurchaseOrderV2(groupedItems, purchaseOrderDate);
     setSubmittingPurchase(false);
 
     if (error) {
@@ -1057,6 +1059,30 @@ export default function InventoryScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>业务日期（可选）</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.surfaceSecondary,
+                    color: theme.textPrimary,
+                    lineHeight: 18,
+                    paddingVertical: 0,
+                    includeFontPadding: false,
+                  },
+                ]}
+                value={purchaseOrderDate}
+                onChangeText={setPurchaseOrderDate}
+                placeholder="业务日期 YYYY-MM-DD"
+                placeholderTextColor={theme.textTertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={10}
+                textAlignVertical="center"
+              />
+            </View>
 
             <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>关联供应商（可选）</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cityFilterRow} contentContainerStyle={styles.cityFilterContent}>

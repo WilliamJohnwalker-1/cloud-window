@@ -110,6 +110,7 @@ export const OrdersScreen: React.FC = () => {
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [externalOrderFormVisible, setExternalOrderFormVisible] = useState(false);
   const [settlementStoreId, setSettlementStoreId] = useState<string | null>(null);
+  const [settlementOrderDate, setSettlementOrderDate] = useState('');
   const [settlementCart, setSettlementCart] = useState<Map<string, number>>(new Map());
   const [submittingSettlementOrder, setSubmittingSettlementOrder] = useState(false);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
@@ -1365,7 +1366,7 @@ export const OrdersScreen: React.FC = () => {
     }));
 
     setSubmittingSettlementOrder(true);
-    const { error } = await createSettlementOrder(settlementStoreId, items);
+    const { error } = await createSettlementOrder(settlementStoreId, items, settlementOrderDate || undefined);
     setSubmittingSettlementOrder(false);
 
     if (error) {
@@ -1375,6 +1376,7 @@ export const OrdersScreen: React.FC = () => {
 
     setSettlementCart(new Map());
     setSettlementStoreId(null);
+    setSettlementOrderDate('');
     setSearchKeyword('');
     setShowSettlementModal(false);
     setPageNotice({ type: 'success', text: '结算订单已创建' });
@@ -1495,6 +1497,7 @@ export const OrdersScreen: React.FC = () => {
               onClick={() => {
                 setSettlementStoreId(null);
                 setSettlementCart(new Map());
+                setSettlementOrderDate('');
                 setSearchKeyword('');
                 setShowSettlementModal(true);
               }}
@@ -1747,6 +1750,7 @@ export const OrdersScreen: React.FC = () => {
                           <span>城市：{purchaseOrder.city_name || '-'}</span>
                           <span>店铺：{purchaseOrder.store_name || '-'}</span>
                           <span>供应商：{purchaseOrder.supplier_name || '未绑定'}</span>
+                          {purchaseOrder.order_date && <span>业务日期：{purchaseOrder.order_date}</span>}
                           <span>创建时间：{new Date(purchaseOrder.created_at).toLocaleString()}</span>
                         </div>
                       </div>
@@ -1821,6 +1825,7 @@ export const OrdersScreen: React.FC = () => {
             const resolvedOrder = getResolvedOrder(order.id) || order;
             const itemKinds = resolvedOrder.items.length;
             const totalPieces = resolvedOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+            const businessOrderDate = resolvedOrder.order_date || order.order_date;
             return (
           <motion.div
             key={order.id}
@@ -1855,6 +1860,7 @@ export const OrdersScreen: React.FC = () => {
                   </div>
                   <div className="flex items-center space-x-4 mt-1 text-white/40 text-xs">
                     <div className="flex items-center space-x-1"><Clock size={12} /><span>{new Date(order.created_at).toLocaleString()}</span></div>
+                    {businessOrderDate && <div className="flex items-center space-x-1"><span>业务日期：{businessOrderDate}</span></div>}
                     <div className="flex items-center space-x-1"><MapPin size={12} /><span>{order.city_name || '-'}</span></div>
                     <div className="flex items-center space-x-1"><Store size={12} /><span>配送店铺：{order.store_name || '未指定店铺'}</span></div>
                     <div className="flex items-center space-x-1"><span>分销商：{order.distributor_store || order.distributor_email || '-'}</span></div>
@@ -2282,6 +2288,7 @@ export const OrdersScreen: React.FC = () => {
                   setShowSettlementModal(false);
                   setSettlementStoreId(null);
                   setSettlementCart(new Map());
+                  setSettlementOrderDate('');
                   setSearchKeyword('');
                 }}
                 className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
@@ -2313,6 +2320,16 @@ export const OrdersScreen: React.FC = () => {
                 onChange={(event) => setSearchKeyword(event.target.value)}
                 placeholder="搜索商品名称/条码"
                 className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-white/60">业务日期（选填）</p>
+              <input
+                type="date"
+                value={settlementOrderDate}
+                onChange={(event) => setSettlementOrderDate(event.target.value)}
+                className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-4 py-3"
               />
             </div>
 
@@ -2444,6 +2461,7 @@ export const OrdersScreen: React.FC = () => {
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">城市：</span>{detailOrder.city_name || '-'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">配送店铺：</span>{detailOrder.store_name || '未指定'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
+                {detailOrder.order_date && <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">业务日期：</span>{detailOrder.order_date}</div>}
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">交易号：</span>{detailOrder.payment_transaction_id || '-'}</div>
                 {detailOrder.order_kind === 'external' && (
