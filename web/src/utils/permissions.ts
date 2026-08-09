@@ -154,3 +154,11 @@ export function isAdminOrAbove(role: RoleInput): boolean {
   if (!isKnownRole(role)) return false;
   return role === 'admin' || role === 'super_admin';
 }
+
+/**
+ * canViewProductDev: admin/super_admin => true
+ */
+export function canViewProductDev(role: RoleInput): boolean {
+  if (!isKnownRole(role)) return false;
+  return role === 'admin' || role === 'super_admin';
+}

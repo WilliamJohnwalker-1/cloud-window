@@ -131,6 +131,7 @@ export interface Order {
   payment_note?: string | null;
   total_retail_amount: number;
   total_discount_amount: number;
+  order_date?: string | null;
   created_at: string;
   items: OrderItem[];
   refunded_items?: RefundedOrderItem[];
@@ -320,6 +321,7 @@ export interface PurchaseOrder {
   status: PurchaseOrderStatus;
   created_by: string;
   notes?: string | null;
+  order_date?: string | null;
   created_at: string;
   updated_at: string;
   items?: PurchaseOrderItem[];
@@ -336,5 +338,30 @@ export interface PurchaseOrderItem {
   delivered_at?: string | null;
   confirmed_by?: string | null;
   unit_cost: number;
+  created_at: string;
+}
+
+export type DevelopmentStage = 'concept' | 'artist_search' | 'design_finalize' | 'factory_search' | 'launched';
+
+export interface ProductDevelopment {
+  id: string;
+  name: string;
+  description: string | null;
+  stage: DevelopmentStage;
+  notes: string | null;
+  target_date: string | null;
+  product_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductDevLog {
+  id: string;
+  project_id: string;
+  from_stage: DevelopmentStage | null;
+  to_stage: DevelopmentStage;
+  notes: string | null;
+  target_date: string | null;
   created_at: string;
 }
