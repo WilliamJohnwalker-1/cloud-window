@@ -30,6 +30,7 @@ export const InventoryScreen: React.FC = () => {
   const [showPurchaseModal, setShowPurchaseModal] = React.useState(false);
   const [purchaseStoreId, setPurchaseStoreId] = React.useState<string | null>(null);
   const [purchaseSupplierId, setPurchaseSupplierId] = React.useState<string | null>(null);
+  const [purchaseOrderDate, setPurchaseOrderDate] = React.useState('');
   const [purchaseSearchKeyword, setPurchaseSearchKeyword] = React.useState('');
   const [purchaseCart, setPurchaseCart] = React.useState<Map<string, number>>(new Map());
   const [purchaseLineTotals, setPurchaseLineTotals] = React.useState<Map<string, string>>(new Map());
@@ -304,7 +305,7 @@ export const InventoryScreen: React.FC = () => {
     }, new Map());
 
     setSubmittingPurchase(true);
-    const { error } = await createPurchaseOrderV2(Array.from(grouped.values()));
+    const { error } = await createPurchaseOrderV2(Array.from(grouped.values()), purchaseOrderDate || undefined);
     setSubmittingPurchase(false);
     if (error) {
       setPageNotice({ type: 'error', text: `进货建单失败：${error.message}` });
@@ -316,6 +317,7 @@ export const InventoryScreen: React.FC = () => {
     setPurchaseSearchKeyword('');
     setPurchaseStoreId(null);
     setPurchaseSupplierId(null);
+    setPurchaseOrderDate('');
     setShowPurchaseModal(false);
     setPageNotice({ type: 'success', text: '进货单已创建，等待确认到货' });
   };
@@ -373,6 +375,7 @@ export const InventoryScreen: React.FC = () => {
             type="button"
             onClick={() => {
               setPurchaseStoreId(null);
+              setPurchaseOrderDate('');
               setPurchaseSearchKeyword('');
               setShowPurchaseModal(true);
             }}
@@ -891,6 +894,7 @@ export const InventoryScreen: React.FC = () => {
                   setShowPurchaseModal(false);
                   setPurchaseStoreId(null);
                   setPurchaseSupplierId(null);
+                  setPurchaseOrderDate('');
                   setPurchaseSearchKeyword('');
                   setPurchaseLineTotals(new Map());
                 }}
@@ -935,6 +939,16 @@ export const InventoryScreen: React.FC = () => {
                 onChange={(event) => setPurchaseSearchKeyword(event.target.value)}
                 placeholder="搜索商品名称/条码"
                 className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-white/60">业务日期（选填）</p>
+              <input
+                type="date"
+                value={purchaseOrderDate}
+                onChange={(event) => setPurchaseOrderDate(event.target.value)}
+                className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-4 py-3"
               />
             </div>
 

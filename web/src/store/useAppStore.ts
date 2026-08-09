@@ -100,6 +100,7 @@ interface OrderRow {
   quantity?: number | string | null;
   unit_price?: number | string | null;
   total_amount?: number | string | null;
+  order_date?: string | null;
   created_at: string;
   order_items?: OrderItemRow[];
 }
@@ -126,6 +127,7 @@ interface PurchaseOrderRow {
   status?: string | null;
   created_by: string;
   notes?: string | null;
+  order_date?: string | null;
   created_at: string;
   updated_at: string;
   stores?: { name?: string | null; address?: string | null } | Array<{ name?: string | null; address?: string | null }> | null;
@@ -403,7 +405,7 @@ interface AppState {
   fetchProducts: () => Promise<void>;
   fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchPurchaseOrders: () => Promise<void>;
-  createPurchaseOrderV2: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
+  createPurchaseOrderV2: (items: PurchaseOrderCreateItem[], orderDate?: string) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseItemDelivery: (purchaseOrderId: string, itemId: string, deliveredQuantity: number) => Promise<{ error: Error | null }>;
   deletePurchaseOrderV2: (purchaseOrderId: string) => Promise<{ error: Error | null }>;
   fetchUndeliveredItems: () => Promise<Array<{
@@ -453,7 +455,7 @@ interface AppState {
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
-  createSettlementOrder: (storeId: string, items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
+  createSettlementOrder: (storeId: string, items: CashierCreateItem[], orderDate?: string) => Promise<{ orderId?: string; error: Error | null }>;
   createExternalOrder: (
     items: CashierCreateItem[],
     channel: ExternalChannel,
@@ -668,6 +670,7 @@ const mapOrder = (row: OrderRow): Order => {
     payment_transaction_id: row.payment_transaction_id ?? undefined,
     payment_paid_at: row.payment_paid_at ?? undefined,
     payment_note: row.payment_note ?? undefined,
+    order_date: row.order_date ?? undefined,
     created_at: row.created_at,
     items: itemsFromRelation,
   };
@@ -695,6 +698,7 @@ const mapPurchaseOrder = (row: PurchaseOrderRow): PurchaseOrder => {
         : 'pending',
     created_by: row.created_by,
     notes: row.notes ?? null,
+    order_date: row.order_date ?? undefined,
     created_at: row.created_at,
     updated_at: row.updated_at,
     items: (row.purchase_order_items || []).map((item) => {
@@ -1329,13 +1333,14 @@ export const useAppStore = create<AppState>()(
         set({ purchaseOrders: (data as PurchaseOrderRow[]).map(mapPurchaseOrder) });
       },
 
-      createPurchaseOrderV2: async (items) => {
+      createPurchaseOrderV2: async (items, orderDate) => {
         const { user, stores } = get();
         if (!user) return { error: new Error('未登录') };
         if (!(user.role === 'admin' || user.role === 'super_admin')) return { error: new Error('当前角色无进货建单权限') };
         if (!Array.isArray(items) || items.length === 0) return { error: new Error('进货单不能为空') };
 
         try {
+          const normalizedOrderDate = orderDate?.trim() ? orderDate : null;
           const orderIds: string[] = [];
           for (const group of items) {
             const selectedStore = stores.find((store) => store.id === group.store_id) || null;
@@ -1368,6 +1373,7 @@ export const useAppStore = create<AppState>()(
               p_city_id: group.city_id,
               p_items: payload,
               p_supplier_id: group.supplier_id ?? null,
+              p_order_date: normalizedOrderDate,
             });
             if (error) throw error;
             if (purchaseOrderId) orderIds.push(String(purchaseOrderId));
@@ -1652,7 +1658,7 @@ export const useAppStore = create<AppState>()(
         const [ordersResult, paymentEventsResult, orderItemsResult] = await Promise.all([
           supabase
             .from('orders')
-            .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
+            .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, order_date, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
             .eq('id', orderId)
             .maybeSingle(),
           supabase
@@ -2631,7 +2637,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      createSettlementOrder: async (storeId, items) => {
+      createSettlementOrder: async (storeId, items, orderDate) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'finance')) return { error: new Error('当前角色无结算建单权限') };
@@ -2647,11 +2653,14 @@ export const useAppStore = create<AppState>()(
         if (invalidItem) return { error: new Error('订单商品参数无效') };
 
         const requestId = createRequestId(user.id);
+        const normalizedOrderDate = orderDate?.trim() ? orderDate : null;
+        const fallbackOrderDate = normalizedOrderDate || new Date().toISOString().slice(0, 10);
         try {
           const { data: orderId, error: rpcError } = await supabase.rpc('create_settlement_order_atomic', {
             p_items: payload,
             p_store_id: storeId,
             p_request_id: requestId,
+            p_order_date: normalizedOrderDate,
           });
           if (!rpcError) {
             await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
@@ -2717,6 +2726,7 @@ export const useAppStore = create<AppState>()(
             order_kind: 'settlement' as const,
             status: 'accepted' as const,
             payment_status: 'paid' as const,
+            order_date: fallbackOrderDate,
           };
 
           let orderInsert = await supabase
@@ -2777,6 +2787,7 @@ export const useAppStore = create<AppState>()(
                     product_id: legacyOrderPayload.product_id,
                     quantity: legacyOrderPayload.quantity,
                     unit_price: legacyOrderPayload.unit_price,
+                    order_date: legacyOrderPayload.order_date,
                   };
                   orderInsert = await supabase
                     .from('orders')
