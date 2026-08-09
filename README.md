@@ -153,6 +153,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
 53. 执行 `supabase/migrate-v7.3-retail-single-pool-and-log-completion.sql`
 54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
+55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
+56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -210,6 +212,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 52. 执行 `supabase/migrate-v7.2-purchase-order-separation.sql`
 53. 执行 `supabase/migrate-v7.3-retail-single-pool-and-log-completion.sql`
 54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
+55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
+56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -225,7 +229,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.12）
+### 5. 启动 Web 端（v1.3.13）
 
 ```bash
 npm run web:v2
@@ -418,6 +422,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.13 (2026-08-09) - 产品开发子系统 + 业务日期建单
+
+- 新增 Web「产品开发」模块：侧边栏新增“研发”入口（仅 admin/super_admin 可见），支持项目创建/编辑/删除、5阶段推进与日志追踪。
+- 新增紧急度看板与侧边角标：基于目标日期对超期/临近项目排序，显示待处理数量角标。
+- 结算单与进货单建单流程新增 `order_date`（业务日期）输入，订单列表/详情展示业务日期，库存日志时间戳保持原规则不变。
+- 数据库迁移链新增 `migrate-v8.0-product-dev-and-order-date.sql`（产品开发表、order_date 字段、RPC 参数扩展与角色检查修复）。
+
+### Mobile v2.2.9 (2026-08-09) - 产品开发 Tab + 业务日期建单
+
+- 新增移动端「研发」Tab（仅 admin/super_admin 可见）：支持产品开发项目看板、新增/编辑/删除、阶段推进/回退与日志查看。
+- 新增底部 Tab 待处理角标：按目标日期统计超期/3天内到期项目数，0 时不显示。
+- 进货单与结算单创建流程新增 `order_date`（YYYY-MM-DD）输入与展示，业务日期与库存日志时间分离。
+- 与 Web 对齐产品开发 5 阶段：`立项 -> 找画手 -> 定稿 -> 找工厂 -> 已上架`。
 
 ### Web v1.3.12 (2026-07-29) - 进货成本链路补齐 + 退款回滚一致性修复
 
