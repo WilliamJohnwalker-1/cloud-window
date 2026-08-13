@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 
 import { useAppStore } from '../store/useAppStore';
 import { useProductDevStore } from '../store/useProductDevStore';
-import type { DevelopmentStage, ProductDevelopment } from '../types';
+import type { DevelopmentStage, ProductDevelopment, ProductWithDetails, PurchaseOrder } from '../types';
 import { canViewProductDev } from '../utils/permissions';
 
 const STAGE_LABELS: Record<DevelopmentStage, string> = {
@@ -31,6 +31,80 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
+type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
+
+type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
+
+function getProjectTimingStatus(project: ProductDevelopment, today: Date): ProjectTimingStatus {
+  if (project.stage === 'launched' || !project.target_date) {
+    return 'none';
+  }
+
+  const target = new Date(`${project.target_date}T00:00:00`);
+  if (target.getTime() < today.getTime()) {
+    return 'overdue';
+  }
+
+  const diffDays = (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+  if (diffDays <= 3) {
+    return 'nearDue';
+  }
+
+  return 'none';
+}
+
+function resolveBoundProduct(identifier: string, products: ProductWithDetails[]): ProductWithDetails | null {
+  const normalized = identifier.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const byId = products.find((item) => item.id === normalized) || null;
+  if (byId) {
+    return byId;
+  }
+
+  return products.find((item) => item.barcode === normalized) || null;
+}
+
+function buildArrivalSummary(productId: string, purchaseOrders: PurchaseOrder[]): {
+  orderCount: number;
+  orderedQuantity: number;
+  deliveredQuantity: number;
+  statusLabel: string;
+} {
+  let orderCount = 0;
+  let orderedQuantity = 0;
+  let deliveredQuantity = 0;
+
+  purchaseOrders.forEach((order) => {
+    let hasMatchedItem = false;
+    (order.items || []).forEach((item) => {
+      if (item.product_id !== productId) {
+        return;
+      }
+
+      hasMatchedItem = true;
+      orderedQuantity += Number(item.ordered_quantity || 0);
+      deliveredQuantity += Number(item.delivered_quantity || 0);
+    });
+
+    if (hasMatchedItem) {
+      orderCount += 1;
+    }
+  });
+
+  if (orderCount === 0) {
+    return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '未下进货单' };
+  }
+
+  if (deliveredQuantity >= orderedQuantity && orderedQuantity > 0) {
+    return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '已全部到货' };
+  }
+
+  return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '到货中' };
+}
+
 interface PageNotice {
   type: 'success' | 'error';
   text: string;
@@ -45,7 +119,7 @@ interface ConfirmAction {
 }
 
 export const ProductDevScreen: React.FC = () => {
-  const { user } = useAppStore();
+  const { user, products, purchaseOrders, fetchProducts, fetchPurchaseOrders } = useAppStore();
   const {
     projects,
     isLoading,
@@ -63,6 +137,7 @@ export const ProductDevScreen: React.FC = () => {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
 
   const [form, setForm] = useState({
     name: '',
@@ -85,26 +160,61 @@ export const ProductDevScreen: React.FC = () => {
 
       inProgress++;
 
-      if (p.target_date) {
-        const target = new Date(`${p.target_date}T00:00:00`);
-        if (target.getTime() < today.getTime()) {
-          overdue++;
-        } else {
-          const diffDays = (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-          if (diffDays <= 3) {
-            pending++;
-          }
-        }
+      const timingStatus = getProjectTimingStatus(p, today);
+      if (timingStatus === 'overdue') {
+        overdue++;
+      } else if (timingStatus === 'nearDue') {
+        pending++;
       }
     });
 
     return { pending, overdue, inProgress };
   }, [projects]);
 
+  const filteredProjects = useMemo(() => {
+    if (activeFilter === 'all') {
+      return projects;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return projects.filter((project) => {
+      if (activeFilter === 'inProgress') {
+        return project.stage !== 'launched';
+      }
+
+      const timingStatus = getProjectTimingStatus(project, today);
+      if (activeFilter === 'nearDue') {
+        return timingStatus === 'nearDue';
+      }
+
+      return timingStatus === 'overdue';
+    });
+  }, [activeFilter, projects]);
+
+  const editingProject = projects.find((p) => p.id === editingProjectId);
+
+  const boundProduct = useMemo(() => {
+    if (!editingProject || editingProject.stage !== 'launched') {
+      return null;
+    }
+
+    return resolveBoundProduct(form.product_id, products);
+  }, [editingProject, form.product_id, products]);
+
+  const arrivalSummary = useMemo(() => {
+    if (!boundProduct) {
+      return null;
+    }
+
+    return buildArrivalSummary(boundProduct.id, purchaseOrders);
+  }, [boundProduct, purchaseOrders]);
+
   useEffect(() => {
     if (!canView) return;
-    void fetchAllProjects();
-  }, [canView, fetchAllProjects]);
+    void Promise.all([fetchAllProjects(), fetchProducts(), fetchPurchaseOrders()]);
+  }, [canView, fetchAllProjects, fetchProducts, fetchPurchaseOrders]);
 
   useEffect(() => {
     if (!error) return;
@@ -249,8 +359,6 @@ export const ProductDevScreen: React.FC = () => {
     );
   }
 
-  const editingProject = projects.find((p) => p.id === editingProjectId);
-
   return (
     <div className="space-y-6">
       {pageNotice && (
@@ -284,6 +392,37 @@ export const ProductDevScreen: React.FC = () => {
           </div>
         </div>
 
+        <div className="flex items-center gap-2 flex-wrap w-full md:w-auto">
+          <button
+            type="button"
+            onClick={() => setActiveFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'all' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter('inProgress')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'inProgress' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          >
+            进行中
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter('nearDue')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'nearDue' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          >
+            临近
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter('overdue')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'overdue' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          >
+            逾期
+          </button>
+        </div>
+
         <button
           type="button"
           onClick={openCreateModal}
@@ -299,7 +438,7 @@ export const ProductDevScreen: React.FC = () => {
       ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {projects.map((project, index) => {
+        {filteredProjects.map((project, index) => {
           const isOverdue = (() => {
             if (project.stage === 'launched' || !project.target_date) return false;
             const target = new Date(`${project.target_date}T00:00:00`);
@@ -443,13 +582,30 @@ export const ProductDevScreen: React.FC = () => {
 
               {editingProject?.stage === 'launched' && (
                 <label className="space-y-1 block">
-                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">关联商品ID (可选)</span>
+                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">关联商品标识（ID 或 EAN-13）</span>
                   <input
                     value={form.product_id}
                     onChange={(event) => setForm((prev) => ({ ...prev, product_id: event.target.value }))}
-                    placeholder="输入已上架的商品ID"
+                    placeholder="输入商品ID或13位EAN条码"
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white"
                   />
+
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                    <div className="text-sm font-semibold text-white">进货到货进度</div>
+                    {!form.product_id.trim() ? (
+                      <div className="text-xs text-white/60">请先填写商品标识</div>
+                    ) : !boundProduct ? (
+                      <div className="text-xs text-red-300">未匹配到商品，请检查ID或EAN-13</div>
+                    ) : (
+                      <>
+                        <div className="text-xs text-white/70">商品：{boundProduct.name}</div>
+                        <div className="text-xs text-white/70">EAN：{boundProduct.barcode || '未绑定'}</div>
+                        <div className="text-xs text-white/90 font-semibold">状态：{arrivalSummary?.statusLabel}</div>
+                        <div className="text-xs text-white/70">关联进货单：{arrivalSummary?.orderCount || 0}</div>
+                        <div className="text-xs text-white/70">到货数量：{arrivalSummary?.deliveredQuantity || 0} / {arrivalSummary?.orderedQuantity || 0}</div>
+                      </>
+                    )}
+                  </div>
                 </label>
               )}
 

@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         <p className="text-xs text-white/40 mt-1 uppercase tracking-widest">Inventory System</p>
       </div>
 
-      <nav className="flex-1 px-4 space-y-2">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-4 pr-3 space-y-2">
         {filteredItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

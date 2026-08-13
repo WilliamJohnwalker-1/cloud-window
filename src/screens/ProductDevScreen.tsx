@@ -20,7 +20,7 @@ import Toast from 'react-native-toast-message';
 import { useProductDevStore } from '../store/useProductDevStore';
 import { useAppStore } from '../store/useAppStore';
 import { Colors, LightColors, DarkColors, Shadow, Radius, Spacing, Typography } from '../theme';
-import type { DevelopmentStage, ProductDevelopment } from '../types';
+import type { DevelopmentStage, ProductDevelopment, ProductWithDetails, PurchaseOrder } from '../types';
 
 const STAGE_LABELS: Record<DevelopmentStage, string> = {
   concept: '立项',
@@ -46,6 +46,80 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
+type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
+
+type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
+
+function getProjectTimingStatus(project: ProductDevelopment, today: Date): ProjectTimingStatus {
+  if (project.stage === 'launched' || !project.target_date) {
+    return 'none';
+  }
+
+  const target = new Date(`${project.target_date}T00:00:00`);
+  if (target.getTime() < today.getTime()) {
+    return 'overdue';
+  }
+
+  const diffDays = (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+  if (diffDays <= 3) {
+    return 'nearDue';
+  }
+
+  return 'none';
+}
+
+function resolveBoundProduct(identifier: string, products: ProductWithDetails[]): ProductWithDetails | null {
+  const normalized = identifier.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const byId = products.find((item) => item.id === normalized) || null;
+  if (byId) {
+    return byId;
+  }
+
+  return products.find((item) => item.barcode === normalized) || null;
+}
+
+function buildArrivalSummary(productId: string, purchaseOrders: PurchaseOrder[]): {
+  orderCount: number;
+  orderedQuantity: number;
+  deliveredQuantity: number;
+  statusLabel: string;
+} {
+  let orderCount = 0;
+  let orderedQuantity = 0;
+  let deliveredQuantity = 0;
+
+  purchaseOrders.forEach((order) => {
+    let hasMatchedItem = false;
+    (order.items || []).forEach((item) => {
+      if (item.product_id !== productId) {
+        return;
+      }
+
+      hasMatchedItem = true;
+      orderedQuantity += Number(item.ordered_quantity || 0);
+      deliveredQuantity += Number(item.delivered_quantity || 0);
+    });
+
+    if (hasMatchedItem) {
+      orderCount += 1;
+    }
+  });
+
+  if (orderCount === 0) {
+    return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '未下进货单' };
+  }
+
+  if (deliveredQuantity >= orderedQuantity && orderedQuantity > 0) {
+    return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '已全部到货' };
+  }
+
+  return { orderCount, orderedQuantity, deliveredQuantity, statusLabel: '到货中' };
+}
+
 export default function ProductDevScreen() {
   // 1. Store hooks
   const {
@@ -57,6 +131,7 @@ export default function ProductDevScreen() {
     advanceStage,
     deleteProject,
   } = useProductDevStore();
+  const { products, purchaseOrders, fetchProducts, fetchPurchaseOrders } = useAppStore();
   const user = useAppStore((state) => state.user);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
@@ -65,6 +140,7 @@ export default function ProductDevScreen() {
   const [refreshing, setRefresh] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<ProductDevelopment | null>(null);
+  const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
   
   // Form state
   const [name, setName] = useState('');
@@ -87,26 +163,59 @@ export default function ProductDevScreen() {
       
       inProgress++;
       
-      if (p.target_date) {
-        const target = new Date(`${p.target_date}T00:00:00`);
-        if (target.getTime() < today.getTime()) {
-          overdue++;
-        } else {
-          const diffDays = (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-          if (diffDays <= 3) {
-            pending++;
-          }
-        }
+      const timingStatus = getProjectTimingStatus(p, today);
+      if (timingStatus === 'overdue') {
+        overdue++;
+      } else if (timingStatus === 'nearDue') {
+        pending++;
       }
     });
 
     return { pending, overdue, inProgress };
   }, [projects]);
 
+  const filteredProjects = useMemo(() => {
+    if (activeFilter === 'all') {
+      return projects;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return projects.filter((project) => {
+      if (activeFilter === 'inProgress') {
+        return project.stage !== 'launched';
+      }
+
+      const timingStatus = getProjectTimingStatus(project, today);
+      if (activeFilter === 'nearDue') {
+        return timingStatus === 'nearDue';
+      }
+
+      return timingStatus === 'overdue';
+    });
+  }, [activeFilter, projects]);
+
+  const boundProduct = useMemo(() => {
+    if (!editingProject || editingProject.stage !== 'launched') {
+      return null;
+    }
+
+    return resolveBoundProduct(productId, products);
+  }, [editingProject, productId, products]);
+
+  const arrivalSummary = useMemo(() => {
+    if (!boundProduct) {
+      return null;
+    }
+
+    return buildArrivalSummary(boundProduct.id, purchaseOrders);
+  }, [boundProduct, purchaseOrders]);
+
   // 4. Effects
   useEffect(() => {
-    fetchAllProjects();
-  }, [fetchAllProjects]);
+    void Promise.all([fetchAllProjects(), fetchProducts(), fetchPurchaseOrders()]);
+  }, [fetchAllProjects, fetchProducts, fetchPurchaseOrders]);
 
   // 5. Handlers
   const handleRefresh = async () => {
@@ -248,74 +357,18 @@ export default function ProductDevScreen() {
 
   // 6. Render helpers
   const renderProjectCard = ({ item }: { item: ProductDevelopment }) => {
-    const isOverdue = (() => {
-      if (item.stage === 'launched' || !item.target_date) return false;
-      const target = new Date(`${item.target_date}T00:00:00`);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      return target.getTime() < today.getTime();
-    })();
-
-    const stageColor = STAGE_COLORS[item.stage];
-    const nextStage = NEXT_STAGE_MAP[item.stage];
-
     return (
       <TouchableOpacity
         style={[
-          styles.card,
+          styles.compactCard,
           { backgroundColor: theme.surface },
-          isOverdue && { borderColor: theme.danger, borderWidth: 1, backgroundColor: theme.dangerBg }
         ]}
         onPress={() => openEditModal(item)}
         activeOpacity={0.7}
       >
-        <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <View style={[styles.stageBadge, { backgroundColor: `${stageColor}20` }]}>
-            <Text style={[styles.stageText, { color: stageColor }]}>{STAGE_LABELS[item.stage]}</Text>
-          </View>
-        </View>
-
-        {item.description ? (
-          <Text style={[styles.cardDesc, { color: theme.textSecondary }]} numberOfLines={2}>
-            {item.description}
-          </Text>
-        ) : null}
-
-        <View style={styles.cardFooter}>
-          <View style={styles.cardMeta}>
-            {item.target_date && (
-              <View style={styles.metaItem}>
-                <Calendar size={14} color={isOverdue ? theme.danger : theme.textSecondary} />
-                <Text style={[styles.metaText, { color: isOverdue ? theme.danger : theme.textSecondary }]}>
-                  {item.target_date}
-                </Text>
-              </View>
-            )}
-            {item.notes && (
-              <View style={styles.metaItem}>
-                <FileText size={14} color={theme.textSecondary} />
-                <Text style={[styles.metaText, { color: theme.textSecondary }]} numberOfLines={1}>
-                  {item.notes}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.cardActions}>
-            {nextStage && (
-              <TouchableOpacity
-                style={[styles.actionBtn, { backgroundColor: theme.pink }]}
-                onPress={() => handleAdvanceStage(item)}
-              >
-                <Text style={styles.actionBtnText}>下一阶段</Text>
-                <ChevronRight size={14} color="#FFF" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+        <Text style={[styles.compactTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+          {item.name}
+        </Text>
       </TouchableOpacity>
     );
   };
@@ -352,10 +405,37 @@ export default function ProductDevScreen() {
             <Text style={styles.statLabel}>逾期</Text>
           </View>
         </View>
+
+        <View style={styles.filterRow}>
+          <TouchableOpacity
+            style={[styles.filterChip, activeFilter === 'all' && styles.filterChipActive]}
+            onPress={() => setActiveFilter('all')}
+          >
+            <Text style={[styles.filterChipText, activeFilter === 'all' && styles.filterChipTextActive]}>全部</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, activeFilter === 'inProgress' && styles.filterChipActive]}
+            onPress={() => setActiveFilter('inProgress')}
+          >
+            <Text style={[styles.filterChipText, activeFilter === 'inProgress' && styles.filterChipTextActive]}>进行中</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, activeFilter === 'nearDue' && styles.filterChipActive]}
+            onPress={() => setActiveFilter('nearDue')}
+          >
+            <Text style={[styles.filterChipText, activeFilter === 'nearDue' && styles.filterChipTextActive]}>临近</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, activeFilter === 'overdue' && styles.filterChipActive]}
+            onPress={() => setActiveFilter('overdue')}
+          >
+            <Text style={[styles.filterChipText, activeFilter === 'overdue' && styles.filterChipTextActive]}>逾期</Text>
+          </TouchableOpacity>
+        </View>
       </LinearGradient>
 
       <FlatList
-        data={projects}
+        data={filteredProjects}
         keyExtractor={(item) => item.id}
         renderItem={renderProjectCard}
         contentContainerStyle={styles.listContent}
@@ -439,14 +519,35 @@ export default function ProductDevScreen() {
 
               {editingProject?.stage === 'launched' && (
                 <>
-                  <Text style={[styles.label, { color: theme.textSecondary }]}>关联商品ID (可选)</Text>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>关联商品标识（ID 或 EAN-13）</Text>
                   <TextInput
                     style={[styles.input, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
                     value={productId}
                     onChangeText={setProductId}
-                    placeholder="输入已上架的商品ID"
+                    placeholder="输入商品ID或13位EAN条码"
                     placeholderTextColor={theme.textTertiary}
                   />
+
+                  <View style={[styles.monitorCard, { backgroundColor: theme.surfaceSecondary, borderColor: theme.border }]}> 
+                    <Text style={[styles.monitorTitle, { color: theme.textPrimary }]}>进货到货进度</Text>
+                    {!productId.trim() ? (
+                      <Text style={[styles.monitorText, { color: theme.textSecondary }]}>请先填写商品标识</Text>
+                    ) : !boundProduct ? (
+                      <Text style={[styles.monitorText, { color: theme.danger }]}>未匹配到商品，请检查ID或EAN-13</Text>
+                    ) : (
+                      <>
+                        <Text style={[styles.monitorText, { color: theme.textSecondary }]}>
+                          商品：{boundProduct.name}
+                        </Text>
+                        <Text style={[styles.monitorText, { color: theme.textSecondary }]}>
+                          EAN：{boundProduct.barcode || '未绑定'}
+                        </Text>
+                        <Text style={[styles.monitorStatus, { color: theme.textPrimary }]}>状态：{arrivalSummary?.statusLabel}</Text>
+                        <Text style={[styles.monitorText, { color: theme.textSecondary }]}>关联进货单：{arrivalSummary?.orderCount || 0}</Text>
+                        <Text style={[styles.monitorText, { color: theme.textSecondary }]}>到货数量：{arrivalSummary?.deliveredQuantity || 0} / {arrivalSummary?.orderedQuantity || 0}</Text>
+                      </>
+                    )}
+                  </View>
                 </>
               )}
 
@@ -538,6 +639,32 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     padding: Spacing.md,
   },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  filterChip: {
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  filterChipActive: {
+    backgroundColor: '#FFF',
+    borderColor: '#FFF',
+  },
+  filterChipText: {
+    ...Typography.caption,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: Colors.pink,
+  },
   statItem: {
     flex: 1,
     alignItems: 'center',
@@ -560,11 +687,18 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingBottom: 100,
   },
-  card: {
+  compactCard: {
     borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    minHeight: 56,
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
     ...Shadow.card,
+  },
+  compactTitle: {
+    ...Typography.body,
+    fontWeight: '600',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -698,6 +832,24 @@ const styles = StyleSheet.create({
   },
   rollbackBtnText: {
     fontSize: 13,
+  },
+  monitorCard: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  monitorTitle: {
+    ...Typography.bodyBold,
+    marginBottom: Spacing.xs,
+  },
+  monitorStatus: {
+    ...Typography.bodyBold,
+    marginTop: Spacing.xs,
+  },
+  monitorText: {
+    ...Typography.caption,
+    marginTop: 2,
   },
   modalFooter: {
     flexDirection: 'row',
