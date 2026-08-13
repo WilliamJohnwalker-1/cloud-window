@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.9`
-- Current web baseline: `v1.3.13`
+- Current mobile baseline: `v2.2.10`
+- Current web baseline: `v1.3.14`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -270,6 +270,7 @@ Before committing:
 - Latest purchase-cost wave: 外部单建单补齐 legacy `unit_price` 兼容；双端进货支持“每行总价(line_total)”录入与汇总；双端商品补齐累计数量/累计成本字段映射；新增 `migrate-v7.6` / `migrate-v7.7` 草案覆盖云窗库存池口径与到货后累计成本更新。
 - Latest refund-rollback hotfix: 修复单商品全额退款偶发停留 `partial_refunded`（退款明细同步失败时自动 fallback 并重算状态）；补齐退款即时回退总库存与 `inventory_logs` 的 `refund_restore` 记录（无需删单才回退/记日志）
 - Latest product-dev + order-date wave: 双端新增产品开发子系统（5阶段看板、紧急度排序、侧栏/Tab 入口与角标）；进货/结算建单新增 `order_date` 业务日期并在订单展示；迁移链延伸至 `migrate-v8.0-product-dev-and-order-date.sql`。
+- Latest product-dev visibility wave: Web 侧边栏菜单改可滚动，双端研发页新增进行中/临近/逾期点击筛选；移动端研发列表压缩为项目名高密度视图；双端“已上架”支持商品 ID/EAN-13 绑定并展示进货到货进度监控。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:
