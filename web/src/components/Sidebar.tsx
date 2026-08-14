@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const filteredItems = menuItems.filter((item) => item.canView);
 
   return (
-    <aside className="w-64 h-screen bg-background border-r border-white/10 flex flex-col fixed left-0 top-0 z-50">
+    <aside className="w-64 h-dvh bg-background border-r border-white/10 flex flex-col fixed left-0 top-0 z-50 overflow-hidden">
       <div className="p-8">
         <h1 className="text-xl font-bold bg-tech-gradient bg-clip-text text-transparent">
           云窗文创
@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         <p className="text-xs text-white/40 mt-1 uppercase tracking-widest">Inventory System</p>
       </div>
 
-      <nav className="flex-1 min-h-0 overflow-y-auto px-4 pr-3 space-y-2">
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain touch-pan-y px-4 pr-3 pb-4 space-y-2" style={{ WebkitOverflowScrolling: 'touch' }}>
         {filteredItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
