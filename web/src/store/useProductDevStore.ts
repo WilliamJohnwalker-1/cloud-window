@@ -8,7 +8,7 @@ type ProjectsFetchMode = 'active' | 'all';
 
 type ProductDevelopmentCreateInput = Omit<ProductDevelopment, 'id' | 'created_at' | 'updated_at'>;
 type ProductDevelopmentUpdateInput = Partial<
-  Pick<ProductDevelopment, 'name' | 'description' | 'notes' | 'target_date' | 'product_id'>
+  Pick<ProductDevelopment, 'name' | 'description' | 'notes' | 'target_date' | 'product_id' | 'is_pinned'>
 >;
 
 interface ProductDevStore {
@@ -66,6 +66,12 @@ function sortProjectsByUrgency(projects: ProductDevelopment[]): ProductDevelopme
   const today = startOfDay(new Date()).getTime();
 
   return [...projects].sort((left, right) => {
+    const leftPinned = Boolean(left.is_pinned);
+    const rightPinned = Boolean(right.is_pinned);
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
+    }
+
     const leftLaunched = isLaunchedProject(left);
     const rightLaunched = isLaunchedProject(right);
 
@@ -116,6 +122,10 @@ function buildUpdatePayload(input: ProductDevelopmentUpdateInput): ProductDevelo
 
   if (input.product_id !== undefined) {
     payload.product_id = input.product_id;
+  }
+
+  if (input.is_pinned !== undefined) {
+    payload.is_pinned = input.is_pinned;
   }
 
   return payload;

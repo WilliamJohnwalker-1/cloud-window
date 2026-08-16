@@ -24,9 +24,9 @@ import type { DevelopmentStage, ProductDevelopment, ProductWithDetails, Purchase
 
 const STAGE_LABELS: Record<DevelopmentStage, string> = {
   concept: '立项',
-  artist_search: '找画手',
-  design_finalize: '定稿',
-  factory_search: '找工厂',
+  artist_search: '约稿',
+  design_finalize: '打样',
+  factory_search: '生产',
   launched: '已上架',
 };
 
@@ -46,7 +46,7 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
-type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
+type ProjectQuickFilter = 'all' | 'inProgress' | 'conceptStage' | 'nearDue' | 'overdue';
 
 type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
 
@@ -148,6 +148,7 @@ export default function ProductDevScreen() {
   const [notes, setNotes] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [productId, setProductId] = useState('');
+  const [createStage, setCreateStage] = useState<DevelopmentStage>('concept');
 
   // 3. Derived state
   const stats = useMemo(() => {
@@ -185,6 +186,10 @@ export default function ProductDevScreen() {
     return projects.filter((project) => {
       if (activeFilter === 'inProgress') {
         return project.stage !== 'launched';
+      }
+
+      if (activeFilter === 'conceptStage') {
+        return project.stage === 'concept';
       }
 
       const timingStatus = getProjectTimingStatus(project, today);
@@ -231,6 +236,7 @@ export default function ProductDevScreen() {
     setNotes('');
     setTargetDate('');
     setProductId('');
+    setCreateStage('concept');
     setModalVisible(true);
   };
 
@@ -241,6 +247,7 @@ export default function ProductDevScreen() {
     setNotes(project.notes || '');
     setTargetDate(project.target_date || '');
     setProductId(project.product_id || '');
+    setCreateStage(project.stage);
     setModalVisible(true);
   };
 
@@ -273,7 +280,7 @@ export default function ProductDevScreen() {
       const { error } = await addProject({
         name: name.trim(),
         description: description.trim() || null,
-        stage: 'concept',
+        stage: createStage,
         notes: notes.trim() || null,
         target_date: targetDate.trim() || null,
         product_id: null,
@@ -355,6 +362,25 @@ export default function ProductDevScreen() {
     );
   };
 
+  const handleTogglePin = async (project: ProductDevelopment): Promise<void> => {
+    const nextPinned = !project.is_pinned;
+    if (nextPinned) {
+      const pinnedCount = projects.filter((item) => item.is_pinned).length;
+      if (pinnedCount >= 2) {
+        Toast.show({ type: 'error', text1: '错误', text2: '最多只能置顶 2 个项目' });
+        return;
+      }
+    }
+
+    const { error } = await updateProject(project.id, { is_pinned: nextPinned });
+    if (error) {
+      Toast.show({ type: 'error', text1: '置顶更新失败', text2: error.message });
+      return;
+    }
+
+    Toast.show({ type: 'success', text1: '成功', text2: nextPinned ? '已置顶项目' : '已取消置顶' });
+  };
+
   // 6. Render helpers
   const renderProjectCard = ({ item }: { item: ProductDevelopment }) => {
     return (
@@ -366,9 +392,24 @@ export default function ProductDevScreen() {
         onPress={() => openEditModal(item)}
         activeOpacity={0.7}
       >
-        <Text style={[styles.compactTitle, { color: theme.textPrimary }]} numberOfLines={1}>
-          {item.name}
-        </Text>
+        <View style={styles.compactCardRow}>
+          <View style={styles.compactCardLeft}>
+            <Text style={[styles.compactTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.is_pinned ? (
+              <Text style={[styles.compactPinnedText, { color: theme.warning }]}>置顶</Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            style={[styles.pinBtn, { borderColor: theme.border }]}
+            onPress={() => {
+              void handleTogglePin(item);
+            }}
+          >
+            <Text style={[styles.pinBtnText, { color: theme.textSecondary }]}>{item.is_pinned ? '取消置顶' : '置顶'}</Text>
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -418,6 +459,12 @@ export default function ProductDevScreen() {
             onPress={() => setActiveFilter('inProgress')}
           >
             <Text style={[styles.filterChipText, activeFilter === 'inProgress' && styles.filterChipTextActive]}>进行中</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, activeFilter === 'conceptStage' && styles.filterChipActive]}
+            onPress={() => setActiveFilter('conceptStage')}
+          >
+            <Text style={[styles.filterChipText, activeFilter === 'conceptStage' && styles.filterChipTextActive]}>立项</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.filterChip, activeFilter === 'nearDue' && styles.filterChipActive]}
@@ -495,6 +542,35 @@ export default function ProductDevScreen() {
                 placeholder="输入项目描述"
                 placeholderTextColor={theme.textTertiary}
               />
+
+              {!editingProject && (
+                <View>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>当前阶段</Text>
+                  <View style={styles.stageSelectRow}>
+                    {(Object.keys(STAGE_LABELS) as DevelopmentStage[])
+                      .filter((stage) => stage !== 'launched')
+                      .map((stage) => (
+                        <TouchableOpacity
+                          key={stage}
+                          style={[
+                            styles.stageSelectChip,
+                            createStage === stage && styles.stageSelectChipActive,
+                            { borderColor: theme.border },
+                          ]}
+                          onPress={() => setCreateStage(stage)}
+                        >
+                          <Text style={[
+                            styles.stageSelectChipText,
+                            { color: createStage === stage ? Colors.pink : theme.textSecondary },
+                          ]}
+                          >
+                            {STAGE_LABELS[stage]}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                </View>
+              )}
 
               <Text style={[styles.label, { color: theme.textSecondary }]}>目标日期 (可选)</Text>
               <TextInput
@@ -696,8 +772,31 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     ...Shadow.card,
   },
+  compactCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  compactCardLeft: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
   compactTitle: {
     ...Typography.body,
+    fontWeight: '600',
+  },
+  compactPinnedText: {
+    ...Typography.caption,
+    marginTop: 2,
+  },
+  pinBtn: {
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+  },
+  pinBtnText: {
+    ...Typography.caption,
     fontWeight: '600',
   },
   cardHeader: {
@@ -815,6 +914,26 @@ const styles = StyleSheet.create({
   },
   textArea: {
     height: 80,
+  },
+  stageSelectRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  stageSelectChip: {
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  stageSelectChipActive: {
+    backgroundColor: '#FFF',
+  },
+  stageSelectChipText: {
+    ...Typography.caption,
+    fontWeight: '600',
   },
   rollbackSection: {
     marginBottom: Spacing.xl,
