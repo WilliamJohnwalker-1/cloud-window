@@ -1271,7 +1271,7 @@ export const useAppStore = create<AppState>()(
 
         const { data, error } = await query
           .order('created_at', { ascending: false })
-          .limit(200);
+          .limit(1000);
         if (error || !data) return;
 
         let rows = data as OrderRow[];
@@ -1296,7 +1296,7 @@ export const useAppStore = create<AppState>()(
 
             const { data: refreshedRows, error: refreshedError } = await refreshQuery
               .order('created_at', { ascending: false })
-              .limit(200);
+              .limit(1000);
 
             if (!refreshedError && refreshedRows) {
               rows = refreshedRows as OrderRow[];

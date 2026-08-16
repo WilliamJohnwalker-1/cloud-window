@@ -155,6 +155,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
 55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
 56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
+57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -214,6 +215,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 54. 执行 `supabase/migrate-v7.4-store-invoice-contact-fields.sql`
 55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
 56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
+57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -229,7 +231,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.14）
+### 5. 启动 Web 端（v1.3.15）
 
 ```bash
 npm run web:v2
@@ -422,6 +424,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.15 (2026-08-16) - 商品编辑图片直传 + 上货单模板重做 + 研发流程增强
+
+- 商品编辑弹窗新增图片加号入口：管理员可在编辑窗内直接上传/更新商品图并预览保存。
+- 上货单导出模板按新样式重做：新增整页抬头信息区（A1~I8 合并）、参考图列、单位列、备注列，补齐表头/合计样式与边框行高。
+- 研发模块新增项目置顶能力（最多2个）并置顶优先排序；新增“立项”筛选。
+- 研发流程文案调整：`找画手 -> 约稿`、`找工厂 -> 生产`、`定稿 -> 打样`；新建项目支持直接选择当前阶段。
+- 新增迁移：`supabase/migrate-v8.1-product-dev-pinned.sql`（`product_developments.is_pinned`）。
+
+### Mobile v2.2.11 (2026-08-16) - 上货单模板重做 + 研发流程增强
+
+- 上货单导出模板按新样式重做：新增整页抬头信息区（A1~I8 合并）、参考图列、单位列、备注列，补齐表头/合计样式与边框行高。
+- 研发模块新增项目置顶能力（最多2个）并置顶优先排序；新增“立项”筛选。
+- 研发流程文案调整：`找画手 -> 约稿`、`找工厂 -> 生产`、`定稿 -> 打样`；新建项目支持直接选择当前阶段。
 
 ### Web v1.3.14 (2026-08-13) - 研发页筛选与商品到货进度可视化
 

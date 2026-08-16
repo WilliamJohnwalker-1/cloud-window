@@ -9,9 +9,9 @@ import { canViewProductDev } from '../utils/permissions';
 
 const STAGE_LABELS: Record<DevelopmentStage, string> = {
   concept: '立项',
-  artist_search: '找画手',
-  design_finalize: '定稿',
-  factory_search: '找工厂',
+  artist_search: '约稿',
+  design_finalize: '打样',
+  factory_search: '生产',
   launched: '已上架',
 };
 
@@ -31,7 +31,7 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
-type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
+type ProjectQuickFilter = 'all' | 'inProgress' | 'conceptStage' | 'nearDue' | 'overdue';
 
 type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
 
@@ -142,6 +142,7 @@ export const ProductDevScreen: React.FC = () => {
   const [form, setForm] = useState({
     name: '',
     description: '',
+    stage: 'concept' as DevelopmentStage,
     notes: '',
     target_date: '',
     product_id: '',
@@ -182,6 +183,10 @@ export const ProductDevScreen: React.FC = () => {
     return projects.filter((project) => {
       if (activeFilter === 'inProgress') {
         return project.stage !== 'launched';
+      }
+
+      if (activeFilter === 'conceptStage') {
+        return project.stage === 'concept';
       }
 
       const timingStatus = getProjectTimingStatus(project, today);
@@ -226,6 +231,7 @@ export const ProductDevScreen: React.FC = () => {
     setForm({
       name: '',
       description: '',
+      stage: 'concept',
       notes: '',
       target_date: '',
       product_id: '',
@@ -238,6 +244,7 @@ export const ProductDevScreen: React.FC = () => {
     setForm({
       name: project.name,
       description: project.description || '',
+      stage: project.stage,
       notes: project.notes || '',
       target_date: project.target_date || '',
       product_id: project.product_id || '',
@@ -274,7 +281,7 @@ export const ProductDevScreen: React.FC = () => {
       const { error: createError } = await addProject({
         name: form.name.trim(),
         description: form.description.trim() || null,
-        stage: 'concept',
+        stage: form.stage,
         notes: form.notes.trim() || null,
         target_date: form.target_date.trim() || null,
         product_id: null,
@@ -323,6 +330,25 @@ export const ProductDevScreen: React.FC = () => {
       title: '回退阶段',
       description: `确定将 "${project.name}" 回退到 [${STAGE_LABELS[toStage]}] 吗？`,
     });
+  };
+
+  const handleTogglePin = async (project: ProductDevelopment, event: React.MouseEvent): Promise<void> => {
+    event.stopPropagation();
+    const nextPinned = !project.is_pinned;
+    if (nextPinned) {
+      const pinnedCount = projects.filter((item) => item.is_pinned).length;
+      if (pinnedCount >= 2) {
+        setPageNotice({ type: 'error', text: '最多只能置顶 2 个项目' });
+        return;
+      }
+    }
+
+    const { error: updateError } = await updateProject(project.id, { is_pinned: nextPinned });
+    if (updateError) {
+      setPageNotice({ type: 'error', text: `置顶更新失败：${updateError.message}` });
+      return;
+    }
+    setPageNotice({ type: 'success', text: nextPinned ? '已置顶项目' : '已取消置顶' });
   };
 
   const submitConfirmAction = async () => {
@@ -409,6 +435,13 @@ export const ProductDevScreen: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={() => setActiveFilter('conceptStage')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'conceptStage' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          >
+            立项
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveFilter('nearDue')}
             className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'nearDue' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
           >
@@ -464,9 +497,16 @@ export const ProductDevScreen: React.FC = () => {
             >
               <div className="flex items-start justify-between gap-4 mb-3">
                 <h3 className="text-lg font-bold text-white truncate flex-1">{project.name}</h3>
-                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${STAGE_COLORS[project.stage]}`}>
-                  {STAGE_LABELS[project.stage]}
-                </span>
+                <div className="flex items-center gap-2">
+                  {project.is_pinned ? (
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap bg-yellow-500/20 text-yellow-300">
+                      置顶
+                    </span>
+                  ) : null}
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${STAGE_COLORS[project.stage]}`}>
+                    {STAGE_LABELS[project.stage]}
+                  </span>
+                </div>
               </div>
 
               {project.description ? (
@@ -492,6 +532,16 @@ export const ProductDevScreen: React.FC = () => {
 
               <div className="mt-5 pt-4 border-t border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      void handleTogglePin(project, event);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl border border-white/10 text-xs text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    title={project.is_pinned ? '取消置顶' : '置顶项目'}
+                  >
+                    {project.is_pinned ? '取消置顶' : '置顶'}
+                  </button>
                   <button
                     type="button"
                     onClick={(event) => handleDelete(project, event)}
@@ -558,6 +608,26 @@ export const ProductDevScreen: React.FC = () => {
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white"
                 />
               </label>
+
+              {!editingProjectId && (
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">当前阶段</span>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.keys(STAGE_LABELS) as DevelopmentStage[])
+                      .filter((stage) => stage !== 'launched')
+                      .map((stage) => (
+                        <button
+                          key={stage}
+                          type="button"
+                          onClick={() => setForm((prev) => ({ ...prev, stage }))}
+                          className={`px-3 py-1.5 rounded-xl border text-sm transition-colors ${form.stage === stage ? 'bg-white text-black border-white' : 'bg-white/5 border-white/10 text-white/70 hover:text-white hover:bg-white/10'}`}
+                        >
+                          {STAGE_LABELS[stage]}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">目标日期 (可选)</span>

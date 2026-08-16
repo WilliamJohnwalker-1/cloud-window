@@ -944,7 +944,7 @@ export default function OrdersScreen() {
         const day = String(exportDate.getDate()).padStart(2, '0');
         const exportBaseName = `云窗&${safeStoreName}*${year}*${month}*${day}上货单`;
 
-        const headers = ['序号', '商品名称', '送货数量', '零售价', '结算价', '零售总价', '结算总价'];
+        const headers = ['序号', '商品名称', '参考图', '单位', '数量', '结算价(元)', '零售价(元)', '结算金额(元)', '备注'];
         const dataRows = order.items.map((item, index) => {
           const quantity = Number(item.quantity || 0);
           const retailPrice = Number(item.retail_price || 0);
@@ -968,36 +968,98 @@ export default function OrdersScreen() {
           const retailTotal = retailPrice * quantity;
           const settlementTotal = settlementPrice * quantity;
 
+          const imageUrl = products.find((p) => p.id === item.product_id)?.image_url || '';
+
           return [
             index + 1,
             item.product_name || '未知商品',
+            imageUrl,
+            '个',
             quantity,
-            Number(retailPrice.toFixed(2)),
             Number(settlementPrice.toFixed(2)),
-            Number(retailTotal.toFixed(2)),
+            Number(retailPrice.toFixed(2)),
             Number(settlementTotal.toFixed(2)),
+            '',
           ];
         });
 
-        const sumRetailTotal = dataRows.reduce((sum, row) => sum + Number(row[5] || 0), 0);
-        const sumSettlementTotal = dataRows.reduce((sum, row) => sum + Number(row[6] || 0), 0);
-        const sumRow = ['合计', '', '', '', '', Number(sumRetailTotal.toFixed(2)), Number(sumSettlementTotal.toFixed(2))];
+        const sumQty = dataRows.reduce((sum, row) => sum + Number(row[4] || 0), 0);
+        const sumSettlementTotal = dataRows.reduce((sum, row) => sum + Number(row[7] || 0), 0);
+        const sumRow = ['合计', '', '', '', Number(sumQty.toFixed(0)), '', '', Number(sumSettlementTotal.toFixed(2)), ''];
 
         const worksheet = workbook.addWorksheet('上货单');
         worksheet.columns = [
           { width: 8 },
           { width: 24 },
+          { width: 20 },
+          { width: 10 },
           { width: 12 },
           { width: 12 },
           { width: 12 },
           { width: 14 },
-          { width: 14 },
+          { width: 12 },
         ];
+        worksheet.addRow(['云窗送货单']);
+        worksheet.addRow([`送货日期： ${year}年 ${month}月 ${day}日`]);
+        worksheet.addRow(['送货单位 / 发货方： 云窗文创工作室  类雅如']);
+        worksheet.addRow(['联系电话： 1857399571']);
+        worksheet.addRow([`收货单位 / 客户： ${storeNameRaw}`]);
+        worksheet.addRow(['收货地址：']);
+        worksheet.addRow(['联系人 / 电话：']);
+        worksheet.addRow(['']);
+
+        for (let rowIndex = 1; rowIndex <= 8; rowIndex += 1) {
+          worksheet.mergeCells(`A${rowIndex}:I${rowIndex}`);
+        }
+
+        worksheet.getRow(1).height = 34;
+        worksheet.getRow(2).height = 24;
+        worksheet.getRow(3).height = 24;
+        worksheet.getRow(4).height = 24;
+        worksheet.getRow(5).height = 24;
+        worksheet.getRow(6).height = 24;
+        worksheet.getRow(7).height = 24;
+        worksheet.getRow(8).height = 14;
+
+        worksheet.getCell('A1').alignment = centered;
+        worksheet.getCell('A1').font = { bold: true, size: 16 };
+        for (let rowIndex = 2; rowIndex <= 8; rowIndex += 1) {
+          worksheet.getCell(`A${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle' };
+        }
         worksheet.addRow(headers);
+        const tableHeaderRow = 9;
         dataRows.forEach((row) => {
           worksheet.addRow(row);
         });
         worksheet.addRow(sumRow);
+        const sumRowIndex = tableHeaderRow + dataRows.length + 1;
+
+        worksheet.getRow(tableHeaderRow).height = 34;
+        for (let rowIndex = tableHeaderRow + 1; rowIndex <= sumRowIndex; rowIndex += 1) {
+          worksheet.getRow(rowIndex).height = 30;
+        }
+
+        const tableBorder = {
+          top: { style: 'thin' as const },
+          left: { style: 'thin' as const },
+          bottom: { style: 'thin' as const },
+          right: { style: 'thin' as const },
+        };
+
+        for (let rowIndex = tableHeaderRow; rowIndex <= sumRowIndex; rowIndex += 1) {
+          for (let colIndex = 1; colIndex <= 9; colIndex += 1) {
+            const cell = worksheet.getCell(rowIndex, colIndex);
+            cell.border = tableBorder;
+          }
+        }
+
+        for (let colIndex = 1; colIndex <= 9; colIndex += 1) {
+          const cell = worksheet.getCell(tableHeaderRow, colIndex);
+          cell.font = { bold: true, size: 14 };
+        }
+        worksheet.getCell(sumRowIndex, 1).font = { bold: true, size: 14 };
+        worksheet.getCell(sumRowIndex, 5).font = { bold: true, size: 14 };
+        worksheet.getCell(sumRowIndex, 8).font = { bold: true, size: 14 };
         worksheet.eachRow((row) => {
           row.eachCell((cell) => {
             cell.alignment = centered;
@@ -1008,9 +1070,10 @@ export default function OrdersScreen() {
         return;
       }
 
-      const headers = ['商品名称', '送货数量', '单价', '查收'];
+      const headers = ['商品名称', '参考图', '送货数量', '单价', '查收'];
       const dataRows = order.items.map((item) => [
         item.product_name,
+        products.find((p) => p.id === item.product_id)?.image_url || '',
         item.quantity,
         item.discount_price,
         '',
@@ -1022,11 +1085,15 @@ export default function OrdersScreen() {
           const len = String(row[colIdx]).length;
           if (len > maxLen) maxLen = len;
         });
-        return Math.max(maxLen + 2, 12);
+        return Math.min(Math.max(maxLen + 2, 12), 40);
       });
 
       const worksheet = workbook.addWorksheet('送货单');
       worksheet.columns = columnWidths.map((width) => ({ width }));
+      const deliveryDate = new Date(order.created_at).toLocaleDateString('zh-CN');
+      worksheet.addRow(['云窗文创送货单']);
+      worksheet.addRow([`店铺：${order.store_name || '未指定店铺'}    日期：${deliveryDate}`]);
+      worksheet.addRow([]);
       worksheet.addRow(headers);
       dataRows.forEach((row) => {
         worksheet.addRow(row);

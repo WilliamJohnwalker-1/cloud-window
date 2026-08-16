@@ -3,6 +3,7 @@ import { Edit2, Filter, Package, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { BarcodePreview } from '../components/BarcodePreview';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
+import { supabase } from '../lib/supabase';
 import { useAppStore } from '../store/useAppStore';
 import { useProductSeriesStore } from '../store/useProductSeriesStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
@@ -26,7 +27,9 @@ export const ProductsScreen: React.FC = () => {
   const [seriesName, setSeriesName] = useState<string>('');
   const [seriesSortIndex, setSeriesSortIndex] = useState<string>('');
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const productCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const productImageInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -38,6 +41,7 @@ export const ProductsScreen: React.FC = () => {
     sku: '',
     category: '',
     series_id: '',
+    image_url: '',
   });
 
   useEffect(() => {
@@ -152,6 +156,7 @@ export const ProductsScreen: React.FC = () => {
       sku: form.sku.trim() || null,
       category: form.category.trim() || null,
       series_id: form.series_id || null,
+      image_url: form.image_url.trim() || undefined,
     };
 
     if (!payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -166,12 +171,12 @@ export const ProductsScreen: React.FC = () => {
     }
     await fetchProducts();
     setShowCreate(false);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '', image_url: '' });
   };
 
   const openCreateModal = (): void => {
     setEditingProductId(null);
-    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '' });
+    setForm({ name: '', price: '', cost: '', one_time_cost: '0', cumulative_cost_quantity: '', cumulative_cost_amount: '', city_id: '', sku: '', category: '', series_id: '', image_url: '' });
     setSelectedStoreId('');
     setCustomStorePrice('');
     setShowPricingPanel(false);
@@ -198,6 +203,7 @@ export const ProductsScreen: React.FC = () => {
       sku: product.sku || '',
       category: product.category || '',
       series_id: product.series_id || '',
+      image_url: product.image_url || '',
     });
     setSelectedStoreId('');
     setCustomStorePrice('');
@@ -230,6 +236,7 @@ export const ProductsScreen: React.FC = () => {
         sku: form.sku.trim() || null,
         category: form.category.trim() || null,
         series_id: form.series_id || null,
+        image_url: form.image_url.trim() || undefined,
       };
 
       if (!payload.name || !payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
@@ -323,6 +330,56 @@ export const ProductsScreen: React.FC = () => {
     const { error } = await deleteSeries(seriesId);
     if (error) {
       window.alert(`删除失败：${error.message}`);
+    }
+  };
+
+  const triggerProductImagePicker = (): void => {
+    if (isUploadingImage) return;
+    productImageInputRef.current?.click();
+  };
+
+  const handleProductImageSelect = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user?.id) {
+        window.alert('登录状态已失效，请重新登录后再上传图片');
+        return;
+      }
+
+      const fileExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : 'jpg';
+      const safeExt = fileExt && /^[a-z0-9]+$/.test(fileExt) ? fileExt : 'jpg';
+      const fileName = `${session.user.id}/products/${Date.now()}.${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, file, {
+          contentType: file.type || `image/${safeExt}`,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+      const publicUrl = urlData?.publicUrl || '';
+      if (!publicUrl) {
+        throw new Error('图片上传成功，但未获取到可访问地址');
+      }
+
+      setForm((prev) => ({ ...prev, image_url: publicUrl }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '上传图片失败';
+      window.alert(`上传失败：${message}`);
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -511,6 +568,47 @@ export const ProductsScreen: React.FC = () => {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4 max-h-[80vh] overflow-y-auto">
             <h3 className="text-xl font-bold">{editingProductId ? '编辑商品' : '新增商品'}</h3>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-white/40 uppercase tracking-wider">商品图片</span>
+                <div className="flex items-center gap-2">
+                  {form.image_url ? (
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, image_url: '' }))}
+                      className="px-2.5 py-1 rounded-lg text-xs bg-white/10 hover:bg-white/20"
+                    >
+                      清空
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={triggerProductImagePicker}
+                    disabled={isUploadingImage}
+                    className="w-8 h-8 rounded-full bg-tech-gradient flex items-center justify-center text-white disabled:opacity-50"
+                    title={isUploadingImage ? '上传中...' : '添加或更新图片'}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="w-full h-36 rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center">
+                {form.image_url ? (
+                  <img src={form.image_url} alt="商品图片预览" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="text-white/30 text-sm">暂无图片</div>
+                )}
+              </div>
+              <input
+                ref={productImageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  void handleProductImageSelect(event);
+                }}
+                className="hidden"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">商品名</span>

@@ -348,6 +348,7 @@ export interface ProductDevelopment {
   name: string;
   description: string | null;
   stage: DevelopmentStage;
+  is_pinned?: boolean;
   notes: string | null;
   target_date: string | null;
   product_id: string | null;
