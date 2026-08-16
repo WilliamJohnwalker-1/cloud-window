@@ -546,6 +546,11 @@ export const OrdersScreen: React.FC = () => {
   const resolveItemName = useCallback((productId: string, productName?: string): string => {
     return productName || productNameMap.get(productId) || fallbackProductName;
   }, [productNameMap]);
+
+  const resolveItemImageUrl = useCallback((productId: string): string => {
+    const product = products.find((entry) => entry.id === productId);
+    return product?.image_url || '';
+  }, [products]);
   const filteredOrdersWithoutRange = useMemo(() => {
     let result = baseOrders;
     if (selectedOrderKind !== 'all') {
@@ -1116,15 +1121,46 @@ export const OrdersScreen: React.FC = () => {
       worksheet.columns = [
         { width: 8 },
         { width: 24 },
+        { width: 20 },
+        { width: 10 },
         { width: 12 },
         { width: 12 },
         { width: 12 },
         { width: 14 },
-        { width: 14 },
+        { width: 12 },
       ];
 
-      const headers = ['序号', '商品名称', '送货数量', '零售价', '结算价', '零售总价', '结算总价'];
+      worksheet.addRow(['云窗送货单']);
+      worksheet.addRow([`送货日期： ${year}年 ${month}月 ${day}日`]);
+      worksheet.addRow(['送货单位 / 发货方： 云窗文创工作室  类雅如']);
+      worksheet.addRow(['联系电话： 1857399571']);
+      worksheet.addRow([`收货单位 / 客户： ${storeNameRaw}`]);
+      worksheet.addRow(['收货地址：']);
+      worksheet.addRow(['联系人 / 电话：']);
+      worksheet.addRow(['']);
+
+      for (let rowIndex = 1; rowIndex <= 8; rowIndex += 1) {
+        worksheet.mergeCells(`A${rowIndex}:I${rowIndex}`);
+      }
+
+      worksheet.getRow(1).height = 34;
+      worksheet.getRow(2).height = 24;
+      worksheet.getRow(3).height = 24;
+      worksheet.getRow(4).height = 24;
+      worksheet.getRow(5).height = 24;
+      worksheet.getRow(6).height = 24;
+      worksheet.getRow(7).height = 24;
+      worksheet.getRow(8).height = 14;
+
+      worksheet.getCell('A1').alignment = centered;
+      worksheet.getCell('A1').font = { bold: true, size: 16 };
+      for (let rowIndex = 2; rowIndex <= 8; rowIndex += 1) {
+        worksheet.getCell(`A${rowIndex}`).alignment = { horizontal: 'left', vertical: 'middle' };
+      }
+
+      const headers = ['序号', '商品名称', '参考图', '单位', '数量', '结算价(元)', '零售价(元)', '结算金额(元)', '备注'];
       worksheet.addRow(headers);
+      const tableHeaderRow = 9;
 
       targetOrder.items.forEach((item, index) => {
         const quantity = Number(item.quantity || 0);
@@ -1152,15 +1188,17 @@ export const OrdersScreen: React.FC = () => {
         worksheet.addRow([
           index + 1,
           resolveItemName(item.product_id, item.product_name),
+          resolveItemImageUrl(item.product_id),
+          '个',
           quantity,
-          Number(retailPrice.toFixed(2)),
           Number(settlementPrice.toFixed(2)),
-          Number(retailTotal.toFixed(2)),
+          Number(retailPrice.toFixed(2)),
           Number(settlementTotal.toFixed(2)),
+          '',
         ]);
       });
 
-      const sumRetailTotal = targetOrder.items.reduce((sum, item) => sum + Number(item.retail_price || 0) * Number(item.quantity || 0), 0);
+      const sumQty = targetOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       const sumSettlementTotal = targetOrder.items.reduce((sum, item) => {
         let settlementPrice = Number(item.discount_price || 0);
         if (!item.is_sample && settlementPrice <= 0) {
@@ -1179,8 +1217,36 @@ export const OrdersScreen: React.FC = () => {
         }
         return sum + settlementPrice * Number(item.quantity || 0);
       }, 0);
-      const sumRow = ['合计', '', '', '', '', Number(sumRetailTotal.toFixed(2)), Number(sumSettlementTotal.toFixed(2))];
+      const sumRow = ['合计', '', '', '', Number(sumQty.toFixed(0)), '', '', Number(sumSettlementTotal.toFixed(2)), ''];
       worksheet.addRow(sumRow);
+      const sumRowIndex = tableHeaderRow + targetOrder.items.length + 1;
+
+      worksheet.getRow(tableHeaderRow).height = 34;
+      for (let rowIndex = tableHeaderRow + 1; rowIndex <= sumRowIndex; rowIndex += 1) {
+        worksheet.getRow(rowIndex).height = 30;
+      }
+
+      const tableBorder = {
+        top: { style: 'thin' as const },
+        left: { style: 'thin' as const },
+        bottom: { style: 'thin' as const },
+        right: { style: 'thin' as const },
+      };
+
+      for (let rowIndex = tableHeaderRow; rowIndex <= sumRowIndex; rowIndex += 1) {
+        for (let colIndex = 1; colIndex <= 9; colIndex += 1) {
+          const cell = worksheet.getCell(rowIndex, colIndex);
+          cell.border = tableBorder;
+        }
+      }
+
+      for (let colIndex = 1; colIndex <= 9; colIndex += 1) {
+        const cell = worksheet.getCell(tableHeaderRow, colIndex);
+        cell.font = { bold: true, size: 14 };
+      }
+      worksheet.getCell(sumRowIndex, 1).font = { bold: true, size: 14 };
+      worksheet.getCell(sumRowIndex, 5).font = { bold: true, size: 14 };
+      worksheet.getCell(sumRowIndex, 8).font = { bold: true, size: 14 };
 
       worksheet.eachRow((row) => {
         row.eachCell((cell) => {
@@ -1195,15 +1261,21 @@ export const OrdersScreen: React.FC = () => {
     const worksheet = workbook.addWorksheet('送货单');
     worksheet.columns = [
       { width: 24 },
+      { width: 36 },
       { width: 12 },
       { width: 12 },
       { width: 12 },
     ];
 
-    worksheet.addRow(['商品名称', '送货数量', '单价', '查收']);
+    const deliveryDate = new Date(targetOrder.created_at).toLocaleDateString('zh-CN');
+    worksheet.addRow(['云窗文创送货单']);
+    worksheet.addRow([`店铺：${targetOrder.store_name || '未指定店铺'}    日期：${deliveryDate}`]);
+    worksheet.addRow([]);
+    worksheet.addRow(['商品名称', '参考图', '送货数量', '单价', '查收']);
     targetOrder.items.forEach((item) => {
       worksheet.addRow([
         resolveItemName(item.product_id, item.product_name),
+        resolveItemImageUrl(item.product_id),
         Number(item.quantity || 0),
         Number(item.discount_price || 0),
         '',
