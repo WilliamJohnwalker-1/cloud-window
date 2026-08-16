@@ -46,7 +46,7 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
-type ProjectQuickFilter = 'all' | 'inProgress' | 'conceptStage' | 'nearDue' | 'overdue';
+type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
 
 type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
 
@@ -141,6 +141,7 @@ export default function ProductDevScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<ProductDevelopment | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
+  const [stageFilter, setStageFilter] = useState<DevelopmentStage | 'all'>('all');
   
   // Form state
   const [name, setName] = useState('');
@@ -176,20 +177,20 @@ export default function ProductDevScreen() {
   }, [projects]);
 
   const filteredProjects = useMemo(() => {
+    const stageFilteredProjects = stageFilter === 'all'
+      ? projects
+      : projects.filter((project) => project.stage === stageFilter);
+
     if (activeFilter === 'all') {
-      return projects;
+      return stageFilteredProjects;
     }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    return projects.filter((project) => {
+    return stageFilteredProjects.filter((project) => {
       if (activeFilter === 'inProgress') {
         return project.stage !== 'launched';
-      }
-
-      if (activeFilter === 'conceptStage') {
-        return project.stage === 'concept';
       }
 
       const timingStatus = getProjectTimingStatus(project, today);
@@ -199,7 +200,7 @@ export default function ProductDevScreen() {
 
       return timingStatus === 'overdue';
     });
-  }, [activeFilter, projects]);
+  }, [activeFilter, projects, stageFilter]);
 
   const boundProduct = useMemo(() => {
     if (!editingProject || editingProject.stage !== 'launched') {
@@ -354,7 +355,6 @@ export default function ProductDevScreen() {
               Toast.show({ type: 'error', text1: '回退失败', text2: error.message });
             } else {
               Toast.show({ type: 'success', text1: '成功', text2: `已回退至 ${STAGE_LABELS[toStage]}` });
-              setModalVisible(false);
             }
           },
         },
@@ -461,12 +461,6 @@ export default function ProductDevScreen() {
             <Text style={[styles.filterChipText, activeFilter === 'inProgress' && styles.filterChipTextActive]}>进行中</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.filterChip, activeFilter === 'conceptStage' && styles.filterChipActive]}
-            onPress={() => setActiveFilter('conceptStage')}
-          >
-            <Text style={[styles.filterChipText, activeFilter === 'conceptStage' && styles.filterChipTextActive]}>立项</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.filterChip, activeFilter === 'nearDue' && styles.filterChipActive]}
             onPress={() => setActiveFilter('nearDue')}
           >
@@ -478,6 +472,24 @@ export default function ProductDevScreen() {
           >
             <Text style={[styles.filterChipText, activeFilter === 'overdue' && styles.filterChipTextActive]}>逾期</Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.filterRow}>
+          <TouchableOpacity
+            style={[styles.filterChip, stageFilter === 'all' && styles.filterChipActive]}
+            onPress={() => setStageFilter('all')}
+          >
+            <Text style={[styles.filterChipText, stageFilter === 'all' && styles.filterChipTextActive]}>全阶段</Text>
+          </TouchableOpacity>
+          {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
+            <TouchableOpacity
+              key={stage}
+              style={[styles.filterChip, stageFilter === stage && styles.filterChipActive]}
+              onPress={() => setStageFilter(stage)}
+            >
+              <Text style={[styles.filterChipText, stageFilter === stage && styles.filterChipTextActive]}>{STAGE_LABELS[stage]}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </LinearGradient>
 

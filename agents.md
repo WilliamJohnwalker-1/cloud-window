@@ -270,7 +270,7 @@ Before committing:
 - Latest purchase-cost wave: 外部单建单补齐 legacy `unit_price` 兼容；双端进货支持“每行总价(line_total)”录入与汇总；双端商品补齐累计数量/累计成本字段映射；新增 `migrate-v7.6` / `migrate-v7.7` 草案覆盖云窗库存池口径与到货后累计成本更新。
 - Latest refund-rollback hotfix: 修复单商品全额退款偶发停留 `partial_refunded`（退款明细同步失败时自动 fallback 并重算状态）；补齐退款即时回退总库存与 `inventory_logs` 的 `refund_restore` 记录（无需删单才回退/记日志）
 - Latest product-dev + order-date wave: 双端新增产品开发子系统（5阶段看板、紧急度排序、侧栏/Tab 入口与角标）；进货/结算建单新增 `order_date` 业务日期并在订单展示；迁移链延伸至 `migrate-v8.0-product-dev-and-order-date.sql`。
-- Latest delivery+product-dev enhancement wave: Web 商品编辑弹窗新增图片加号直传；双端上货单模板升级为新抬头样式（A1~I8 合并）并新增参考图列；双端研发模块新增最多2个项目置顶、立项筛选、阶段文案更新（约稿/打样/生产）与新建阶段可选；迁移链延伸至 `migrate-v8.1-product-dev-pinned.sql`。
+- Latest delivery+product-dev enhancement wave: Web 商品编辑弹窗新增图片加号直传；双端上货单模板升级为新抬头样式（A1~I8 合并）并新增参考图列；双端研发模块新增最多2个项目置顶、按当前阶段筛选（全阶段）、阶段文案更新（约稿/打样/生产）与新建阶段可选，回退阶段后保持编辑弹窗打开便于继续补充备注；迁移链延伸至 `migrate-v8.1-product-dev-pinned.sql`。
 - Latest product-dev visibility wave: Web 侧边栏菜单改可滚动，双端研发页新增进行中/临近/逾期点击筛选；移动端研发列表压缩为项目名高密度视图；双端“已上架”支持商品 ID/EAN-13 绑定并展示进货到货进度监控。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
