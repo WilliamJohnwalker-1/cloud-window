@@ -31,7 +31,7 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   launched: null,
 };
 
-type ProjectQuickFilter = 'all' | 'inProgress' | 'conceptStage' | 'nearDue' | 'overdue';
+type ProjectQuickFilter = 'all' | 'inProgress' | 'nearDue' | 'overdue';
 
 type ProjectTimingStatus = 'none' | 'nearDue' | 'overdue';
 
@@ -138,6 +138,7 @@ export const ProductDevScreen: React.FC = () => {
   const [pageNotice, setPageNotice] = useState<PageNotice | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
+  const [stageFilter, setStageFilter] = useState<DevelopmentStage | 'all'>('all');
 
   const [form, setForm] = useState({
     name: '',
@@ -173,20 +174,20 @@ export const ProductDevScreen: React.FC = () => {
   }, [projects]);
 
   const filteredProjects = useMemo(() => {
+    const stageFilteredProjects = stageFilter === 'all'
+      ? projects
+      : projects.filter((project) => project.stage === stageFilter);
+
     if (activeFilter === 'all') {
-      return projects;
+      return stageFilteredProjects;
     }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    return projects.filter((project) => {
+    return stageFilteredProjects.filter((project) => {
       if (activeFilter === 'inProgress') {
         return project.stage !== 'launched';
-      }
-
-      if (activeFilter === 'conceptStage') {
-        return project.stage === 'concept';
       }
 
       const timingStatus = getProjectTimingStatus(project, today);
@@ -196,7 +197,7 @@ export const ProductDevScreen: React.FC = () => {
 
       return timingStatus === 'overdue';
     });
-  }, [activeFilter, projects]);
+  }, [activeFilter, projects, stageFilter]);
 
   const editingProject = projects.find((p) => p.id === editingProjectId);
 
@@ -368,7 +369,9 @@ export const ProductDevScreen: React.FC = () => {
           setPageNotice({ type: 'error', text: `操作失败：${advanceError.message}` });
         } else {
           setPageNotice({ type: 'success', text: `已更新至 ${STAGE_LABELS[confirmAction.targetStage]}` });
-          setShowCreate(false);
+          if (confirmAction.actionType === 'advance') {
+            setShowCreate(false);
+          }
         }
       }
     }
@@ -435,13 +438,6 @@ export const ProductDevScreen: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => setActiveFilter('conceptStage')}
-            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'conceptStage' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
-          >
-            立项
-          </button>
-          <button
-            type="button"
             onClick={() => setActiveFilter('nearDue')}
             className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${activeFilter === 'nearDue' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
           >
@@ -454,6 +450,18 @@ export const ProductDevScreen: React.FC = () => {
           >
             逾期
           </button>
+          <select
+            value={stageFilter}
+            onChange={(event) => setStageFilter(event.target.value as DevelopmentStage | 'all')}
+            className="px-3 py-1.5 rounded-xl text-sm border bg-white/10 border-white/20 text-white/90"
+          >
+            <option value="all">全部阶段</option>
+            {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
+              <option key={stage} value={stage}>
+                {STAGE_LABELS[stage]}
+              </option>
+            ))}
+          </select>
         </div>
 
         <button
