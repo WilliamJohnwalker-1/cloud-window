@@ -450,18 +450,24 @@ export const ProductDevScreen: React.FC = () => {
           >
             逾期
           </button>
-          <select
-            value={stageFilter}
-            onChange={(event) => setStageFilter(event.target.value as DevelopmentStage | 'all')}
-            className="px-3 py-1.5 rounded-xl text-sm border bg-white/10 border-white/20 text-white/90"
+          <span className="px-2 text-xs font-bold text-white/40 uppercase tracking-wider">阶段</span>
+          <button
+            type="button"
+            onClick={() => setStageFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${stageFilter === 'all' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
           >
-            <option value="all">全部阶段</option>
-            {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
-              <option key={stage} value={stage}>
-                {STAGE_LABELS[stage]}
-              </option>
-            ))}
-          </select>
+            全阶段
+          </button>
+          {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
+            <button
+              key={stage}
+              type="button"
+              onClick={() => setStageFilter(stage)}
+              className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${stageFilter === stage ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+            >
+              {STAGE_LABELS[stage]}
+            </button>
+          ))}
         </div>
 
         <button
