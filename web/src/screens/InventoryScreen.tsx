@@ -204,8 +204,9 @@ export const InventoryScreen: React.FC = () => {
   const filteredPurchaseProducts = React.useMemo(() => {
     if (!selectedPurchaseStore) return [];
     const keyword = purchaseSearchKeyword.trim().toLowerCase();
+    const isTotalWarehousePurchase = selectedPurchaseStore.name.trim() === '云窗';
     return products
-      .filter((product) => product.city_id === selectedPurchaseStore.city_id)
+      .filter((product) => isTotalWarehousePurchase || product.city_id === selectedPurchaseStore.city_id)
       .filter((product) => {
         if (!keyword) return true;
         return [product.name, product.barcode || '', product.city_name || '']
@@ -289,9 +290,11 @@ export const InventoryScreen: React.FC = () => {
       supplier_id: string | null;
       products: Array<{ productId: string; quantity: number; lineTotal?: number }>;
     }>>((acc, item) => {
-      const existing = acc.get(item.store.id) || {
+      const cityId = item.store.name.trim() === '云窗' ? item.product.city_id : item.store.city_id;
+      const groupKey = `${item.store.id}:${cityId}`;
+      const existing = acc.get(groupKey) || {
         store_id: item.store.id,
-        city_id: item.store.city_id,
+        city_id: cityId,
         supplier_id: purchaseSupplierId ?? null,
         products: [],
       };
@@ -300,7 +303,7 @@ export const InventoryScreen: React.FC = () => {
         quantity: item.quantity,
         lineTotal: Number(item.lineTotal || 0),
       });
-      acc.set(item.store.id, existing);
+      acc.set(groupKey, existing);
       return acc;
     }, new Map());
 

@@ -194,8 +194,9 @@ export default function InventoryScreen() {
 
   const activePurchaseStores = stores.filter((store) => store.status === 'active');
   const selectedPurchaseStore = activePurchaseStores.find((store) => store.id === purchaseStoreId) || null;
+  const isTotalWarehousePurchase = selectedPurchaseStore?.name.trim() === '云窗';
   const purchaseProducts = selectedPurchaseStore
-    ? products.filter((product) => product.city_id === selectedPurchaseStore.city_id)
+    ? products.filter((product) => isTotalWarehousePurchase || product.city_id === selectedPurchaseStore.city_id)
     : [];
   const purchaseCartEntries = Array.from(purchaseCart.entries()).filter(([, qty]) => qty > 0);
   const purchaseTotalQuantity = purchaseCartEntries.reduce((sum, [, qty]) => sum + qty, 0);
@@ -364,13 +365,17 @@ export default function InventoryScreen() {
       const [storeId, productId] = key.split(':');
       const store = activePurchaseStores.find((item) => item.id === storeId);
       if (!store || !productId) return;
-      const group = groupMap.get(storeId) || { store_id: storeId, city_id: store.city_id, supplier_id: purchaseSupplierId ?? null, products: [] };
+      const product = products.find((item) => item.id === productId);
+      if (!product) return;
+      const cityId = store.name.trim() === '云窗' ? product.city_id : store.city_id;
+      const groupKey = `${storeId}:${cityId}`;
+      const group = groupMap.get(groupKey) || { store_id: storeId, city_id: cityId, supplier_id: purchaseSupplierId ?? null, products: [] };
       group.products.push({
         product_id: productId,
         quantity,
         lineTotal: Number(purchaseLineTotals.get(key) || 0),
       });
-      groupMap.set(storeId, group);
+      groupMap.set(groupKey, group);
     });
 
     const groupedItems = Array.from(groupMap.values());

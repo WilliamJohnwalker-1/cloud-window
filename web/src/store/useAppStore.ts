@@ -1346,7 +1346,7 @@ export const useAppStore = create<AppState>()(
             const selectedStore = stores.find((store) => store.id === group.store_id) || null;
             if (!selectedStore) throw new Error('店铺不存在或未加载');
             if (selectedStore.status !== 'active') throw new Error('店铺已停用');
-            if (selectedStore.city_id !== group.city_id) throw new Error('店铺不属于所选城市');
+            if (selectedStore.name.trim() !== '云窗' && selectedStore.city_id !== group.city_id) throw new Error('店铺不属于所选城市');
             if (!Array.isArray(group.products) || group.products.length === 0) throw new Error(`${selectedStore.name} 进货商品不能为空`);
 
             const payload = group.products.map((product) => {
