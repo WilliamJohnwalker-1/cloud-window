@@ -70,10 +70,10 @@ BEGIN
     WHERE i.indrelid = 'public.inventory'::regclass
       AND i.indisunique
       AND (
-        SELECT ARRAY_AGG(a.attname ORDER BY x.ord)
+        SELECT ARRAY_AGG(a.attname::TEXT ORDER BY x.ord)
         FROM UNNEST(i.indkey) WITH ORDINALITY AS x(attnum, ord)
         JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = x.attnum
-      ) = ARRAY['product_id']
+      ) = ARRAY['product_id']::TEXT[]
   ) THEN
     ALTER TABLE public.inventory
       ADD CONSTRAINT inventory_product_id_unique UNIQUE (product_id);
@@ -88,10 +88,10 @@ BEGIN
     WHERE i.indrelid = 'public.store_inventory'::regclass
       AND i.indisunique
       AND (
-        SELECT ARRAY_AGG(a.attname ORDER BY x.ord)
+        SELECT ARRAY_AGG(a.attname::TEXT ORDER BY x.ord)
         FROM UNNEST(i.indkey) WITH ORDINALITY AS x(attnum, ord)
         JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = x.attnum
-      ) = ARRAY['store_id', 'product_id']
+      ) = ARRAY['store_id', 'product_id']::TEXT[]
   ) THEN
     ALTER TABLE public.store_inventory
       ADD CONSTRAINT store_inventory_store_product_unique UNIQUE (store_id, product_id);
