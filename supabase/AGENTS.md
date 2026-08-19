@@ -56,6 +56,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v8.0-product-dev-and-order-date.sql`: product development module and order_date support.
 - `migrate-v8.1-product-dev-pinned.sql`: product development pinned projects.
 - `migrate-v8.2-yunchuang-purchase-all-cities.sql`: allow 云窗 purchase orders across product cities while receiving into total warehouse.
+- `migrate-v8.3-inventory-conflict-constraints.sql`: ensure inventory/store_inventory upsert unique constraints for purchase delivery.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -111,6 +112,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 48. `migrate-v8.0-product-dev-and-order-date.sql`
 49. `migrate-v8.1-product-dev-pinned.sql`
 50. `migrate-v8.2-yunchuang-purchase-all-cities.sql`
+51. `migrate-v8.3-inventory-conflict-constraints.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -163,6 +165,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 48. `migrate-v8.0-product-dev-and-order-date.sql`
 49. `migrate-v8.1-product-dev-pinned.sql`
 50. `migrate-v8.2-yunchuang-purchase-all-cities.sql`
+51. `migrate-v8.3-inventory-conflict-constraints.sql`
 
 ## TABLES
 
