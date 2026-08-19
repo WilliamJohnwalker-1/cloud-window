@@ -156,6 +156,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
 56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
 57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
+58. 执行 `supabase/migrate-v8.2-yunchuang-purchase-all-cities.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -216,6 +217,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 55. 执行 `supabase/migrate-v7.5-external-channel-orders.sql`
 56. 执行 `supabase/migrate-v8.0-product-dev-and-order-date.sql`
 57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
+58. 执行 `supabase/migrate-v8.2-yunchuang-purchase-all-cities.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -231,7 +233,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.15）
+### 5. 启动 Web 端（v1.3.16）
 
 ```bash
 npm run web:v2
@@ -424,6 +426,15 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.16 (2026-08-19) - 云窗进货跨城市修复
+
+- 进货建单修复：选择“云窗”时可为所有城市商品创建进货单，按商品城市拆单，到货仍入总仓库存；普通店铺继续保持所属城市限制。
+- 新增迁移：`supabase/migrate-v8.2-yunchuang-purchase-all-cities.sql`（云窗进货跨城市建单）。
+
+### Mobile v2.2.12 (2026-08-19) - 云窗进货跨城市修复
+
+- 进货建单修复：选择“云窗”时可为所有城市商品创建进货单，按商品城市拆单，到货仍入总仓库存；普通店铺继续保持所属城市限制。
 
 ### Web v1.3.15 (2026-08-16) - 商品编辑图片直传 + 上货单模板重做 + 研发流程增强
 
