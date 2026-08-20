@@ -160,7 +160,7 @@ interface ProductRow {
   updated_at: string;
   cities?: { name: string } | null;
   product_series?: { name?: string | null } | null;
-  inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
+  inventory?: { quantity?: number | null; min_quantity?: number | null } | null;
 }
 
 interface StoreRow {
@@ -1311,11 +1311,11 @@ export const useAppStore = create<AppState>()(
                 : null,
               discount_price: distributorDiscount ?? baseDiscount,
               city_name: p.cities?.name,
-              quantity: p.inventory?.[0]?.quantity !== null && p.inventory?.[0]?.quantity !== undefined
-                ? Number(p.inventory[0].quantity)
+              quantity: p.inventory?.quantity !== null && p.inventory?.quantity !== undefined
+                ? Number(p.inventory.quantity)
                 : undefined,
-              min_quantity: p.inventory?.[0]?.min_quantity !== null && p.inventory?.[0]?.min_quantity !== undefined
-                ? Number(p.inventory[0].min_quantity)
+              min_quantity: p.inventory?.min_quantity !== null && p.inventory?.min_quantity !== undefined
+                ? Number(p.inventory.min_quantity)
                 : undefined,
             };
           });

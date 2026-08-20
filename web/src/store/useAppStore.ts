@@ -58,7 +58,7 @@ interface ProductRow {
   created_at: string;
   updated_at: string;
   cities?: { name: string } | null;
-  inventory?: Array<{ quantity?: number | null; min_quantity?: number | null }>;
+  inventory?: { quantity?: number | null; min_quantity?: number | null } | null;
 }
 
 interface OrderItemRow {
@@ -530,11 +530,11 @@ const mapProducts = (rows: ProductRow[]): ProductWithDetails[] => {
     created_at: row.created_at,
     updated_at: row.updated_at,
     city_name: row.cities?.name,
-    quantity: row.inventory?.[0]?.quantity !== undefined && row.inventory?.[0]?.quantity !== null
-      ? Number(row.inventory[0].quantity)
+    quantity: row.inventory?.quantity !== undefined && row.inventory?.quantity !== null
+      ? Number(row.inventory.quantity)
       : undefined,
-    min_quantity: row.inventory?.[0]?.min_quantity !== undefined && row.inventory?.[0]?.min_quantity !== null
-      ? Number(row.inventory[0].min_quantity)
+    min_quantity: row.inventory?.min_quantity !== undefined && row.inventory?.min_quantity !== null
+      ? Number(row.inventory.min_quantity)
       : undefined,
   }));
 };
