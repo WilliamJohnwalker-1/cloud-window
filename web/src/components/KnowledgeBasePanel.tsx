@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { BookOpen, X, Upload, Download, Trash2, FileText } from 'lucide-react';
 import { useKnowledgeBaseStore } from '../store/useKnowledgeBaseStore';
 import { useAppStore } from '../store/useAppStore';
@@ -6,11 +6,20 @@ import { canViewKnowledgeBase, canManageKnowledgeBase } from '../utils/permissio
 import { supabase } from '../lib/supabase';
 
 export function KnowledgeBasePanel() {
+  const floatingSize = 56;
+  const floatingEdgePadding = 8;
+  const floatingDefaultOffset = 32;
   const { user } = useAppStore();
   const { files, isLoading, fetchFiles, uploadFile, deleteFile } = useKnowledgeBaseStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [floatingPosition, setFloatingPosition] = useState({ x: 0, y: 0 });
+  const [floatingPositionReady, setFloatingPositionReady] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const dragOriginRef = useRef({ x: 0, y: 0 });
+  const suppressClickRef = useRef(false);
 
   const canView = canViewKnowledgeBase(user?.role);
   const canManage = canManageKnowledgeBase(user?.role);
@@ -21,7 +30,100 @@ export function KnowledgeBasePanel() {
     }
   }, [canView, isOpen, fetchFiles]);
 
+  const clampFloatingPosition = useCallback((x: number, y: number) => {
+    const maxX = Math.max(
+      floatingEdgePadding,
+      window.innerWidth - floatingSize - floatingEdgePadding,
+    );
+    const maxY = Math.max(
+      floatingEdgePadding,
+      window.innerHeight - floatingSize - floatingEdgePadding,
+    );
+
+    return {
+      x: Math.min(maxX, Math.max(floatingEdgePadding, x)),
+      y: Math.min(maxY, Math.max(floatingEdgePadding, y)),
+    };
+  }, []);
+
+  useEffect(() => {
+    const initial = clampFloatingPosition(
+      window.innerWidth - floatingSize - floatingDefaultOffset,
+      window.innerHeight - floatingSize - floatingDefaultOffset,
+    );
+    setFloatingPosition(initial);
+    dragOriginRef.current = initial;
+    setFloatingPositionReady(true);
+
+    const handleResize = () => {
+      setFloatingPosition((prev) => {
+        const next = clampFloatingPosition(prev.x, prev.y);
+        dragOriginRef.current = next;
+        return next;
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [clampFloatingPosition]);
+
+  useEffect(() => {
+    const handlePointerMove = (clientX: number, clientY: number) => {
+      if (!isDraggingRef.current) return;
+
+      const deltaX = clientX - dragStartRef.current.x;
+      const deltaY = clientY - dragStartRef.current.y;
+      if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+        suppressClickRef.current = true;
+      }
+
+      const next = clampFloatingPosition(
+        dragOriginRef.current.x + deltaX,
+        dragOriginRef.current.y + deltaY,
+      );
+      setFloatingPosition(next);
+      dragOriginRef.current = next;
+      dragStartRef.current = { x: clientX, y: clientY };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      handlePointerMove(event.clientX, event.clientY);
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      handlePointerMove(touch.clientX, touch.clientY);
+    };
+
+    const handlePointerEnd = () => {
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handlePointerEnd);
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handlePointerEnd);
+    window.addEventListener('touchcancel', handlePointerEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handlePointerEnd);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handlePointerEnd);
+      window.removeEventListener('touchcancel', handlePointerEnd);
+    };
+  }, [clampFloatingPosition]);
+
   if (!canView) return null;
+
+  const handleDragStart = (clientX: number, clientY: number): void => {
+    isDraggingRef.current = true;
+    suppressClickRef.current = false;
+    dragStartRef.current = { x: clientX, y: clientY };
+  };
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -119,8 +221,28 @@ export function KnowledgeBasePanel() {
     <>
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-accent rounded-full shadow-lg flex items-center justify-center hover:bg-accent/90 transition-transform hover:scale-105 z-40"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          handleDragStart(event.clientX, event.clientY);
+        }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          if (!touch) return;
+          handleDragStart(touch.clientX, touch.clientY);
+        }}
+        onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+          }
+          setIsOpen(true);
+        }}
+        className="fixed w-14 h-14 bg-accent rounded-full shadow-lg flex items-center justify-center hover:bg-accent/90 transition-transform hover:scale-105 z-40"
+        style={floatingPositionReady ? {
+          left: floatingPosition.x,
+          top: floatingPosition.y,
+          touchAction: 'none',
+        } : { visibility: 'hidden' }}
         title="知识库"
       >
         <BookOpen size={24} className="text-white" />

@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
+  Dimensions,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Modal,
   FlatList,
   ActivityIndicator,
   Alert,
+  PanResponder,
 } from 'react-native';
 import { BookOpen, X, Upload, FileText, Trash2, Download } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -30,6 +33,7 @@ export default function KnowledgeBaseFloatingBall() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [position, setPosition] = useState({ x: 18, y: 140 });
 
   const canView = canViewKnowledgeBase(user?.role);
   const canManage = canManageKnowledgeBase(user?.role);
@@ -43,6 +47,47 @@ export default function KnowledgeBaseFloatingBall() {
   if (!canView) {
     return null;
   }
+
+  const clampPosition = (x: number, y: number): { x: number; y: number } => {
+    const { width, height } = Dimensions.get('window');
+    const minX = 8;
+    const maxX = Math.max(8, width - 56 - 8);
+    const minY = 80;
+    const maxY = Math.max(80, height - 56 - 140);
+    return {
+      x: Math.min(maxX, Math.max(minX, x)),
+      y: Math.min(maxY, Math.max(minY, y)),
+    };
+  };
+
+  const panResponder = useMemo(() => {
+    let startX = 0;
+    let startY = 0;
+    let moved = false;
+
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        startX = position.x;
+        startY = position.y;
+        moved = false;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (Math.abs(gestureState.dx) > 3 || Math.abs(gestureState.dy) > 3) {
+          moved = true;
+        }
+        const next = clampPosition(startX + gestureState.dx, startY + gestureState.dy);
+        setPosition(next);
+      },
+      onPanResponderRelease: () => {
+        if (!moved) {
+          setModalVisible(true);
+        }
+      },
+      onPanResponderTerminationRequest: () => false,
+    });
+  }, [position.x, position.y]);
 
   const handleUpload = async () => {
     try {
@@ -174,13 +219,19 @@ export default function KnowledgeBaseFloatingBall() {
 
   return (
     <>
-      <TouchableOpacity
-        style={[styles.floatingBall, { backgroundColor: theme.pink }]}
-        onPress={() => setModalVisible(true)}
-        activeOpacity={0.8}
+      <Pressable
+        style={[
+          styles.floatingBall,
+          {
+            backgroundColor: theme.pink,
+            left: position.x,
+            top: position.y,
+          },
+        ]}
+        {...panResponder.panHandlers}
       >
         <BookOpen size={24} color="#FFF" />
-      </TouchableOpacity>
+      </Pressable>
 
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
         <View style={[styles.modalContainer, { backgroundColor: theme.background }]}>
@@ -234,8 +285,6 @@ function decodeBase64(base64: string): Uint8Array {
 const styles = StyleSheet.create({
   floatingBall: {
     position: 'absolute',
-    right: 20,
-    bottom: 100,
     width: 56,
     height: 56,
     borderRadius: 28,

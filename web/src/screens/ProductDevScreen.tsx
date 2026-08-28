@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Edit2, Plus, Trash2, Calendar, FileText, ChevronRight, Lightbulb } from 'lucide-react';
+import { Edit2, Plus, Trash2, Calendar, FileText, ChevronRight, Lightbulb, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { useAppStore } from '../store/useAppStore';
@@ -139,6 +139,7 @@ export const ProductDevScreen: React.FC = () => {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
   const [stageFilter, setStageFilter] = useState<DevelopmentStage | 'all'>('all');
+  const [searchKeyword, setSearchKeyword] = useState('');
 
   const [form, setForm] = useState({
     name: '',
@@ -174,9 +175,19 @@ export const ProductDevScreen: React.FC = () => {
   }, [projects]);
 
   const filteredProjects = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    const keywordFilteredProjects = keyword
+      ? projects.filter((project) => {
+          const haystack = [project.name, project.description || '', project.notes || '']
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(keyword);
+        })
+      : projects;
+
     const stageFilteredProjects = stageFilter === 'all'
-      ? projects
-      : projects.filter((project) => project.stage === stageFilter);
+      ? keywordFilteredProjects
+      : keywordFilteredProjects.filter((project) => project.stage === stageFilter);
 
     if (activeFilter === 'all') {
       return stageFilteredProjects;
@@ -197,7 +208,7 @@ export const ProductDevScreen: React.FC = () => {
 
       return timingStatus === 'overdue';
     });
-  }, [activeFilter, projects, stageFilter]);
+  }, [activeFilter, projects, searchKeyword, stageFilter]);
 
   const editingProject = projects.find((p) => p.id === editingProjectId);
 
@@ -468,6 +479,17 @@ export const ProductDevScreen: React.FC = () => {
               {STAGE_LABELS[stage]}
             </button>
           ))}
+        </div>
+
+        <div className="relative w-full md:w-72">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+          <input
+            type="text"
+            value={searchKeyword}
+            onChange={(event) => setSearchKeyword(event.target.value)}
+            placeholder="搜索研发项目..."
+            className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder:text-white/30"
+          />
         </div>
 
         <button
