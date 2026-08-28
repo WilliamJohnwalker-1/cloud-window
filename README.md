@@ -433,7 +433,7 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
-### Web v1.3.17 (2026-08-28) - 研发体验与进货删单成本回滚加固
+### Web v1.3.17 (2026-08-28) - 进货总价口径+财务聚合入账+订单财务分页加固
 
 - 进货单总价链路补齐：数据库新增 `purchase_orders.total_cost_amount`（历史回填 + 建单写入），进货单列表/统计优先使用该字段，统一采购总价口径。
 - 进货财务链路收敛：确认到货改为“同一进货单聚合一条财务记录”（按 `source_purchase_order_id` upsert），避免多行重复记账。
@@ -445,7 +445,7 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 新增迁移：`supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`（进货总价字段、确认到货财务聚合、分页查询能力）。
 - 新增迁移：`supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`（删进货单累计成本回滚与兜底）。
 
-### Mobile v2.2.13 (2026-08-28) - 研发体验同步优化
+### Mobile v2.2.13 (2026-08-28) - 进货总价口径+财务聚合对齐+订单财务分页同步
 
 - 移动端订单页补齐分页能力：普通订单、进货单与“仅未到货”列表均支持上一页/下一页与页码跳转。
 - 移动端财务页补齐分页能力：流水列表支持上一页/下一页与页码跳转。
