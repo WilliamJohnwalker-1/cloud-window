@@ -38,6 +38,7 @@ interface CartItem {
 type StatsRange = 'day' | 'week' | 'month' | 'year' | 'all' | 'range';
 
 export default function OrdersScreen() {
+  const pageSize = 20;
   const {
     user,
     products,
@@ -119,6 +120,8 @@ export default function OrdersScreen() {
   const [showQuantityInput, setShowQuantityInput] = useState<string | null>(null);
   const [statsExpanded, setStatsExpanded] = useState(false);
   const [statsMounted, setStatsMounted] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [manualPageInput, setManualPageInput] = useState('1');
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [orderModalDistributorId, setOrderModalDistributorId] = useState<string | null>(null);
   const [orderModalStoreId, setOrderModalStoreId] = useState<string | null>(null);
@@ -1113,25 +1116,92 @@ export default function OrdersScreen() {
 
   const purchaseTotals = useMemo(() => {
     return displayPurchaseOrders.reduce((acc, order) => {
+      const retailTotal = (order.items || []).reduce((itemSum, item) => {
+        const deliveredQty = Number(item.delivered_quantity || 0);
+        const orderedQty = Number(item.ordered_quantity || 0);
+        const qty = deliveredQty > 0 ? deliveredQty : orderedQty;
+        const retailPrice = Number(products.find((product) => product.id === item.product_id)?.price || 0);
+        return itemSum + qty * retailPrice;
+      }, 0);
+      acc.retail += retailTotal;
+
+      if (Number.isFinite(Number(order.total_cost_amount))) {
+        acc.totalCost += Number(order.total_cost_amount || 0);
+        return acc;
+      }
+
       order.items?.forEach((item) => {
         const orderedQty = Number(item.ordered_quantity || 0);
         const unitCost = Number(item.unit_cost || 0);
-        const lineTotal = orderedQty * unitCost;
-        acc.total += lineTotal;
+        acc.totalCost += orderedQty * unitCost;
       });
       return acc;
-    }, { total: 0 });
-  }, [displayPurchaseOrders]);
+    }, { totalCost: 0, retail: 0 });
+  }, [displayPurchaseOrders, products]);
 
   const summaryOrders = filteredOrders.filter((order) => order.order_kind !== 'purchase');
+  const pagedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredOrders.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredOrders]);
+  const pagedPurchaseOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return displayPurchaseOrders.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, displayPurchaseOrders]);
+  const pagedUndeliveredItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return undeliveredItems.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, undeliveredItems]);
+  const totalPages = useMemo(() => {
+    if (selectedOrderKind === 'purchase') {
+      const sourceLength = showUndeliveredOnly ? undeliveredItems.length : displayPurchaseOrders.length;
+      return Math.max(1, Math.ceil(sourceLength / pageSize));
+    }
+    return Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  }, [displayPurchaseOrders.length, filteredOrders.length, selectedOrderKind, showUndeliveredOnly, undeliveredItems.length]);
   const totalRetail = selectedOrderKind === 'purchase'
-    ? purchaseTotals.total
+    ? purchaseTotals.retail
     : summaryOrders.reduce((sum, o) => sum + Number(o.total_retail_amount || 0), 0);
   const totalDiscount = selectedOrderKind === 'purchase'
-    ? purchaseTotals.total
+    ? purchaseTotals.totalCost
     : summaryOrders.reduce((sum, o) => sum + Number(o.total_discount_amount || 0), 0);
-  const summaryRetailLabel = selectedOrderKind === 'purchase' ? '进货成本' : '零售总价';
-  const summaryDiscountLabel = selectedOrderKind === 'purchase' ? '进货总价' : '折扣总价';
+  const summaryRetailLabel = selectedOrderKind === 'purchase' ? '进货零售总价' : '零售总价';
+  const summaryDiscountLabel = selectedOrderKind === 'purchase' ? '进货采购总价' : '折扣总价';
+
+  const handleManualPageJump = useCallback(() => {
+    const parsedPage = Number.parseInt(manualPageInput, 10);
+    if (!Number.isFinite(parsedPage)) {
+      setManualPageInput(String(currentPage));
+      return;
+    }
+    const nextPage = Math.min(totalPages, Math.max(1, parsedPage));
+    setCurrentPage(nextPage);
+    setManualPageInput(String(nextPage));
+  }, [currentPage, manualPageInput, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    rangeEndDate,
+    rangeStartDate,
+    searchText,
+    selectedOrderCityId,
+    selectedOrderKind,
+    selectedOrderProvinceId,
+    selectedOrderStoreId,
+    showUndeliveredOnly,
+    statsRange,
+  ]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setManualPageInput(String(currentPage));
+  }, [currentPage]);
 
   const renderOrder = ({ item }: { item: Order }) => (
     <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
@@ -1266,9 +1336,13 @@ export default function OrdersScreen() {
         ) : null}
 
         <View style={styles.orderItemsSummary}>
-          <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
+          <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}> 
             共 {(item.items || []).length} 种商品，待到货 {pendingItems.length} 项
           </Text>
+        </View>
+
+        <View style={styles.orderTotals}>
+          <Text style={[styles.detailText, { color: theme.textSecondary }]}>采购成本: {Number(item.total_cost_amount || 0).toFixed(2)}元</Text>
         </View>
 
         {(item.items || []).map((purchaseItem) => (
@@ -1681,7 +1755,7 @@ export default function OrdersScreen() {
 
           {showUndeliveredOnly ? (
             <FlatList
-              data={undeliveredItems}
+              data={pagedUndeliveredItems}
               keyExtractor={(item) => `${item.purchase_order_id}-${item.item_id}`}
               contentContainerStyle={styles.list}
               refreshControl={<RefreshControl refreshing={refreshing || loadingUndeliveredItems} onRefresh={onRefresh} tintColor={Colors.pink} />}
@@ -1703,7 +1777,7 @@ export default function OrdersScreen() {
             />
           ) : (
             <FlatList
-              data={displayPurchaseOrders}
+              data={pagedPurchaseOrders}
               keyExtractor={(item) => item.id}
               renderItem={renderPurchaseOrder}
               contentContainerStyle={styles.list}
@@ -1719,7 +1793,7 @@ export default function OrdersScreen() {
         </>
       ) : (
         <FlatList
-          data={filteredOrders}
+          data={pagedOrders}
           keyExtractor={(item) => item.id}
           renderItem={renderOrder}
           contentContainerStyle={styles.list}
@@ -1731,6 +1805,40 @@ export default function OrdersScreen() {
             </View>
           }
         />
+      )}
+
+      {((selectedOrderKind === 'purchase' && (showUndeliveredOnly ? undeliveredItems.length > 0 : displayPurchaseOrders.length > 0))
+        || (selectedOrderKind !== 'purchase' && filteredOrders.length > 0)) && (
+        <View style={styles.paginationRow}> 
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage <= 1 && styles.paginationButtonDisabled]}
+            onPress={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1}
+          >
+            <Text style={styles.paginationButtonText}>上一页</Text>
+          </TouchableOpacity>
+          <Text style={styles.paginationInfo}>第 {currentPage} / {totalPages} 页</Text>
+          <TextInput
+            value={manualPageInput}
+            onChangeText={setManualPageInput}
+            style={styles.paginationInput}
+            keyboardType="number-pad"
+            placeholder="页码"
+            placeholderTextColor={theme.textTertiary}
+            returnKeyType="done"
+            onSubmitEditing={handleManualPageJump}
+          />
+          <TouchableOpacity style={styles.paginationJumpButton} onPress={handleManualPageJump}>
+            <Text style={styles.paginationButtonText}>跳转</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage >= totalPages && styles.paginationButtonDisabled]}
+            onPress={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages}
+          >
+            <Text style={styles.paginationButtonText}>下一页</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       <Modal visible={purchaseConfirmPayload !== null} animationType="fade" transparent>
@@ -3038,5 +3146,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#fff',
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginHorizontal: 10,
+    marginBottom: 10,
+    gap: 8,
+  },
+  paginationButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  paginationJumpButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surfaceSecondary,
+  },
+  paginationButtonDisabled: {
+    opacity: 0.5,
+  },
+  paginationButtonText: {
+    fontSize: 12,
+    color: Colors.textPrimary,
+    fontWeight: '600',
+  },
+  paginationInfo: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  paginationInput: {
+    width: 58,
+    height: 32,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surfaceSecondary,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 });

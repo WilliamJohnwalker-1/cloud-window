@@ -58,6 +58,7 @@ interface TransactionFormState {
 const getToday = (): string => new Date().toISOString().slice(0, 10);
 
 export default function FinanceScreen() {
+  const pageSize = 20;
   const user = useAppStore((state) => state.user);
   const cities = useAppStore((state) => state.cities);
   const stores = useAppStore((state) => state.stores);
@@ -91,6 +92,8 @@ export default function FinanceScreen() {
   const [storeFilter, setStoreFilter] = useState('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [manualPageInput, setManualPageInput] = useState('1');
   const [form, setForm] = useState<TransactionFormState>({
     transaction_type: 'expense',
     category: '',
@@ -143,6 +146,13 @@ export default function FinanceScreen() {
     });
   }, [categoryFilter, cityFilter, endDateFilter, startDateFilter, storeFilter, transactions, typeFilter]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+
+  const pagedTransactions = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredTransactions.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredTransactions, pageSize]);
+
   const hasActiveFilters = typeFilter !== 'all'
     || categoryFilter !== 'all'
     || cityFilter !== 'all'
@@ -191,6 +201,31 @@ export default function FinanceScreen() {
       setCategoryFilter('all');
     }
   }, [categoryFilter, filterCategoryOptions]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [typeFilter, categoryFilter, cityFilter, storeFilter, startDateFilter, endDateFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setManualPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const handlePageJump = (): void => {
+    const parsedPage = Number.parseInt(manualPageInput, 10);
+    if (!Number.isFinite(parsedPage)) {
+      setManualPageInput(String(currentPage));
+      return;
+    }
+    const nextPage = Math.min(totalPages, Math.max(1, parsedPage));
+    setCurrentPage(nextPage);
+    setManualPageInput(String(nextPage));
+  };
 
   const resetForm = (): void => {
     setEditingId(null);
@@ -516,7 +551,7 @@ export default function FinanceScreen() {
               {transactions.length === 0 ? '暂无财务流水' : '当前筛选条件下暂无财务流水'}
             </Text>
           </View>
-        ) : filteredTransactions.map((tx) => (
+        ) : pagedTransactions.map((tx) => (
           <TouchableOpacity key={tx.id} style={styles.item} onPress={() => handleOpenEdit(tx.id)} activeOpacity={canEdit ? 0.8 : 1}>
             <View style={styles.itemTopRow}>
               <Text style={styles.itemTitle}>{tx.category}</Text>
@@ -535,6 +570,39 @@ export default function FinanceScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      {filteredTransactions.length > 0 ? (
+        <View style={styles.paginationRow}>
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage <= 1 && styles.paginationButtonDisabled]}
+            onPress={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1}
+          >
+            <Text style={styles.paginationButtonText}>上一页</Text>
+          </TouchableOpacity>
+          <Text style={styles.paginationInfo}>第 {currentPage} / {totalPages} 页</Text>
+          <TextInput
+            value={manualPageInput}
+            onChangeText={setManualPageInput}
+            style={styles.paginationInput}
+            keyboardType="number-pad"
+            placeholder="页码"
+            placeholderTextColor={Colors.textSecondary}
+            returnKeyType="done"
+            onSubmitEditing={handlePageJump}
+          />
+          <TouchableOpacity style={styles.paginationJumpButton} onPress={handlePageJump}>
+            <Text style={styles.paginationButtonText}>跳转</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage >= totalPages && styles.paginationButtonDisabled]}
+            onPress={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages}
+          >
+            <Text style={styles.paginationButtonText}>下一页</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <Modal visible={formVisible} transparent animationType="slide" onRequestClose={resetForm}>
         <View style={styles.modalOverlay}>
@@ -962,5 +1030,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: Spacing.sm,
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: Spacing.sm,
+  },
+  paginationButton: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  paginationButtonText: {
+    color: Colors.textPrimary,
+    fontWeight: '600',
+  },
+  paginationButtonDisabled: {
+    opacity: 0.5,
+  },
+  paginationJumpButton: {
+    backgroundColor: Colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  paginationInfo: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+  },
+  paginationInput: {
+    width: 58,
+    height: 32,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surfaceSecondary,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    includeFontPadding: false,
   },
 });

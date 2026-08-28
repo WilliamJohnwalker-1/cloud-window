@@ -14,7 +14,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Plus, X, ChevronRight, Trash2, Edit2, Calendar, FileText, CheckCircle } from 'lucide-react-native';
+import { Plus, X, ChevronRight, Trash2, Edit2, Calendar, FileText, CheckCircle, Search } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 
 import { useProductDevStore } from '../store/useProductDevStore';
@@ -142,6 +142,7 @@ export default function ProductDevScreen() {
   const [editingProject, setEditingProject] = useState<ProductDevelopment | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProjectQuickFilter>('all');
   const [stageFilter, setStageFilter] = useState<DevelopmentStage | 'all'>('all');
+  const [searchText, setSearchText] = useState('');
   
   // Form state
   const [name, setName] = useState('');
@@ -177,9 +178,19 @@ export default function ProductDevScreen() {
   }, [projects]);
 
   const filteredProjects = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    const keywordFilteredProjects = keyword
+      ? projects.filter((project) => {
+          const haystack = [project.name, project.description || '', project.notes || '']
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(keyword);
+        })
+      : projects;
+
     const stageFilteredProjects = stageFilter === 'all'
-      ? projects
-      : projects.filter((project) => project.stage === stageFilter);
+      ? keywordFilteredProjects
+      : keywordFilteredProjects.filter((project) => project.stage === stageFilter);
 
     if (activeFilter === 'all') {
       return stageFilteredProjects;
@@ -200,7 +211,7 @@ export default function ProductDevScreen() {
 
       return timingStatus === 'overdue';
     });
-  }, [activeFilter, projects, stageFilter]);
+  }, [activeFilter, projects, searchText, stageFilter]);
 
   const boundProduct = useMemo(() => {
     if (!editingProject || editingProject.stage !== 'launched') {
@@ -333,6 +344,7 @@ export default function ProductDevScreen() {
               Toast.show({ type: 'error', text1: '推进失败', text2: error.message });
             } else {
               Toast.show({ type: 'success', text1: '成功', text2: `已推进至 ${STAGE_LABELS[nextStage]}` });
+              setModalVisible(false);
             }
           },
         },
@@ -492,6 +504,18 @@ export default function ProductDevScreen() {
           ))}
         </View>
       </LinearGradient>
+
+      <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }]}> 
+        <Search size={18} color={theme.textTertiary} />
+        <TextInput
+          style={[styles.searchInput, { color: theme.textPrimary }]}
+          placeholder="搜索研发项目..."
+          placeholderTextColor={theme.textTertiary}
+          value={searchText}
+          onChangeText={setSearchText}
+          textAlignVertical="center"
+        />
+      </View>
 
       <FlatList
         data={filteredProjects}
@@ -752,6 +776,25 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: Colors.pink,
+  },
+  searchContainer: {
+    borderRadius: Radius.pill,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    height: 40,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: Spacing.sm,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingVertical: 0,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   statItem: {
     flex: 1,

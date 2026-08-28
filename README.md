@@ -158,6 +158,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
 58. 执行 `supabase/migrate-v8.2-yunchuang-purchase-all-cities.sql`
 59. 执行 `supabase/migrate-v8.3-inventory-conflict-constraints.sql`
+60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
+61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -220,6 +222,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 57. 执行 `supabase/migrate-v8.1-product-dev-pinned.sql`
 58. 执行 `supabase/migrate-v8.2-yunchuang-purchase-all-cities.sql`
 59. 执行 `supabase/migrate-v8.3-inventory-conflict-constraints.sql`
+60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
+61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -235,7 +239,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.16）
+### 5. 启动 Web 端（v1.3.17）
 
 ```bash
 npm run web:v2
@@ -428,6 +432,27 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.17 (2026-08-28) - 研发体验与进货删单成本回滚加固
+
+- 进货单总价链路补齐：数据库新增 `purchase_orders.total_cost_amount`（历史回填 + 建单写入），进货单列表/统计优先使用该字段，统一采购总价口径。
+- 进货财务链路收敛：确认到货改为“同一进货单聚合一条财务记录”（按 `source_purchase_order_id` upsert），避免多行重复记账。
+- 订单页与财务页补齐分页能力：Web 新增上一页/下一页 + 页码跳转，覆盖普通订单、进货单、未到货清单与财务流水。
+- Web 研发模块新增“仅项目内搜索”，搜索范围限制在项目名称/描述/备注，避免串入其他模块内容。
+- Web 研发项目推进下一阶段后自动关闭编辑弹窗，避免阶段变更后定位困难与信息重置感知。
+- 知识库悬浮入口升级为可拖动交互（保留点击打开），支持 mouse/touch 拖拽并做窗口边界夹紧。
+- 进货删单关键风险修复：新增 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`，删除进货单时按实到数量回滚累计成本字段，并在累计基线未初始化时自动跳过。
+- 新增迁移：`supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`（进货总价字段、确认到货财务聚合、分页查询能力）。
+- 新增迁移：`supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`（删进货单累计成本回滚与兜底）。
+
+### Mobile v2.2.13 (2026-08-28) - 研发体验同步优化
+
+- 移动端订单页补齐分页能力：普通订单、进货单与“仅未到货”列表均支持上一页/下一页与页码跳转。
+- 移动端财务页补齐分页能力：流水列表支持上一页/下一页与页码跳转。
+- 移动端进货单展示与统计对齐 `total_cost_amount`，补齐“进货零售总价/进货采购总价”口径。
+- 移动端研发模块新增“仅项目内搜索”，保持与 Web 同口径，不检索其他模块内容。
+- 移动端研发项目推进下一阶段后自动关闭编辑弹窗，减少转阶段后回查成本。
+- 与 Web 同步进货删单累计成本回滚策略（数据库层），移动端无需额外前端分叉逻辑。
 
 ### Web v1.3.16 (2026-08-19) - 云窗进货跨城市修复
 

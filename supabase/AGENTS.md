@@ -57,6 +57,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v8.1-product-dev-pinned.sql`: product development pinned projects.
 - `migrate-v8.2-yunchuang-purchase-all-cities.sql`: allow 云窗 purchase orders across product cities while receiving into total warehouse.
 - `migrate-v8.3-inventory-conflict-constraints.sql`: ensure inventory/store_inventory upsert unique constraints for purchase delivery.
+- `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`: add purchase_orders.total_cost_amount, backfill historical totals, aggregate purchase finance writes by purchase order, and support pagination scenarios.
+- `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`: rollback product cumulative cost fields when deleting purchase orders (skip rollback if cumulative baseline is uninitialized).
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -113,6 +115,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 49. `migrate-v8.1-product-dev-pinned.sql`
 50. `migrate-v8.2-yunchuang-purchase-all-cities.sql`
 51. `migrate-v8.3-inventory-conflict-constraints.sql`
+52. `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
+53. `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -166,6 +170,8 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 49. `migrate-v8.1-product-dev-pinned.sql`
 50. `migrate-v8.2-yunchuang-purchase-all-cities.sql`
 51. `migrate-v8.3-inventory-conflict-constraints.sql`
+52. `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
+53. `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 
 ## TABLES
 

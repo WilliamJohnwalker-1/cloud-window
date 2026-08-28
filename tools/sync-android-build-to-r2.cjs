@@ -296,7 +296,25 @@ const main = () => {
   mkdirSync(artifactDir, { recursive: true });
 
   console.log(`📦 Downloading APK from ${artifactUrl}`);
-  run('curl', ['-L', artifactUrl, '-o', artifactFile]);
+  runWithRetry(
+    'curl',
+    [
+      '-L',
+      '--retry',
+      '20',
+      '--retry-delay',
+      '5',
+      '--retry-all-errors',
+      '-C',
+      '-',
+      artifactUrl,
+      '-o',
+      artifactFile,
+    ],
+    {},
+    3,
+    5000,
+  );
 
   console.log(`☁️ Uploading APK to R2: ${opts.bucket}/${apkKey}`);
   run('npx', ['wrangler', 'r2', 'object', 'put', `${opts.bucket}/${apkKey}`, '--file', artifactFile, '--remote']);
