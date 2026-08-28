@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.13`
-- Current web baseline: `v1.3.17`
+- Current mobile baseline: `v2.2.14`
+- Current web baseline: `v1.3.18`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -276,6 +276,7 @@ Before committing:
 - Latest purchase-order total+pagination wave: 新增 `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`，补齐 `purchase_orders.total_cost_amount` 与历史回填；确认到货财务改按进货单聚合写入；双端订单页与财务页补齐分页+页码跳转。
 - Latest product-dev visibility wave: Web 侧边栏菜单改可滚动，双端研发页新增进行中/临近/逾期点击筛选；移动端研发列表压缩为项目名高密度视图；双端“已上架”支持商品 ID/EAN-13 绑定并展示进货到货进度监控。
 - Latest product-dev + purchase-delete hardening wave: Web 知识库悬浮入口支持拖动且保留点击打开；双端研发模块补齐“仅项目内搜索”并在推进阶段后自动退出编辑框；新增 `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`，删除进货单时按实到数量回滚 `products.cumulative_cost_quantity/cumulative_cost_amount`，并在累计基线未初始化时跳过回滚。
+- Latest purchase-order date-filter hotfix: 双端订单页“进货单”时间筛选改按 `order_date`（业务日期）生效；缺失业务日期的历史单据自动回退 `created_at`，避免筛选丢单。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

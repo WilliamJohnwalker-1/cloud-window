@@ -425,6 +425,14 @@ export default function OrdersScreen() {
     return date.getFullYear() === now.getFullYear();
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
+  const resolvePurchaseOrderFilterDate = useCallback((order: PurchaseOrder): string => {
+    const businessDate = order.order_date?.trim();
+    if (businessDate) {
+      return `${businessDate}T00:00:00`;
+    }
+    return order.created_at;
+  }, []);
+
   const rangedOrders = useMemo(() => {
     return baseOrders.filter((order) => matchesStatsRange(order.created_at));
   }, [baseOrders, matchesStatsRange]);
@@ -443,8 +451,8 @@ export default function OrdersScreen() {
   }, [rangedOrders, searchText]);
 
   const rangedPurchaseOrders = useMemo(() => {
-    return filteredPurchaseOrders.filter((order) => matchesStatsRange(order.created_at));
-  }, [filteredPurchaseOrders, matchesStatsRange]);
+    return filteredPurchaseOrders.filter((order) => matchesStatsRange(resolvePurchaseOrderFilterDate(order)));
+  }, [filteredPurchaseOrders, matchesStatsRange, resolvePurchaseOrderFilterDate]);
 
   const displayPurchaseOrders = useMemo(() => {
     let list = [...rangedPurchaseOrders];
