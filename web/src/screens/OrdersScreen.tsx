@@ -335,6 +335,14 @@ export const OrdersScreen: React.FC = () => {
       .filter((order) => matchesStatsRange(order.created_at));
   }, [baseOrders, matchesStatsRange, orderCityProvinceMap, refundViewFilter, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
 
+  const resolvePurchaseOrderFilterDate = useCallback((order: PurchaseOrder): string => {
+    const businessDate = order.order_date?.trim();
+    if (businessDate) {
+      return `${businessDate}T00:00:00`;
+    }
+    return order.created_at;
+  }, []);
+
   const filteredPurchaseOrders = useMemo(() => {
     let result = purchaseOrders;
 
@@ -359,8 +367,8 @@ export const OrdersScreen: React.FC = () => {
       result = result.filter((order) => order.store_id === selectedFilterStoreId);
     }
 
-    return result.filter((order) => matchesStatsRange(order.created_at));
-  }, [filter, matchesStatsRange, orderCityProvinceMap, purchaseOrders, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId]);
+    return result.filter((order) => matchesStatsRange(resolvePurchaseOrderFilterDate(order)));
+  }, [filter, matchesStatsRange, orderCityProvinceMap, purchaseOrders, resolvePurchaseOrderFilterDate, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId]);
 
   const revenueOrders = useMemo(() => {
     return filteredOrders.filter((order) => {
