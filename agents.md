@@ -224,10 +224,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql -> 47. migrate-v6.6-inventory-log-completion.sql -> 48. migrate-v6.7-refund-reversal-backfill.sql -> 49. migrate-v6.8-retail-income-category-normalization.sql -> 50. migrate-v7.0-store-invoice-fields.sql -> 51. migrate-v7.1-finance-city-binding.sql -> 52. migrate-v7.2-purchase-order-separation.sql -> 53. migrate-v7.3-retail-single-pool-and-log-completion.sql -> 54. migrate-v7.4-store-invoice-contact-fields.sql -> 55. migrate-v7.5-external-channel-orders.sql -> 56. migrate-v8.0-product-dev-and-order-date.sql -> 57. migrate-v8.1-product-dev-pinned.sql -> 58. migrate-v8.2-yunchuang-purchase-all-cities.sql -> 59. migrate-v8.3-inventory-conflict-constraints.sql
+41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql -> 47. migrate-v6.6-inventory-log-completion.sql -> 48. migrate-v6.7-refund-reversal-backfill.sql -> 49. migrate-v6.8-retail-income-category-normalization.sql -> 50. migrate-v7.0-store-invoice-fields.sql -> 51. migrate-v7.1-finance-city-binding.sql -> 52. migrate-v7.2-purchase-order-separation.sql -> 53. migrate-v7.3-retail-single-pool-and-log-completion.sql -> 54. migrate-v7.4-store-invoice-contact-fields.sql -> 55. migrate-v7.5-external-channel-orders.sql -> 56. migrate-v8.0-product-dev-and-order-date.sql -> 57. migrate-v8.1-product-dev-pinned.sql -> 58. migrate-v8.2-yunchuang-purchase-all-cities.sql -> 59. migrate-v8.3-inventory-conflict-constraints.sql -> 60. migrate-v8.4-purchase-order-total-and-finance-pagination.sql -> 61. migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-59 same as above
+1. migrate-v2.sql -> 2-61 same as above
 
 ## GOTCHAS
 
@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.12`
-- Current web baseline: `v1.3.16`
+- Current mobile baseline: `v2.2.13`
+- Current web baseline: `v1.3.17`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -273,7 +273,9 @@ Before committing:
 - Latest delivery+product-dev enhancement wave: Web 商品编辑弹窗新增图片加号直传；双端上货单模板升级为新抬头样式（A1~I8 合并）并新增参考图列；双端研发模块新增最多2个项目置顶、按当前阶段筛选（全阶段）、阶段文案更新（约稿/打样/生产）与新建阶段可选，回退阶段后保持编辑弹窗打开便于继续补充备注；迁移链延伸至 `migrate-v8.1-product-dev-pinned.sql`。
 - Latest yunchuang purchase hotfix: 双端进货选择“云窗”时改为展示所有城市商品，并按商品城市拆单；后端 `migrate-v8.2-yunchuang-purchase-all-cities.sql` 放开云窗店铺跨城市建单，到货仍入总仓库存。
 - Latest purchase-delivery constraint hotfix: 新增 `migrate-v8.3-inventory-conflict-constraints.sql` 补齐历史库 `inventory` / `store_inventory` upsert 唯一约束，修复确认到货 `ON CONFLICT` 失败。
+- Latest purchase-order total+pagination wave: 新增 `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`，补齐 `purchase_orders.total_cost_amount` 与历史回填；确认到货财务改按进货单聚合写入；双端订单页与财务页补齐分页+页码跳转。
 - Latest product-dev visibility wave: Web 侧边栏菜单改可滚动，双端研发页新增进行中/临近/逾期点击筛选；移动端研发列表压缩为项目名高密度视图；双端“已上架”支持商品 ID/EAN-13 绑定并展示进货到货进度监控。
+- Latest product-dev + purchase-delete hardening wave: Web 知识库悬浮入口支持拖动且保留点击打开；双端研发模块补齐“仅项目内搜索”并在推进阶段后自动退出编辑框；新增 `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`，删除进货单时按实到数量回滚 `products.cumulative_cost_quantity/cumulative_cost_amount`，并在累计基线未初始化时跳过回滚。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:
