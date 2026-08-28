@@ -239,7 +239,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.17）
+### 5. 启动 Web 端（v1.3.18）
 
 ```bash
 npm run web:v2
@@ -432,6 +432,16 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.18 (2026-08-28) - 进货单时间筛选切换为业务日期
+
+- 订单页“进货单”时间筛选口径由 `created_at` 切换为 `order_date`（业务日期），按当日/本周/本月/年度/自定义区间统一生效。
+- 兼容历史数据：若进货单缺失 `order_date`，筛选自动回退到 `created_at`，避免旧单据被误过滤。
+
+### Mobile v2.2.14 (2026-08-28) - 进货单时间筛选切换为业务日期
+
+- 移动端订单页“进货单”时间筛选口径由 `created_at` 切换为 `order_date`（业务日期），与 Web 保持一致。
+- 兼容历史数据：无 `order_date` 的历史进货单自动回退按 `created_at` 参与筛选。
 
 ### Web v1.3.17 (2026-08-28) - 进货总价口径+财务聚合入账+订单财务分页加固
 
