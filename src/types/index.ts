@@ -316,6 +316,7 @@ export interface PurchaseOrder {
   store_name?: string;
   city_id: string;
   city_name?: string;
+  total_cost_amount?: number;
   supplier_id?: string | null;
   supplier_name?: string | null;
   status: PurchaseOrderStatus;

@@ -71,6 +71,7 @@ type CartLineType = 'sale' | 'sample';
 const fallbackProductName = '云窗文创';
 
 export const OrdersScreen: React.FC = () => {
+  const pageSize = 20;
   const {
     orders,
     purchaseOrders,
@@ -155,6 +156,8 @@ export const OrdersScreen: React.FC = () => {
   const [submittingModify, setSubmittingModify] = useState(false);
   const [showQuantityStats, setShowQuantityStats] = useState(true);
   const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [manualPageInput, setManualPageInput] = useState('1');
   const orderCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.role === 'finance';
 
@@ -384,6 +387,69 @@ export const OrdersScreen: React.FC = () => {
     return filteredOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
   }, [filteredOrders]);
 
+  const purchaseOrdersTotalCost = useMemo(() => {
+    return filteredPurchaseOrders.reduce((sum, order) => {
+      if (Number.isFinite(Number(order.total_cost_amount))) {
+        return sum + Number(order.total_cost_amount || 0);
+      }
+      const fallbackCost = (order.items || []).reduce((itemSum, item) => (
+        itemSum + Number(item.ordered_quantity || 0) * Number(item.unit_cost || 0)
+      ), 0);
+      return sum + fallbackCost;
+    }, 0);
+  }, [filteredPurchaseOrders]);
+
+  const purchaseOrdersTotalRetail = useMemo(() => {
+    return filteredPurchaseOrders.reduce((sum, order) => {
+      const orderRetail = (order.items || []).reduce((itemSum, item) => {
+        const deliveredQty = Number(item.delivered_quantity || 0);
+        const orderedQty = Number(item.ordered_quantity || 0);
+        const qty = deliveredQty > 0 ? deliveredQty : orderedQty;
+        const retailPrice = Number(products.find((product) => product.id === item.product_id)?.price || 0);
+        return itemSum + qty * retailPrice;
+      }, 0);
+      return sum + orderRetail;
+    }, 0);
+  }, [filteredPurchaseOrders, products]);
+
+  const pagedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredOrders.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredOrders]);
+
+  const pagedPurchaseOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredPurchaseOrders.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredPurchaseOrders]);
+
+  const pagedUndeliveredItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return undeliveredItems.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, undeliveredItems]);
+
+  const totalPages = useMemo(() => {
+    if (selectedOrderKind === 'purchase') {
+      const sourceLength = showUndeliveredOnly ? undeliveredItems.length : filteredPurchaseOrders.length;
+      return Math.max(1, Math.ceil(sourceLength / pageSize));
+    }
+    return Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  }, [filteredOrders.length, filteredPurchaseOrders.length, selectedOrderKind, showUndeliveredOnly, undeliveredItems.length]);
+
+  const handlePageJump = useCallback(() => {
+    const parsedPage = Number.parseInt(manualPageInput, 10);
+    if (!Number.isFinite(parsedPage)) {
+      setManualPageInput(String(currentPage));
+      return;
+    }
+    const nextPage = Math.min(totalPages, Math.max(1, parsedPage));
+    setCurrentPage(nextPage);
+    setManualPageInput(String(nextPage));
+  }, [currentPage, manualPageInput, totalPages]);
+
+  const summaryOrderCount = selectedOrderKind === 'purchase'
+    ? filteredPurchaseOrders.length
+    : filteredOrders.length;
+
   const rangeLabel = useMemo(() => {
     switch (statsRange) {
       case 'day':
@@ -414,6 +480,16 @@ export const OrdersScreen: React.FC = () => {
   }, [selectedOrderKind]);
 
   const statsCopy = useMemo(() => {
+    if (selectedOrderKind === 'purchase') {
+      return {
+        orderCountLabel: `${rangeLabel}进货订单数`,
+        retailLabel: `${rangeLabel}进货零售总价`,
+        discountLabel: `${rangeLabel}进货采购总价`,
+        retailValue: purchaseOrdersTotalRetail,
+        discountValue: purchaseOrdersTotalCost,
+      };
+    }
+
     if (refundViewFilter === 'refunded') {
       return {
         orderCountLabel: `${rangeLabel}退款订单数`,
@@ -441,7 +517,18 @@ export const OrdersScreen: React.FC = () => {
       retailValue: totalRetail,
       discountValue: totalDiscount,
     };
-  }, [filteredDiscountTotal, filteredRetailTotal, rangeLabel, refundViewFilter, revenueTypeLabel, totalDiscount, totalRetail]);
+  }, [
+    filteredDiscountTotal,
+    filteredRetailTotal,
+    purchaseOrdersTotalRetail,
+    purchaseOrdersTotalCost,
+    rangeLabel,
+    refundViewFilter,
+    revenueTypeLabel,
+    selectedOrderKind,
+    totalDiscount,
+    totalRetail,
+  ]);
 
   const filteredProducts = useMemo(() => {
     let result = products;
@@ -674,6 +761,32 @@ export const OrdersScreen: React.FC = () => {
       setUndeliveredItems([]);
     }
   }, [selectedOrderKind]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    filter,
+    rangeEndDate,
+    rangeStartDate,
+    refundViewFilter,
+    searchKeyword,
+    selectedFilterCityId,
+    selectedFilterProvinceId,
+    selectedFilterStoreId,
+    selectedOrderKind,
+    showUndeliveredOnly,
+    statsRange,
+  ]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setManualPageInput(String(currentPage));
+  }, [currentPage]);
 
   const refreshUndeliveredItems = useCallback(async (): Promise<void> => {
     setLoadingUndeliveredItems(true);
@@ -1679,7 +1792,7 @@ export const OrdersScreen: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="bg-white/5 rounded-xl px-4 py-3">
             <p className="text-xs text-white/50">{statsCopy.orderCountLabel}</p>
-            <p className="text-xl font-black">{filteredOrders.length}</p>
+            <p className="text-xl font-black">{summaryOrderCount}</p>
           </div>
           <div className="bg-white/5 rounded-xl px-4 py-3">
             <p className="text-xs text-white/50">{statsCopy.retailLabel}</p>
@@ -1784,7 +1897,7 @@ export const OrdersScreen: React.FC = () => {
                 ) : undeliveredItems.length === 0 ? (
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-sm text-white/60">暂无未到货商品</div>
                 ) : (
-                  undeliveredItems.map((row) => (
+                  pagedUndeliveredItems.map((row) => (
                     <div key={`${row.purchase_order_id}-${row.item_id}`} className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="font-semibold">{row.product_name}</p>
@@ -1798,7 +1911,7 @@ export const OrdersScreen: React.FC = () => {
                 )}
               </div>
             ) : (
-              filteredPurchaseOrders.map((purchaseOrder, index) => {
+              pagedPurchaseOrders.map((purchaseOrder, index) => {
                 const pendingItems = (purchaseOrder.items || []).filter((item) => item.delivery_status !== 'delivered');
                 const canOperatePurchase = user?.role === 'admin' || user?.role === 'super_admin';
 
@@ -1822,6 +1935,7 @@ export const OrdersScreen: React.FC = () => {
                           <span>城市：{purchaseOrder.city_name || '-'}</span>
                           <span>店铺：{purchaseOrder.store_name || '-'}</span>
                           <span>供应商：{purchaseOrder.supplier_name || '未绑定'}</span>
+                          <span>采购成本：¥{Number(purchaseOrder.total_cost_amount || 0).toFixed(2)}</span>
                           {purchaseOrder.order_date && <span>业务日期：{purchaseOrder.order_date}</span>}
                           <span>创建时间：{new Date(purchaseOrder.created_at).toLocaleString()}</span>
                         </div>
@@ -1892,7 +2006,7 @@ export const OrdersScreen: React.FC = () => {
               })
             )}
           </>
-        ) : filteredOrders.map((order, index) => (
+        ) : pagedOrders.map((order, index) => (
           (() => {
             const resolvedOrder = getResolvedOrder(order.id) || order;
             const itemKinds = resolvedOrder.items.length;
@@ -2089,6 +2203,49 @@ export const OrdersScreen: React.FC = () => {
           })()
         ))}
       </div>
+
+      {((selectedOrderKind === 'purchase' && (showUndeliveredOnly ? undeliveredItems.length > 0 : filteredPurchaseOrders.length > 0))
+        || (selectedOrderKind !== 'purchase' && filteredOrders.length > 0)) && (
+        <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-white/70">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 disabled:opacity-50"
+          >
+            上一页
+          </button>
+          <span>第 {currentPage} / {totalPages} 页</span>
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={manualPageInput}
+            onChange={(event) => setManualPageInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                handlePageJump();
+              }
+            }}
+            className="w-24 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+          />
+          <button
+            type="button"
+            onClick={handlePageJump}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5"
+          >
+            跳转
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 disabled:opacity-50"
+          >
+            下一页
+          </button>
+        </div>
+      )}
 
       <ExternalOrderForm
         visible={externalOrderFormVisible}

@@ -62,6 +62,7 @@ const formatCurrency = (value: number): string => `¥${value.toFixed(2)}`;
 const getToday = (): string => new Date().toISOString().slice(0, 10);
 
 export const FinanceScreen: React.FC = () => {
+  const pageSize = 20;
   const { user, cities, stores, products, fetchCities, fetchStores, fetchProducts } = useAppStore();
   const { suppliers, fetchSuppliers } = useSupplierStore();
   const {
@@ -95,6 +96,8 @@ export const FinanceScreen: React.FC = () => {
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
   const [keywordFilter, setKeywordFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [manualPageInput, setManualPageInput] = useState('1');
   const [isEditingInitialBalance, setIsEditingInitialBalance] = useState(false);
   const [initialBalanceDraft, setInitialBalanceDraft] = useState('');
   const [form, setForm] = useState<FinanceFormState>({
@@ -281,6 +284,46 @@ export const FinanceScreen: React.FC = () => {
     transactions,
     typeFilter,
   ]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+
+  const pagedTransactions = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredTransactions.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredTransactions, pageSize]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    typeFilter,
+    categoryFilter,
+    cityFilter,
+    storeFilter,
+    startDateFilter,
+    endDateFilter,
+    keywordFilter,
+  ]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setManualPageInput(String(currentPage));
+  }, [currentPage]);
+
+  const handlePageJump = (): void => {
+    const parsedPage = Number.parseInt(manualPageInput, 10);
+    if (!Number.isFinite(parsedPage)) {
+      setManualPageInput(String(currentPage));
+      return;
+    }
+    const nextPage = Math.min(totalPages, Math.max(1, parsedPage));
+    setCurrentPage(nextPage);
+    setManualPageInput(String(nextPage));
+  };
 
   const resetFilters = (): void => {
     setTypeFilter('all');
@@ -698,7 +741,7 @@ export const FinanceScreen: React.FC = () => {
       ) : null}
 
       <div className="space-y-4">
-        {filteredTransactions.map((transaction, index) => {
+        {pagedTransactions.map((transaction, index) => {
           const isIncome = transaction.transaction_type === 'income';
 
           return (
@@ -792,6 +835,48 @@ export const FinanceScreen: React.FC = () => {
           );
         })}
       </div>
+
+      {filteredTransactions.length > 0 ? (
+        <div className="flex items-center justify-end gap-2 text-sm text-white/70">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 disabled:opacity-50"
+          >
+            上一页
+          </button>
+          <span>第 {currentPage} / {totalPages} 页</span>
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={manualPageInput}
+            onChange={(event) => setManualPageInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                handlePageJump();
+              }
+            }}
+            className="w-24 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+          />
+          <button
+            type="button"
+            onClick={handlePageJump}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5"
+          >
+            跳转
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages}
+            className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 disabled:opacity-50"
+          >
+            下一页
+          </button>
+        </div>
+      ) : null}
 
       {!isLoading && filteredTransactions.length === 0 ? (
         <div className="h-[320px] flex flex-col items-center justify-center text-white/20">

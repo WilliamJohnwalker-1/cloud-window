@@ -123,6 +123,7 @@ interface PurchaseOrderRow {
   id: string;
   store_id: string;
   city_id: string;
+  total_cost_amount?: number | string | null;
   supplier_id?: string | null;
   status?: string | null;
   created_by: string;
@@ -689,6 +690,7 @@ const mapPurchaseOrder = (row: PurchaseOrderRow): PurchaseOrder => {
     store_name: storeData?.name ?? undefined,
     city_id: row.city_id,
     city_name: cityData?.name ?? undefined,
+    total_cost_amount: Number(row.total_cost_amount || 0),
     supplier_id: row.supplier_id ?? null,
     supplier_name: supplierData?.company_name ?? null,
     status: row.status === 'delivered'
