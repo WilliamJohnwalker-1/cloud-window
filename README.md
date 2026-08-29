@@ -160,6 +160,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 59. 执行 `supabase/migrate-v8.3-inventory-conflict-constraints.sql`
 60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
+62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -224,6 +225,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 59. 执行 `supabase/migrate-v8.3-inventory-conflict-constraints.sql`
 60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
+62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -239,7 +241,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.18）
+### 5. 启动 Web 端（v1.3.19）
 
 ```bash
 npm run web:v2
@@ -432,6 +434,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.19 (2026-08-29) - 研发流程新增物流阶段与筛选交互回调
+
+- Web 研发流程新增“物流”阶段（位于“生产”与“已上架”之间），推进链路调整为：`生产 -> 物流 -> 已上架`。
+- 商品 ID/EAN-13 绑定与进货到货进度监控从“已上架”阶段迁移到“物流”阶段，避免上架后继续承担物流态信息录入。
+- 研发项目“推进下一阶段”后，成功即自动回到编辑弹窗，便于连续补充备注和日期，不再中断编辑上下文。
+- 顶部“按阶段筛选”从 chips 回退为统一风格下拉框，修复深色背景下文字可读性风险。
+
+### Mobile v2.2.15 (2026-08-29) - 研发流程新增物流阶段与编辑连续性优化
+
+- 移动端研发流程新增“物流”阶段（位于“生产”与“已上架”之间），推进链路与 Web 保持一致。
+- 商品 ID/EAN-13 绑定与进货到货进度监控从“已上架”阶段迁移到“物流”阶段。
+- 研发项目“推进下一阶段”后，成功即自动回到编辑弹窗，减少多次打开弹窗造成的操作中断。
+- 新增迁移：`supabase/migrate-v8.6-product-dev-logistics-stage.sql`（阶段约束扩展 + `app_schema_meta` 版本写入）。
 
 ### Web v1.3.18 (2026-08-28) - 进货单时间筛选切换为业务日期
 
