@@ -27,6 +27,7 @@ const STAGE_LABELS: Record<DevelopmentStage, string> = {
   artist_search: '约稿',
   design_finalize: '打样',
   factory_search: '生产',
+  logistics: '物流',
   launched: '已上架',
 };
 
@@ -35,6 +36,7 @@ const STAGE_COLORS: Record<DevelopmentStage, string> = {
   artist_search: Colors.gradientMid, // purple
   design_finalize: Colors.warning, // orange
   factory_search: Colors.success, // green
+  logistics: Colors.blue,
   launched: Colors.textSecondary, // gray
 };
 
@@ -42,7 +44,8 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   concept: 'artist_search',
   artist_search: 'design_finalize',
   design_finalize: 'factory_search',
-  factory_search: 'launched',
+  factory_search: 'logistics',
+  logistics: 'launched',
   launched: null,
 };
 
@@ -214,7 +217,7 @@ export default function ProductDevScreen() {
   }, [activeFilter, projects, searchText, stageFilter]);
 
   const boundProduct = useMemo(() => {
-    if (!editingProject || editingProject.stage !== 'launched') {
+    if (!editingProject || editingProject.stage !== 'logistics') {
       return null;
     }
 
@@ -344,7 +347,12 @@ export default function ProductDevScreen() {
               Toast.show({ type: 'error', text1: '推进失败', text2: error.message });
             } else {
               Toast.show({ type: 'success', text1: '成功', text2: `已推进至 ${STAGE_LABELS[nextStage]}` });
-              setModalVisible(false);
+              const updatedProject = useProductDevStore.getState().projects.find((item) => item.id === project.id);
+              if (updatedProject) {
+                openEditModal(updatedProject);
+              } else {
+                setModalVisible(false);
+              }
             }
           },
         },
@@ -629,7 +637,7 @@ export default function ProductDevScreen() {
                 textAlignVertical="top"
               />
 
-              {editingProject?.stage === 'launched' && (
+              {editingProject?.stage === 'logistics' && (
                 <>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>关联商品标识（ID 或 EAN-13）</Text>
                   <TextInput
@@ -670,7 +678,7 @@ export default function ProductDevScreen() {
                     {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => {
                       if (stage === editingProject.stage || stage === 'launched') return null;
                       // Only show stages before current stage
-                      const stagesOrder: DevelopmentStage[] = ['concept', 'artist_search', 'design_finalize', 'factory_search', 'launched'];
+                      const stagesOrder: DevelopmentStage[] = ['concept', 'artist_search', 'design_finalize', 'factory_search', 'logistics', 'launched'];
                       if (stagesOrder.indexOf(stage) >= stagesOrder.indexOf(editingProject.stage)) return null;
                       
                       return (

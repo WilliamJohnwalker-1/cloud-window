@@ -12,6 +12,7 @@ const STAGE_LABELS: Record<DevelopmentStage, string> = {
   artist_search: '约稿',
   design_finalize: '打样',
   factory_search: '生产',
+  logistics: '物流',
   launched: '已上架',
 };
 
@@ -20,6 +21,7 @@ const STAGE_COLORS: Record<DevelopmentStage, string> = {
   artist_search: 'bg-purple-500/15 text-purple-300',
   design_finalize: 'bg-orange-500/15 text-orange-300',
   factory_search: 'bg-emerald-500/15 text-emerald-300',
+  logistics: 'bg-sky-500/15 text-sky-300',
   launched: 'bg-white/10 text-white/50',
 };
 
@@ -27,7 +29,8 @@ const NEXT_STAGE_MAP: Record<DevelopmentStage, DevelopmentStage | null> = {
   concept: 'artist_search',
   artist_search: 'design_finalize',
   design_finalize: 'factory_search',
-  factory_search: 'launched',
+  factory_search: 'logistics',
+  logistics: 'launched',
   launched: null,
 };
 
@@ -213,7 +216,7 @@ export const ProductDevScreen: React.FC = () => {
   const editingProject = projects.find((p) => p.id === editingProjectId);
 
   const boundProduct = useMemo(() => {
-    if (!editingProject || editingProject.stage !== 'launched') {
+    if (!editingProject || editingProject.stage !== 'logistics') {
       return null;
     }
 
@@ -381,7 +384,12 @@ export const ProductDevScreen: React.FC = () => {
         } else {
           setPageNotice({ type: 'success', text: `已更新至 ${STAGE_LABELS[confirmAction.targetStage]}` });
           if (confirmAction.actionType === 'advance') {
-            setShowCreate(false);
+            const updatedProject = useProductDevStore.getState().projects.find((project) => project.id === confirmAction.projectId);
+            if (updatedProject) {
+              openEditModal(updatedProject);
+            } else {
+              setShowCreate(false);
+            }
           }
         }
       }
@@ -461,24 +469,21 @@ export const ProductDevScreen: React.FC = () => {
           >
             逾期
           </button>
-          <span className="px-2 text-xs font-bold text-white/40 uppercase tracking-wider">阶段</span>
-          <button
-            type="button"
-            onClick={() => setStageFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${stageFilter === 'all' ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
-          >
-            全阶段
-          </button>
-          {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
-            <button
-              key={stage}
-              type="button"
-              onClick={() => setStageFilter(stage)}
-              className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${stageFilter === stage ? 'bg-white text-black border-white' : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'}`}
+          <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/20 bg-white/10 text-sm text-white/90">
+            <span className="text-xs font-bold text-white/60 uppercase tracking-wider whitespace-nowrap">阶段</span>
+            <select
+              value={stageFilter}
+              onChange={(event) => setStageFilter(event.target.value as DevelopmentStage | 'all')}
+              className="bg-slate-900 border border-white/20 rounded-lg px-2 py-1 text-sm text-white outline-none focus:border-accent"
             >
-              {STAGE_LABELS[stage]}
-            </button>
-          ))}
+              <option value="all">全阶段</option>
+              {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => (
+                <option key={stage} value={stage}>
+                  {STAGE_LABELS[stage]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="relative w-full md:w-72">
@@ -686,7 +691,7 @@ export const ProductDevScreen: React.FC = () => {
                 />
               </label>
 
-              {editingProject?.stage === 'launched' && (
+              {editingProject?.stage === 'logistics' && (
                 <label className="space-y-1 block">
                   <span className="text-xs font-bold text-white/40 uppercase tracking-wider">关联商品标识（ID 或 EAN-13）</span>
                   <input
@@ -721,7 +726,7 @@ export const ProductDevScreen: React.FC = () => {
                   <div className="flex flex-wrap gap-2">
                     {(Object.keys(STAGE_LABELS) as DevelopmentStage[]).map((stage) => {
                       if (stage === editingProject.stage || stage === 'launched') return null;
-                      const stagesOrder: DevelopmentStage[] = ['concept', 'artist_search', 'design_finalize', 'factory_search', 'launched'];
+                      const stagesOrder: DevelopmentStage[] = ['concept', 'artist_search', 'design_finalize', 'factory_search', 'logistics', 'launched'];
                       if (stagesOrder.indexOf(stage) >= stagesOrder.indexOf(editingProject.stage)) return null;
                       
                       return (

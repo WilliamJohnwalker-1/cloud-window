@@ -59,6 +59,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 - `migrate-v8.3-inventory-conflict-constraints.sql`: ensure inventory/store_inventory upsert unique constraints for purchase delivery.
 - `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`: add purchase_orders.total_cost_amount, backfill historical totals, aggregate purchase finance writes by purchase order, and support pagination scenarios.
 - `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`: rollback product cumulative cost fields when deleting purchase orders (skip rollback if cumulative baseline is uninitialized).
+- `migrate-v8.6-product-dev-logistics-stage.sql`: add logistics stage between factory_search and launched, update stage check constraint/comment, and bump schema version via app_schema_meta.
 - `storage-policies.sql`: Image upload RLS.
 
 ## EXECUTION ORDER
@@ -117,6 +118,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 51. `migrate-v8.3-inventory-conflict-constraints.sql`
 52. `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 53. `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
+54. `migrate-v8.6-product-dev-logistics-stage.sql`
 
 ### Upgrade
 1. `migrate-v2.sql`
@@ -172,6 +174,7 @@ PostgreSQL schema with RLS policies for multi-role inventory management.
 51. `migrate-v8.3-inventory-conflict-constraints.sql`
 52. `migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 53. `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
+54. `migrate-v8.6-product-dev-logistics-stage.sql`
 
 ## TABLES
 
