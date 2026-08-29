@@ -342,7 +342,7 @@ export interface PurchaseOrderItem {
   created_at: string;
 }
 
-export type DevelopmentStage = 'concept' | 'artist_search' | 'design_finalize' | 'factory_search' | 'launched';
+export type DevelopmentStage = 'concept' | 'artist_search' | 'design_finalize' | 'factory_search' | 'logistics' | 'launched';
 
 export interface ProductDevelopment {
   id: string;
