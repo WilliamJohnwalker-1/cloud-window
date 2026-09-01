@@ -740,8 +740,8 @@ export default function OrdersScreen() {
     if (!purchaseConfirmPayload) return;
 
     const deliveredQuantity = Number.parseInt(purchaseConfirmPayload.deliveredQuantityInput || '', 10);
-    if (Number.isNaN(deliveredQuantity) || deliveredQuantity <= 0) {
-      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效到货数量' });
+    if (Number.isNaN(deliveredQuantity) || deliveredQuantity < 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请输入有效到货数量（可为0）' });
       return;
     }
 
@@ -1139,9 +1139,7 @@ export default function OrdersScreen() {
       }
 
       order.items?.forEach((item) => {
-        const orderedQty = Number(item.ordered_quantity || 0);
-        const unitCost = Number(item.unit_cost || 0);
-        acc.totalCost += orderedQty * unitCost;
+        acc.totalCost += Number(item.line_total || 0);
       });
       return acc;
     }, { totalCost: 0, retail: 0 });
@@ -1370,7 +1368,7 @@ export default function OrdersScreen() {
                     itemId: purchaseItem.id,
                     productName: purchaseItem.product_name || '未知商品',
                     orderedQuantity: Number(purchaseItem.ordered_quantity || 0),
-                    deliveredQuantityInput: String(Number(purchaseItem.ordered_quantity || 0)),
+                    deliveredQuantityInput: String(Number(purchaseItem.delivered_quantity || 0)),
                   });
                 }}
               >
@@ -1860,7 +1858,7 @@ export default function OrdersScreen() {
             </View>
 
             <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 8 }]}>商品：{purchaseConfirmPayload?.productName}</Text>
-            <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 12 }]}>下单数量：{purchaseConfirmPayload?.orderedQuantity}</Text>
+            <Text style={[styles.orderMeta, { color: theme.textSecondary, marginBottom: 12 }]}>下单数量：{purchaseConfirmPayload?.orderedQuantity}（可上下调整到货量）</Text>
             <TextInput
               style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
               value={purchaseConfirmPayload?.deliveredQuantityInput || ''}
@@ -1871,7 +1869,7 @@ export default function OrdersScreen() {
                 });
               }}
               keyboardType="number-pad"
-              placeholder="请输入到货数量"
+              placeholder="请输入到货数量（可为0）"
               placeholderTextColor={theme.textTertiary}
             />
 

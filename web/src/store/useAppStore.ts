@@ -114,7 +114,7 @@ interface PurchaseOrderItemRow {
   delivery_status?: string | null;
   delivered_at?: string | null;
   confirmed_by?: string | null;
-  unit_cost?: number | string | null;
+  line_total?: number | string | null;
   created_at: string;
   products?: { name?: string | null; cost?: number | string | null } | Array<{ name?: string | null; cost?: number | string | null }> | null;
 }
@@ -715,7 +715,7 @@ const mapPurchaseOrder = (row: PurchaseOrderRow): PurchaseOrder => {
         delivery_status: item.delivery_status === 'delivered' ? 'delivered' : 'pending',
         delivered_at: item.delivered_at ?? null,
         confirmed_by: item.confirmed_by ?? null,
-        unit_cost: Number(item.unit_cost ?? productData?.cost ?? 0),
+        line_total: Number(item.line_total || 0),
         created_at: item.created_at,
       };
     }),
@@ -1988,18 +1988,18 @@ export const useAppStore = create<AppState>()(
       addProduct: async (payload) => {
         try {
           const cumulativeCostQuantity = payload.cumulative_cost_quantity === undefined || payload.cumulative_cost_quantity === null
-            ? null
+            ? 0
             : Number(payload.cumulative_cost_quantity);
           const cumulativeCostAmount = payload.cumulative_cost_amount === undefined || payload.cumulative_cost_amount === null
-            ? null
+            ? 0
             : Number(payload.cumulative_cost_amount);
           const { data: createdProduct, error: insertError } = await supabase.from('products').insert({
             name: payload.name,
             price: Number(payload.price),
             cost: Number(payload.cost),
             one_time_cost: Number(payload.one_time_cost || 0),
-            cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity,
-            cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount,
+            cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? 0 : cumulativeCostQuantity,
+            cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? 0 : cumulativeCostAmount,
             discount_price: Number(payload.discount_price),
             city_id: payload.city_id,
             image_url: payload.image_url ?? null,

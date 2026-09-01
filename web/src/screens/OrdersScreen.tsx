@@ -401,7 +401,7 @@ export const OrdersScreen: React.FC = () => {
         return sum + Number(order.total_cost_amount || 0);
       }
       const fallbackCost = (order.items || []).reduce((itemSum, item) => (
-        itemSum + Number(item.ordered_quantity || 0) * Number(item.unit_cost || 0)
+        itemSum + Number(item.line_total || 0)
       ), 0);
       return sum + fallbackCost;
     }, 0);
@@ -1989,7 +1989,7 @@ export const OrdersScreen: React.FC = () => {
                                         itemId: item.id,
                                         productName: item.product_name || fallbackProductName,
                                         orderedQuantity: Number(item.ordered_quantity || 0),
-                                        deliveredQuantity: Number(item.ordered_quantity || 0),
+                                        deliveredQuantity: Number(item.delivered_quantity || 0),
                                       });
                                     }}
                                     className="px-2.5 py-1.5 rounded-lg border border-amber-400/30 bg-amber-500/20 text-amber-100 text-xs font-bold"
@@ -2274,10 +2274,10 @@ export const OrdersScreen: React.FC = () => {
               </button>
             </div>
             <p className="text-sm text-white/70">商品：{purchaseConfirmPayload.productName}</p>
-            <p className="text-xs text-white/50">下单数量：{purchaseConfirmPayload.orderedQuantity}（可输入大于下单数）</p>
+            <p className="text-xs text-white/50">下单数量：{purchaseConfirmPayload.orderedQuantity}（可上下调整到货量，可为0）</p>
             <input
               type="number"
-              min={1}
+              min={0}
               step={1}
               value={purchaseConfirmPayload.deliveredQuantity}
               onChange={(event) => {
@@ -2302,7 +2302,7 @@ export const OrdersScreen: React.FC = () => {
                 onClick={() => {
                   void handleConfirmPurchaseItemDelivery();
                 }}
-                disabled={submittingPurchaseConfirm || Number(purchaseConfirmPayload.deliveredQuantity || 0) <= 0}
+                disabled={submittingPurchaseConfirm || Number(purchaseConfirmPayload.deliveredQuantity || 0) < 0}
                 className="px-4 py-2 rounded-xl border border-amber-400/30 bg-amber-500/20 text-amber-100 font-semibold disabled:opacity-60"
               >
                 {submittingPurchaseConfirm ? '提交中...' : '确认到货'}

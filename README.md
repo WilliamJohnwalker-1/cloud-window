@@ -161,6 +161,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
+63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -226,6 +227,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 60. 执行 `supabase/migrate-v8.4-purchase-order-total-and-finance-pagination.sql`
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
+63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -241,7 +243,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.19）
+### 5. 启动 Web 端（v1.3.20）
 
 ```bash
 npm run web:v2
@@ -434,6 +436,19 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.20 (2026-09-01) - 进货行总价主口径与到货数量可调收口
+
+- 进货项成本口径统一为 `purchase_order_items.line_total`：前端统计 fallback 与进货链路不再依赖进货行 `unit_cost`。
+- 进货确认到货支持“可上调/可下调/可置0”的数量调整，库存按“新到货 - 旧到货”差量回写。
+- 采购费用口径改为进货单固定总价（`purchase_orders.total_cost_amount`），不随单次到货确认波动。
+- 新增迁移：`supabase/migrate-v8.7-purchase-line-total-model.sql`（进货行总价主口径、删除 `purchase_order_items.unit_cost`、累计成本按到货数量+行总价重算）。
+
+### Mobile v2.2.16 (2026-09-01) - 进货统计口径切换与默认累计值收口
+
+- 移动端进货统计 fallback 切换为按 `line_total` 求和，和 Web/数据库保持同口径。
+- 新建商品时若管理员未填写“累计数量/累计成本”，默认写入 `0`（不再写 `null`）。
+- 进货单确认到货弹窗文案与默认值调整为“支持上下调整到货数量（含0）”，与后端到货逻辑对齐。
 
 ### Web v1.3.19 (2026-08-29) - 研发流程新增物流阶段与筛选交互回调
 
