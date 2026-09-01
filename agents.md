@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.15`
-- Current web baseline: `v1.3.19`
+- Current mobile baseline: `v2.2.16`
+- Current web baseline: `v1.3.20`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -278,6 +278,7 @@ Before committing:
 - Latest product-dev + purchase-delete hardening wave: Web 知识库悬浮入口支持拖动且保留点击打开；双端研发模块补齐“仅项目内搜索”并在推进阶段后自动退出编辑框；新增 `migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`，删除进货单时按实到数量回滚 `products.cumulative_cost_quantity/cumulative_cost_amount`，并在累计基线未初始化时跳过回滚。
 - Latest purchase-order date-filter hotfix: 双端订单页“进货单”时间筛选改按 `order_date`（业务日期）生效；缺失业务日期的历史单据自动回退 `created_at`，避免筛选丢单。
 - Latest product-dev logistics wave: 双端研发流程新增“物流”阶段（位于“生产”与“已上架”之间），并将商品 ID/EAN-13 绑定与进货到货进度监控从“已上架”迁移至“物流”；双端“推进下一阶段”后统一改为自动回到编辑弹窗以便持续补充信息；Web 顶部阶段筛选由 chips 回退为统一风格下拉框，避免深色背景下文字可读性问题；新增迁移 `migrate-v8.6-product-dev-logistics-stage.sql`（`app_schema_meta` 版本写入口径对齐）。
+- Latest purchase line-total wave: 新增 `migrate-v8.7-purchase-line-total-model.sql`，进货项成本主口径切换为 `purchase_order_items.line_total` 并移除该表 `unit_cost`；确认到货支持数量上调/下调/置0，库存按差量回写；采购费用维持进货单固定总额；商品累计数量/累计成本改为按到货数量与行总价重算。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:
