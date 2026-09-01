@@ -338,7 +338,7 @@ export interface PurchaseOrderItem {
   delivery_status: PurchaseItemDeliveryStatus;
   delivered_at?: string | null;
   confirmed_by?: string | null;
-  unit_cost: number;
+  line_total: number;
   created_at: string;
 }
 
