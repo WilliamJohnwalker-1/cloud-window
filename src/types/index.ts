@@ -208,7 +208,7 @@ export interface InventoryReport {
 
 export type OrderStatus = 'pending' | 'accepted';
 
-export type OrderKind = 'distribution' | 'retail' | 'settlement' | 'purchase' | 'external';
+export type OrderKind = 'distribution' | 'return' | 'retail' | 'settlement' | 'purchase' | 'external';
 
 export type ExternalChannel = 'xiaohongshu' | 'taobao';
 

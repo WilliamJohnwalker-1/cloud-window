@@ -79,6 +79,7 @@ export const OrdersScreen: React.FC = () => {
     user,
     acceptOrder,
     createBatchOrders,
+    returnStoreInventoryToWarehouse,
     createSettlementOrder,
     confirmExternalOrder,
     confirmPurchaseDelivery,
@@ -104,15 +105,20 @@ export const OrdersScreen: React.FC = () => {
   const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
   const [selectedFilterProvinceId, setSelectedFilterProvinceId] = useState<string | null>(null);
   const [selectedFilterCityId, setSelectedFilterCityId] = useState<string | null>(null);
   const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [externalOrderFormVisible, setExternalOrderFormVisible] = useState(false);
   const [settlementStoreId, setSettlementStoreId] = useState<string | null>(null);
   const [settlementOrderDate, setSettlementOrderDate] = useState('');
   const [settlementCart, setSettlementCart] = useState<Map<string, number>>(new Map());
+  const [returnCart, setReturnCart] = useState<Map<string, number>>(new Map());
+  const [returnSearchKeyword, setReturnSearchKeyword] = useState('');
+  const [submittingReturnOrder, setSubmittingReturnOrder] = useState(false);
   const [submittingSettlementOrder, setSubmittingSettlementOrder] = useState(false);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [detailOrderData, setDetailOrderData] = useState<(typeof orders)[number] | null>(null);
@@ -160,6 +166,7 @@ export const OrdersScreen: React.FC = () => {
   const [manualPageInput, setManualPageInput] = useState('1');
   const orderCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isAdminOrManager = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager' || user?.role === 'finance';
+  const canReturnGoods = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
 
   useEffect(() => {
     const handleSearchJump = (event: Event): void => {
@@ -203,6 +210,7 @@ export const OrdersScreen: React.FC = () => {
   }, []);
 
   const getOrderKindLabel = (kind: OrderKind): string => {
+    if (kind === 'return') return '供货单';
     if (kind === 'purchase') return '进货单';
     if (kind === 'settlement') return '结算单';
     if (kind === 'retail') return '零售单';
@@ -306,10 +314,25 @@ export const OrdersScreen: React.FC = () => {
     return date.getFullYear() === now.getFullYear();
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
+  const resolveOrderFilterDate = useCallback((order: (typeof orders)[number]): string => {
+    if (order.order_kind === 'settlement') {
+      const businessDate = order.order_date?.trim();
+      if (businessDate) {
+        return `${businessDate}T00:00:00`;
+      }
+    }
+    return order.created_at;
+  }, []);
+
   const filteredOrders = useMemo(() => {
     let result = baseOrders;
     if (selectedOrderKind !== 'all') {
-      result = result.filter((order) => order.order_kind === selectedOrderKind);
+      result = result.filter((order) => {
+        if (selectedOrderKind === 'distribution') {
+          return order.order_kind === 'distribution' || order.order_kind === 'return';
+        }
+        return order.order_kind === selectedOrderKind;
+      });
     }
     if (selectedFilterProvinceId) {
       result = result.filter((order) => {
@@ -332,8 +355,8 @@ export const OrdersScreen: React.FC = () => {
       });
     }
     return result
-      .filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange, orderCityProvinceMap, refundViewFilter, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
+      .filter((order) => matchesStatsRange(resolveOrderFilterDate(order)));
+  }, [baseOrders, matchesStatsRange, orderCityProvinceMap, refundViewFilter, resolveOrderFilterDate, selectedFilterCityId, selectedFilterProvinceId, selectedFilterStoreId, selectedOrderKind]);
 
   const resolvePurchaseOrderFilterDate = useCallback((order: PurchaseOrder): string => {
     const businessDate = order.order_date?.trim();
@@ -569,6 +592,27 @@ export const OrdersScreen: React.FC = () => {
       });
   }, [products, searchKeyword, settlementStoreId, stores]);
 
+  const filteredReturnProducts = useMemo(() => {
+    if (!returnStoreId) return [];
+    const selectedStore = stores.find((store) => store.id === returnStoreId);
+    if (!selectedStore) return [];
+    const keyword = returnSearchKeyword.trim().toLowerCase();
+
+    return products
+      .filter((product) => product.city_id === selectedStore.city_id)
+      .filter((product) => {
+        const stock = Number(
+          storeInventory.find((item) => item.store_id === returnStoreId && item.product_id === product.id)?.quantity || 0,
+        );
+        return stock > 0;
+      })
+      .filter((product) => {
+        if (!keyword) return true;
+        const haystack = [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase();
+        return haystack.includes(keyword);
+      });
+  }, [products, returnSearchKeyword, returnStoreId, storeInventory, stores]);
+
   const settlementTotalAmount = useMemo(() => {
     if (!settlementStoreId || settlementCart.size === 0) return 0;
     const selectedStore = stores.find((store) => store.id === settlementStoreId);
@@ -649,7 +693,12 @@ export const OrdersScreen: React.FC = () => {
   const filteredOrdersWithoutRange = useMemo(() => {
     let result = baseOrders;
     if (selectedOrderKind !== 'all') {
-      result = result.filter((order) => order.order_kind === selectedOrderKind);
+      result = result.filter((order) => {
+        if (selectedOrderKind === 'distribution') {
+          return order.order_kind === 'distribution' || order.order_kind === 'return';
+        }
+        return order.order_kind === selectedOrderKind;
+      });
     }
     if (selectedFilterProvinceId) {
       result = result.filter((order) => {
@@ -860,6 +909,12 @@ export const OrdersScreen: React.FC = () => {
       void fetchStoreProductPrices(settlementStoreId);
     }
   }, [settlementStoreId, fetchStoreInventory, fetchStoreProductPrices]);
+
+  useEffect(() => {
+    if (returnStoreId) {
+      void fetchStoreInventory(returnStoreId);
+    }
+  }, [fetchStoreInventory, returnStoreId]);
 
 
   const openOrderDetail = async (orderId: string): Promise<void> => {
@@ -1575,6 +1630,35 @@ export const OrdersScreen: React.FC = () => {
     setPageNotice({ type: 'success', text: '结算订单已创建' });
   };
 
+  const handleCreateReturnOrder = async (): Promise<void> => {
+    if (!returnStoreId) {
+      setPageNotice({ type: 'error', text: '请先选择店铺' });
+      return;
+    }
+    if (returnCart.size === 0) {
+      setPageNotice({ type: 'error', text: '请先选择退货商品' });
+      return;
+    }
+
+    setSubmittingReturnOrder(true);
+    const { error } = await returnStoreInventoryToWarehouse(
+      returnStoreId,
+      Array.from(returnCart.entries()).map(([productId, quantity]) => ({ productId, quantity })),
+    );
+    setSubmittingReturnOrder(false);
+
+    if (error) {
+      setPageNotice({ type: 'error', text: `退货失败：${error.message}` });
+      return;
+    }
+
+    setReturnCart(new Map());
+    setReturnStoreId(null);
+    setReturnSearchKeyword('');
+    setShowReturnModal(false);
+    setPageNotice({ type: 'success', text: '退货已回总仓' });
+  };
+
   const handleModifyOrder = async (): Promise<void> => {
     if (!modifyOrder) return;
     const itemsPayload = Array.from(modifyCart.entries()).map(([orderItemId, quantity]) => ({
@@ -1708,6 +1792,21 @@ export const OrdersScreen: React.FC = () => {
             >
               <Plus size={18} />
               <span>上货</span>
+            </button>
+          )}
+          {canReturnGoods && (
+            <button
+              type="button"
+              onClick={() => {
+                setReturnStoreId(null);
+                setReturnCart(new Map());
+                setReturnSearchKeyword('');
+                setShowReturnModal(true);
+              }}
+              className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
+            >
+              <Plus size={18} />
+              <span>退货</span>
             </button>
           )}
           <button
@@ -2510,6 +2609,189 @@ export const OrdersScreen: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showReturnModal && canReturnGoods && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">退货回总仓</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReturnModal(false);
+                  setReturnStoreId(null);
+                  setReturnCart(new Map());
+                  setReturnSearchKeyword('');
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select
+                value={returnStoreId || ''}
+                onChange={(event) => {
+                  setReturnStoreId(event.target.value || null);
+                  setReturnCart(new Map());
+                }}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none"
+              >
+                <option value="" className="bg-[#121217]">-- 请选择店铺 --</option>
+                {stores
+                  .filter((store) => store.status === 'active')
+                  .map((store) => (
+                    <option key={store.id} value={store.id} className="bg-[#121217]">
+                      {store.name} ({store.city_name})
+                    </option>
+                  ))}
+              </select>
+              <input
+                value={returnSearchKeyword}
+                onChange={(event) => setReturnSearchKeyword(event.target.value)}
+                placeholder="搜索店铺库存商品"
+                className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            {returnStoreId ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
+                  {filteredReturnProducts.map((product) => {
+                    const stock = Number(
+                      storeInventory.find((item) => item.store_id === returnStoreId && item.product_id === product.id)?.quantity || 0,
+                    );
+                    const qty = returnCart.get(product.id) || 0;
+                    return (
+                      <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+                            {product.image_url ? (
+                              <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-[10px] text-white/40">图</span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold">{product.name}</p>
+                            <p className="text-xs text-white/40">店铺库存 {stock} · 条码 {product.barcode || '无'}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextQty = Math.max(0, qty - 1);
+                              setReturnCart((prev) => {
+                                const next = new Map(prev);
+                                if (nextQty <= 0) next.delete(product.id);
+                                else next.set(product.id, nextQty);
+                                return next;
+                              });
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                          >
+                            -1
+                          </button>
+                          <input
+                            value={qty > 0 ? String(qty) : ''}
+                            onChange={(event) => {
+                              const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                              if (Number.isNaN(value)) {
+                                setReturnCart((prev) => {
+                                  const next = new Map(prev);
+                                  next.delete(product.id);
+                                  return next;
+                                });
+                                return;
+                              }
+                              setReturnCart((prev) => {
+                                const next = new Map(prev);
+                                if (value <= 0) next.delete(product.id);
+                                else next.set(product.id, Math.min(value, stock));
+                                return next;
+                              });
+                            }}
+                            placeholder="退货数量"
+                            className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (qty >= stock) return;
+                              setReturnCart((prev) => {
+                                const next = new Map(prev);
+                                next.set(product.id, qty + 1);
+                                return next;
+                              });
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-white/10"
+                          >
+                            +1
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {filteredReturnProducts.length === 0 && <p className="p-4 text-sm text-white/40">该店铺暂无可退货库存</p>}
+                </div>
+
+                <div className="border border-white/10 rounded-2xl p-4 flex flex-col">
+                  <h4 className="font-semibold mb-3">退货清单</h4>
+                  <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
+                    {Array.from(returnCart.entries()).map(([productId, quantity]) => {
+                      const product = products.find((item) => item.id === productId);
+                      if (!product) return null;
+                      return (
+                        <div key={productId} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">{product.name}</p>
+                            <p className="text-xs text-white/40">数量 {quantity}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReturnCart((prev) => {
+                                const next = new Map(prev);
+                                next.delete(productId);
+                                return next;
+                              });
+                            }}
+                            className="text-xs text-red-300 hover:text-red-200"
+                          >
+                            移除
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {returnCart.size === 0 && <p className="text-sm text-white/40">暂无商品</p>}
+                  </div>
+
+                  <div className="mt-auto pt-4 border-t border-white/10 space-y-1 text-sm">
+                    <div className="flex justify-between"><span className="text-white/60">商品总数</span><span>{Array.from(returnCart.values()).reduce((sum, qty) => sum + qty, 0)}</span></div>
+                    <div className="flex justify-between"><span className="text-white/60">操作</span><span className="text-accent font-bold">店铺库存回退总仓</span></div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCreateReturnOrder();
+                    }}
+                    disabled={submittingReturnOrder || !returnStoreId || returnCart.size === 0}
+                    className="mt-4 w-full py-2.5 rounded-xl bg-tech-gradient font-bold disabled:opacity-60"
+                  >
+                    {submittingReturnOrder ? '处理中...' : '确认退货'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-white/40">请先选择店铺</p>
+            )}
           </div>
         </div>
       )}

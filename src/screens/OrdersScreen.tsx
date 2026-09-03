@@ -57,6 +57,7 @@ export default function OrdersScreen() {
     fetchStoreProductPrices,
     createSettlementOrder,
     createBatchOrders,
+    returnStoreInventoryToWarehouse,
     deleteOrder,
     acceptOrder,
     confirmPurchaseItemDelivery,
@@ -109,6 +110,11 @@ export default function OrdersScreen() {
   const [retailModalVisible, setRetailModalVisible] = useState(false);
   const [retailStoreId, setRetailStoreId] = useState<string | null>(null);
   const [settlementOrderDate, setSettlementOrderDate] = useState('');
+  const [returnModalVisible, setReturnModalVisible] = useState(false);
+  const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
+  const [returnCart, setReturnCart] = useState<Map<string, number>>(new Map());
+  const [returnSearchText, setReturnSearchText] = useState('');
+  const [submittingReturnOrder, setSubmittingReturnOrder] = useState(false);
   const [retailCart, setRetailCart] = useState<Map<string, number>>(new Map());
   const [retailQtyInputMode, setRetailQtyInputMode] = useState<Map<string, string>>(new Map());
   const [retailQtyEditingKey, setRetailQtyEditingKey] = useState<string | null>(null);
@@ -138,9 +144,11 @@ export default function OrdersScreen() {
   const canCreateSettlement = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'finance';
   const canConfirmPurchase = user?.role === 'admin' || user?.role === 'super_admin';
   const canCreateOrder = user?.role === 'distributor' || user?.role === 'admin' || user?.role === 'super_admin';
+  const canReturnGoods = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'inventory_manager';
   const minSaleQuantity = user?.role === 'distributor' ? 30 : 1;
 
   const getOrderKindLabel = (kind: Order['order_kind']): string => {
+    if (kind === 'return') return '供货单';
     if (kind === 'retail') return '零售单';
     if (kind === 'settlement') return '结算单';
     if (kind === 'external') return '外部单';
@@ -149,6 +157,7 @@ export default function OrdersScreen() {
   };
 
   const getOrderTotalLabel = (kind: Order['order_kind']): string => {
+    if (kind === 'return') return '折扣总价';
     if (kind === 'retail') return '收款总价';
     if (kind === 'settlement') return '结算总价';
     if (kind === 'external') return '零售总价';
@@ -214,6 +223,11 @@ export default function OrdersScreen() {
       fetchStoreInventory(retailStoreId);
     }
   }, [retailStoreId, fetchStoreInventory]);
+  useEffect(() => {
+    if (returnStoreId) {
+      fetchStoreInventory(returnStoreId);
+    }
+  }, [fetchStoreInventory, returnStoreId]);
 
 
 
@@ -358,7 +372,12 @@ export default function OrdersScreen() {
       return [];
     }
     if (selectedOrderKind) {
-      list = list.filter((o) => o.order_kind === selectedOrderKind);
+      list = list.filter((o) => {
+        if (selectedOrderKind === 'distribution') {
+          return o.order_kind === 'distribution' || o.order_kind === 'return';
+        }
+        return o.order_kind === selectedOrderKind;
+      });
     }
     return list;
   }, [orders, isAdminOrManager, orderFilterCities, selectedOrderCityId, selectedOrderProvinceId, selectedOrderStoreId, selectedOrderKind]);
@@ -433,9 +452,19 @@ export default function OrdersScreen() {
     return order.created_at;
   }, []);
 
+  const resolveOrderFilterDate = useCallback((order: Order): string => {
+    if (order.order_kind === 'settlement') {
+      const businessDate = order.order_date?.trim();
+      if (businessDate) {
+        return `${businessDate}T00:00:00`;
+      }
+    }
+    return order.created_at;
+  }, []);
+
   const rangedOrders = useMemo(() => {
-    return baseOrders.filter((order) => matchesStatsRange(order.created_at));
-  }, [baseOrders, matchesStatsRange]);
+    return baseOrders.filter((order) => matchesStatsRange(resolveOrderFilterDate(order)));
+  }, [baseOrders, matchesStatsRange, resolveOrderFilterDate]);
 
   const filteredOrders = useMemo(() => {
     let list = [...rangedOrders];
@@ -811,6 +840,60 @@ export default function OrdersScreen() {
     setRetailCart(new Map());
     setRetailQtyInputMode(new Map());
     setRetailQtyEditingKey(null);
+  };
+
+  const resetReturnForm = () => {
+    setReturnStoreId(null);
+    setReturnCart(new Map());
+    setReturnSearchText('');
+  };
+
+  const filteredReturnProducts = useMemo(() => {
+    if (!returnStoreId) return [];
+    const selectedStore = stores.find((store) => store.id === returnStoreId);
+    if (!selectedStore) return [];
+    const keyword = returnSearchText.trim().toLowerCase();
+
+    return products
+      .filter((product) => product.city_id === selectedStore.city_id)
+      .filter((product) => {
+        const stock = Number(
+          storeInventory.find((inv) => inv.store_id === returnStoreId && inv.product_id === product.id)?.quantity || 0,
+        );
+        return stock > 0;
+      })
+      .filter((product) => {
+        if (!keyword) return true;
+        return [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase().includes(keyword);
+      });
+  }, [products, returnSearchText, returnStoreId, storeInventory, stores]);
+
+  const handleCreateReturnOrder = async (): Promise<void> => {
+    if (!returnStoreId) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请先选择店铺' });
+      return;
+    }
+    if (returnCart.size === 0) {
+      Toast.show({ type: 'error', text1: '错误', text2: '请先选择退货商品' });
+      return;
+    }
+
+    setSubmittingReturnOrder(true);
+    const { error } = await returnStoreInventoryToWarehouse(
+      returnStoreId,
+      Array.from(returnCart.entries()).map(([productId, quantity]) => ({ productId, quantity })),
+    );
+    setSubmittingReturnOrder(false);
+
+    if (error) {
+      Toast.show({ type: 'error', text1: '退货失败', text2: error.message });
+      return;
+    }
+
+    Toast.show({ type: 'success', text1: '成功', text2: '退货已回总仓' });
+    resetReturnForm();
+    setReturnModalVisible(false);
+    fetchOrders();
   };
 
   const handleConfirmOutbound = async () => {
@@ -1549,6 +1632,20 @@ export default function OrdersScreen() {
             >
               <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
                 <Text style={styles.addButtonText}>上货</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          {canReturnGoods && (
+            <TouchableOpacity
+              onPress={() => {
+                resetReturnForm();
+                setReturnModalVisible(true);
+              }}
+              activeOpacity={0.85}
+              style={styles.outboundButtonWrap}
+            >
+              <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
+                <Text style={styles.addButtonText}>退货</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -2670,6 +2767,155 @@ export default function OrdersScreen() {
               >
                 <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
                   <Text style={styles.confirmButtonText}>{submittingRetailOrder ? '处理中...' : '确认建单'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={returnModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface }]}> 
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>退货回总仓</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  resetReturnForm();
+                  setReturnModalVisible(false);
+                }}
+              >
+                <Text style={styles.modalClose}>取消</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>选择店铺</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
+                {stores.filter((store) => store.status === 'active').map((store) => (
+                  <TouchableOpacity
+                    key={store.id}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, returnStoreId === store.id && styles.chipActive]}
+                    onPress={() => {
+                      setReturnStoreId(store.id);
+                      setReturnCart(new Map());
+                    }}
+                  >
+                    <Text style={[styles.chipText, { color: theme.textSecondary }, returnStoreId === store.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
+                      {store.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TextInput
+                value={returnSearchText}
+                onChangeText={setReturnSearchText}
+                placeholder="搜索店铺库存商品"
+                placeholderTextColor={theme.textTertiary}
+                style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                textAlignVertical="center"
+              />
+            </View>
+
+            {returnStoreId ? (
+              <FlatList
+                data={filteredReturnProducts}
+                keyExtractor={(item) => item.id}
+                style={styles.list}
+                renderItem={({ item }) => {
+                  const stock = Number(
+                    storeInventory.find((inv) => inv.product_id === item.id && inv.store_id === returnStoreId)?.quantity || 0,
+                  );
+                  const qty = returnCart.get(item.id) || 0;
+                  return (
+                    <View style={styles.productRow}>
+                      {item.image_url ? (
+                        <Image source={{ uri: item.image_url }} style={styles.productThumb} />
+                      ) : (
+                        <View style={styles.productThumbPlaceholder}>
+                          <Text style={styles.productThumbPlaceholderText}>{item.name.charAt(0)}</Text>
+                        </View>
+                      )}
+                      <View style={styles.productRowInfo}>
+                        <Text style={[styles.productRowName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
+                        <Text style={[styles.productRowMeta, { color: theme.textSecondary }]}>店铺库存: {stock}</Text>
+                      </View>
+                      <View style={styles.productRowActions}>
+                        {qty > 0 ? (
+                          <>
+                            <TouchableOpacity
+                              style={styles.qtyBtn}
+                              onPress={() => {
+                                setReturnCart((prev) => {
+                                  const next = new Map(prev);
+                                  const nextQty = qty - 1;
+                                  if (nextQty <= 0) next.delete(item.id);
+                                  else next.set(item.id, nextQty);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <Text style={styles.qtyBtnText}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={styles.qtyValue}>{qty}</Text>
+                          </>
+                        ) : <Text style={styles.qtyEmpty}>0</Text>}
+                        <TouchableOpacity
+                          disabled={qty >= stock}
+                          onPress={() => {
+                            setReturnCart((prev) => {
+                              const next = new Map(prev);
+                              next.set(item.id, qty + 1);
+                              return next;
+                            });
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <LinearGradient
+                            colors={qty >= stock ? ['#ccc', '#ccc'] : ['#FF6B9D', '#5B8DEF']}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                            style={styles.qtyBtnAdd}
+                          >
+                            <Text style={styles.qtyBtnAddText}>+1</Text>
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                    <Text style={[styles.emptyText, { color: theme.textTertiary }]}>该店铺暂无可退货库存</Text>
+                  </View>
+                }
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <ClipboardList size={48} color={theme.textTertiary} strokeWidth={1.5} />
+                <Text style={[styles.emptyText, { color: theme.textTertiary }]}>请先选择店铺</Text>
+              </View>
+            )}
+
+            <View style={[styles.modalButtons, { alignItems: 'center', justifyContent: 'space-between' }]}> 
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '600' }}>
+                  共 {Array.from(returnCart.values()).reduce((sum, value) => sum + value, 0)} 件
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  操作: 店铺库存回退到总仓
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.confirmButtonWrap, { flex: 1 }, (!returnStoreId || returnCart.size === 0 || submittingReturnOrder) && styles.disabledButton]}
+                onPress={() => {
+                  if (!returnStoreId || returnCart.size === 0) return;
+                  void handleCreateReturnOrder();
+                }}
+                disabled={!returnStoreId || returnCart.size === 0 || submittingReturnOrder}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
+                  <Text style={styles.confirmButtonText}>{submittingReturnOrder ? '处理中...' : '确认退货'}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>

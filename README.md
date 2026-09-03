@@ -162,6 +162,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
+64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -228,6 +229,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 61. 执行 `supabase/migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql`
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
+64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -243,7 +245,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.20）
+### 5. 启动 Web 端（v1.3.21）
 
 ```bash
 npm run web:v2
@@ -436,6 +438,23 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.21 (2026-09-03) - 库存排序 + 退货回总仓 + 结算业务日期口径
+
+- Web 库存页“当前库存”列新增升降序切换按钮，支持总仓/店铺库存统一按数量排序。
+- 订单页“上货”旁新增“退货”入口：复用建单式选店/选品交互，执行店铺库存回退总仓库存。
+- 结算单筛选与统计改按业务日期口径：订单页时间筛选与报表趋势/周转涉及结算单时优先 `order_date`，历史空值回退 `created_at`。
+- 修正：库存页默认排序态不再误显示“降序箭头”，仅在升序/降序状态显示对应图标。
+- 修正：退货正式落地为 `order_kind='return'`，并并入口径到“供货分类”；供货统计按退货冲减，可下探到负值。
+- 新增迁移：`supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`（`orders.order_kind` 扩展 `return` + 退货删单回滚方向修正为“总仓减、店铺加”）。
+
+### Mobile v2.2.17 (2026-09-03) - 库存排序 + 退货回总仓 + 结算业务日期口径
+
+- 移动端库存页新增库存数量排序开关（升/降/默认），总仓与店铺库存列表均可按数量重排。
+- 订单页“上货”旁新增“退货”流程，支持按店铺库存选品并将库存从店铺回退至总仓。
+- 结算单相关筛选与报表计算统一优先业务日期 `order_date`，兼容历史补录数据回退 `created_at`。
+- 修正：库存页默认排序态改为中性显示，不再默认展示降序箭头。
+- 修正：退货写入独立 `return` 订单类型并归并到供货分类统计；供货统计支持退货冲减至负数。
 
 ### Web v1.3.20 (2026-09-01) - 进货行总价主口径与到货数量可调收口
 
