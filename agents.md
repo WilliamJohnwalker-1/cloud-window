@@ -224,10 +224,10 @@ const isAdminOrManager = user?.role === 'admin' || user?.role === 'inventory_man
 Execute in Supabase SQL Editor (paste SQL content, not file path):
 
 **New project:**
-41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql -> 47. migrate-v6.6-inventory-log-completion.sql -> 48. migrate-v6.7-refund-reversal-backfill.sql -> 49. migrate-v6.8-retail-income-category-normalization.sql -> 50. migrate-v7.0-store-invoice-fields.sql -> 51. migrate-v7.1-finance-city-binding.sql -> 52. migrate-v7.2-purchase-order-separation.sql -> 53. migrate-v7.3-retail-single-pool-and-log-completion.sql -> 54. migrate-v7.4-store-invoice-contact-fields.sql -> 55. migrate-v7.5-external-channel-orders.sql -> 56. migrate-v8.0-product-dev-and-order-date.sql -> 57. migrate-v8.1-product-dev-pinned.sql -> 58. migrate-v8.2-yunchuang-purchase-all-cities.sql -> 59. migrate-v8.3-inventory-conflict-constraints.sql -> 60. migrate-v8.4-purchase-order-total-and-finance-pagination.sql -> 61. migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql -> 62. migrate-v8.6-product-dev-logistics-stage.sql
+41. migrate-v6.0-foundation.sql -> 42. migrate-v6.1-finance.sql -> 43. migrate-v6.2-knowledge-base.sql -> 44. migrate-v6.3-finance-integration.sql -> 45. migrate-v6.4-financial-backfill.sql -> 46. migrate-v6.5-inventory-slow-moving-alert.sql -> 47. migrate-v6.6-inventory-log-completion.sql -> 48. migrate-v6.7-refund-reversal-backfill.sql -> 49. migrate-v6.8-retail-income-category-normalization.sql -> 50. migrate-v7.0-store-invoice-fields.sql -> 51. migrate-v7.1-finance-city-binding.sql -> 52. migrate-v7.2-purchase-order-separation.sql -> 53. migrate-v7.3-retail-single-pool-and-log-completion.sql -> 54. migrate-v7.4-store-invoice-contact-fields.sql -> 55. migrate-v7.5-external-channel-orders.sql -> 56. migrate-v8.0-product-dev-and-order-date.sql -> 57. migrate-v8.1-product-dev-pinned.sql -> 58. migrate-v8.2-yunchuang-purchase-all-cities.sql -> 59. migrate-v8.3-inventory-conflict-constraints.sql -> 60. migrate-v8.4-purchase-order-total-and-finance-pagination.sql -> 61. migrate-v8.5-purchase-delete-cumulative-cost-rollback.sql -> 62. migrate-v8.6-product-dev-logistics-stage.sql -> 63. migrate-v8.7-purchase-line-total-model.sql -> 64. migrate-v8.8-return-order-kind-and-delete-wrapper.sql
 
 **Upgrade v1->v2:**
-1. migrate-v2.sql -> 2-62 same as above
+1. migrate-v2.sql -> 2-64 same as above
 
 ## GOTCHAS
 
@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.16`
-- Current web baseline: `v1.3.20`
+- Current mobile baseline: `v2.2.17`
+- Current web baseline: `v1.3.21`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -279,6 +279,8 @@ Before committing:
 - Latest purchase-order date-filter hotfix: 双端订单页“进货单”时间筛选改按 `order_date`（业务日期）生效；缺失业务日期的历史单据自动回退 `created_at`，避免筛选丢单。
 - Latest product-dev logistics wave: 双端研发流程新增“物流”阶段（位于“生产”与“已上架”之间），并将商品 ID/EAN-13 绑定与进货到货进度监控从“已上架”迁移至“物流”；双端“推进下一阶段”后统一改为自动回到编辑弹窗以便持续补充信息；Web 顶部阶段筛选由 chips 回退为统一风格下拉框，避免深色背景下文字可读性问题；新增迁移 `migrate-v8.6-product-dev-logistics-stage.sql`（`app_schema_meta` 版本写入口径对齐）。
 - Latest purchase line-total wave: 新增 `migrate-v8.7-purchase-line-total-model.sql`，进货项成本主口径切换为 `purchase_order_items.line_total` 并移除该表 `unit_cost`；确认到货支持数量上调/下调/置0，库存按差量回写；采购费用维持进货单固定总额；商品累计数量/累计成本改为按到货数量与行总价重算。
+- Latest dual-end inventory+settlement wave: 双端库存页补齐“库存数量升降序”切换；双端订单页在“上货”旁新增“退货回总仓”能力（店铺库存 -> 总仓库存）；双端结算单筛选与报表统计口径统一优先 `order_date`，历史数据自动回退 `created_at`。
+- Latest return-stat fix wave: 双端库存排序默认态改为中性（不再默认显示降序箭头）；退货写入 `order_kind='return'` 并归并到供货分类统计，供货统计支持退货冲减为负；新增 `migrate-v8.8-return-order-kind-and-delete-wrapper.sql` 修复退货删单回滚方向（总仓减、店铺加）。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

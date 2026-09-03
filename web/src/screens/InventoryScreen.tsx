@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Check, History, Minus, Pencil, Plus, ScanLine, ShoppingCart, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, History, Minus, Pencil, Plus, ScanLine, ShoppingCart, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ProvinceCityFilter } from '../components/ProvinceCityFilter';
 import { useAppStore } from '../store/useAppStore';
@@ -14,6 +14,7 @@ export const InventoryScreen: React.FC = () => {
   const [cityFilter, setCityFilter] = React.useState<string>('all');
   const [provinceFilter, setProvinceFilter] = React.useState<string | null>(null);
   const [showWarningOnly, setShowWarningOnly] = React.useState(false);
+  const [quantitySort, setQuantitySort] = React.useState<'none' | 'asc' | 'desc'>('none');
   const [viewMode, setViewMode] = React.useState<'main' | 'store'>('main');
   const [selectedStoreProvinceId, setSelectedStoreProvinceId] = React.useState<string | null>(null);
   const [selectedStoreCityId, setSelectedStoreCityId] = React.useState<string | null>(null);
@@ -177,6 +178,28 @@ export const InventoryScreen: React.FC = () => {
     if (!showWarningOnly) return cityFilteredProducts;
     return cityFilteredProducts.filter((item) => Number(item.quantity || 0) < Number(item.min_quantity ?? 10));
   }, [cityFilteredProducts, showWarningOnly]);
+
+  const sortedProducts = React.useMemo(() => {
+    if (quantitySort === 'none') return filteredProducts;
+    const sorted = [...filteredProducts];
+    sorted.sort((left, right) => {
+      const leftQty = Number(left.quantity || 0);
+      const rightQty = Number(right.quantity || 0);
+      return quantitySort === 'asc' ? leftQty - rightQty : rightQty - leftQty;
+    });
+    return sorted;
+  }, [filteredProducts, quantitySort]);
+
+  const sortedStoreInventory = React.useMemo(() => {
+    if (quantitySort === 'none') return filteredStoreInventory;
+    const sorted = [...filteredStoreInventory];
+    sorted.sort((left, right) => {
+      const leftQty = Number(left.quantity || 0);
+      const rightQty = Number(right.quantity || 0);
+      return quantitySort === 'asc' ? leftQty - rightQty : rightQty - leftQty;
+    });
+    return sorted;
+  }, [filteredStoreInventory, quantitySort]);
 
   const currentTotalStock = React.useMemo(() => {
     return viewMode === 'main'
@@ -488,7 +511,22 @@ export const InventoryScreen: React.FC = () => {
             <tr className="border-b border-white/5 bg-white/[0.02]">
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest">商品信息</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">城市</th>
-              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">当前库存</th>
+              <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuantitySort((prev) => {
+                      if (prev === 'none') return 'desc';
+                      if (prev === 'desc') return 'asc';
+                      return 'none';
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 hover:text-white"
+                >
+                  <span>当前库存</span>
+                  {quantitySort === 'asc' ? <ArrowUp size={12} /> : quantitySort === 'desc' ? <ArrowDown size={12} /> : null}
+                </button>
+              </th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">成本价</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">结算价</th>
               <th className="px-8 py-5 text-xs font-bold text-white/40 uppercase tracking-widest text-center">库存价值</th>
@@ -499,7 +537,7 @@ export const InventoryScreen: React.FC = () => {
           </thead>
           <tbody>
             {viewMode === 'main' ? (
-              filteredProducts.map((product, index) => {
+              sortedProducts.map((product, index) => {
                 const currentQty = Number(product.quantity || 0);
                 const isLowStock = currentQty < Number(product.min_quantity ?? 10);
                 return (
@@ -687,7 +725,7 @@ export const InventoryScreen: React.FC = () => {
                 );
               })
             ) : (
-              filteredStoreInventory.map((item, index) => {
+              sortedStoreInventory.map((item, index) => {
                 const product = item.product;
                 const currentStoreQty = Number(item.quantity || 0);
                 return (

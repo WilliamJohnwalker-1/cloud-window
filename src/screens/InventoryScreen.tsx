@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -89,6 +89,7 @@ export default function InventoryScreen() {
   const [editingStoreInventoryItem, setEditingStoreInventoryItem] = useState<StoreInventory | null>(null);
   const [editStoreQuantity, setEditStoreQuantity] = useState('0');
   const [savingStoreEdit, setSavingStoreEdit] = useState(false);
+  const [quantitySort, setQuantitySort] = useState<'none' | 'asc' | 'desc'>('none');
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
@@ -191,6 +192,28 @@ export default function InventoryScreen() {
     if (!searchText.trim()) return true;
     return item.product_name?.toLowerCase().includes(searchText.toLowerCase());
   });
+
+  const sortedFilteredProducts = useMemo(() => {
+    if (quantitySort === 'none') return filteredProducts;
+    const sorted = [...filteredProducts];
+    sorted.sort((left, right) => {
+      const leftQty = Number(left.quantity || 0);
+      const rightQty = Number(right.quantity || 0);
+      return quantitySort === 'asc' ? leftQty - rightQty : rightQty - leftQty;
+    });
+    return sorted;
+  }, [filteredProducts, quantitySort]);
+
+  const sortedFilteredStoreInventory = useMemo(() => {
+    if (quantitySort === 'none') return filteredStoreInventory;
+    const sorted = [...filteredStoreInventory];
+    sorted.sort((left, right) => {
+      const leftQty = Number(left.quantity || 0);
+      const rightQty = Number(right.quantity || 0);
+      return quantitySort === 'asc' ? leftQty - rightQty : rightQty - leftQty;
+    });
+    return sorted;
+  }, [filteredStoreInventory, quantitySort]);
 
   const activePurchaseStores = stores.filter((store) => store.status === 'active');
   const selectedPurchaseStore = activePurchaseStores.find((store) => store.id === purchaseStoreId) || null;
@@ -789,10 +812,36 @@ export default function InventoryScreen() {
             </View>
           </View>
 
-          <View style={[styles.filterRow, { backgroundColor: theme.surface }]}>
+          <View style={[styles.filterRow, { backgroundColor: theme.surface }]}> 
             {renderFilterButton('all', '全部')}
             {renderFilterButton('low', '库存不足')}
             {renderFilterButton('normal', '库存正常')}
+            <TouchableOpacity
+              style={[styles.filterButton, quantitySort !== 'none' && styles.filterActive]}
+              onPress={() => {
+                setQuantitySort((prev) => {
+                  if (prev === 'none') return 'desc';
+                  if (prev === 'desc') return 'asc';
+                  return 'none';
+                });
+              }}
+            >
+              <LinearGradient
+                colors={quantitySort !== 'none' ? ['#FF6B9D', '#5B8DEF'] : [theme.surfaceSecondary, theme.surfaceSecondary]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.filterGradient}
+              >
+                <View style={styles.sortButtonContent}>
+                  <Text style={styles.filterTextActive}>库存</Text>
+                  {quantitySort === 'asc' ? (
+                    <ChevronsUp size={14} color="#fff" />
+                  ) : quantitySort === 'desc' ? (
+                    <ChevronsDown size={14} color="#fff" />
+                  ) : null}
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
           </View>
 
           <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary }] }>
@@ -808,7 +857,7 @@ export default function InventoryScreen() {
           </View>
 
           <FlatList
-            data={filteredProducts}
+            data={sortedFilteredProducts}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
@@ -857,7 +906,7 @@ export default function InventoryScreen() {
             />
           </View>
           <FlatList
-            data={filteredStoreInventory}
+            data={sortedFilteredStoreInventory}
             keyExtractor={(item) => item.id}
             renderItem={renderStoreInventoryItem}
             contentContainerStyle={styles.list}
@@ -1384,6 +1433,11 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     alignItems: 'center',
     borderRadius: Radius.xl,
+  },
+  sortButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   filterText: {
     fontSize: 14,

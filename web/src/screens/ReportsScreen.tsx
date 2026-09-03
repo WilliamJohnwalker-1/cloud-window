@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
 import { AlertTriangle, DollarSign, Package, TrendingDown, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -185,19 +185,8 @@ export const ReportsScreen: React.FC = () => {
   }, [fetchBalance, fetchStores, fetchTransactions]);
 
   useEffect(() => {
-    if (selectedMonth === 'all') {
-      void fetchOrders();
-      return;
-    }
-
-    const monthRange = buildMonthDateRange(selectedMonth);
-    if (!monthRange) {
-      void fetchOrders();
-      return;
-    }
-
-    void fetchOrders(monthRange.startDate, monthRange.endDate);
-  }, [fetchOrders, selectedMonth]);
+    void fetchOrders();
+  }, [fetchOrders]);
 
   useEffect(() => {
     if (selectedMonth !== 'all') return;
@@ -230,14 +219,27 @@ export const ReportsScreen: React.FC = () => {
     setReportType(reportTabs[0]?.key || 'sales');
   }, [reportTabs, reportType]);
 
+  const resolveOrderBusinessDate = useCallback((order: (typeof orders)[number]): string => {
+    if (order.order_kind === 'settlement') {
+      const businessDate = String(order.order_date || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+        return `${businessDate}T00:00:00`;
+      }
+    }
+    return order.created_at;
+  }, []);
+
 
   const { stats, profitData, supplyData, turnoverData, revenueData, sellThroughData, salesSummary } = useMemo(() => {
+    const monthScopedOrders = selectedMonth === 'all'
+      ? orders
+      : orders.filter((order) => resolveOrderBusinessDate(order).slice(0, 7) === selectedMonth);
     const provinceScopedOrders = selectedProvinceId
-      ? orders.filter((order) => {
+      ? monthScopedOrders.filter((order) => {
           const province = reportCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
           return selectedProvinceId === '未知省份' ? !province : province === selectedProvinceId;
         })
-      : orders;
+      : monthScopedOrders;
     const cityScopedOrders = selectedCityId
       ? provinceScopedOrders.filter((order) => getOrderCityKey(order) === selectedCityId)
       : provinceScopedOrders;
@@ -250,7 +252,7 @@ export const ReportsScreen: React.FC = () => {
     const totalRetail = revenueOrders.reduce((sum, order) => sum + Number(order.total_retail_amount || 0), 0);
     const totalDiscount = revenueOrders.reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
     const pendingCount = scopedOrders.filter((order) => order.status === 'pending').length;
-    const supplyOrders = scopedOrders.filter((order) => order.order_kind === 'distribution');
+    const supplyOrders = scopedOrders.filter((order) => order.order_kind === 'distribution' || order.order_kind === 'return');
 
     const cityMap = new Map<string, number>();
     const productAmountMap = new Map<string, number>();
@@ -291,7 +293,7 @@ export const ReportsScreen: React.FC = () => {
 
     const trendMap = new Map<string, number>();
     revenueOrders.forEach((order) => {
-      const date = new Date(order.created_at);
+      const date = new Date(resolveOrderBusinessDate(order));
       let key = '';
       if (selectedMonth === 'all') {
         key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -404,10 +406,10 @@ export const ReportsScreen: React.FC = () => {
     const globalSeenProductsForTrend = new Set<string>();
     const profitTrendMap = new Map<string, { revenue: number; cost: number }>();
     
-    const sortedRevenueOrders = [...revenueOrders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const sortedRevenueOrders = [...revenueOrders].sort((a, b) => new Date(resolveOrderBusinessDate(a)).getTime() - new Date(resolveOrderBusinessDate(b)).getTime());
     
     sortedRevenueOrders.forEach((order) => {
-      const date = new Date(order.created_at);
+      const date = new Date(resolveOrderBusinessDate(order));
       let key = '';
       if (selectedMonth === 'all') {
         key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -452,16 +454,17 @@ export const ReportsScreen: React.FC = () => {
     let totalSupplyQuantity = 0;
 
     supplyOrders.forEach((order) => {
+      const signedFactor = order.order_kind === 'return' ? -1 : 1;
       const storeName = order.store_name || '未知店铺/历史订单';
       const orderSupplyQty = order.items
         .filter((item) => !item.is_sample)
-        .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+        .reduce((sum, item) => sum + Number(item.quantity || 0) * signedFactor, 0);
       supplyStoreMap.set(storeName, (supplyStoreMap.get(storeName) || 0) + orderSupplyQty);
 
       order.items.forEach((item) => {
         if (item.is_sample) return;
         const productName = item.product_name || item.product_id;
-        const quantity = Number(item.quantity || 0);
+        const quantity = Number(item.quantity || 0) * signedFactor;
         supplyProductMap.set(productName, (supplyProductMap.get(productName) || 0) + quantity);
         totalSupplyQuantity += quantity;
       });
@@ -487,8 +490,8 @@ export const ReportsScreen: React.FC = () => {
       const [year, month] = selectedMonth.split('-');
       periodDays = new Date(Number(year), Number(month), 0).getDate();
     } else if (turnoverOrders.length > 0) {
-      const earliest = Math.min(...turnoverOrders.map((order) => new Date(order.created_at).getTime()));
-      const latest = Math.max(...turnoverOrders.map((order) => new Date(order.created_at).getTime()));
+      const earliest = Math.min(...turnoverOrders.map((order) => new Date(resolveOrderBusinessDate(order)).getTime()));
+      const latest = Math.max(...turnoverOrders.map((order) => new Date(resolveOrderBusinessDate(order)).getTime()));
       periodDays = Math.max(1, Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24)));
     }
 
@@ -498,7 +501,7 @@ export const ReportsScreen: React.FC = () => {
     const productRecentSalesVolume: Record<string, number> = {};
 
     turnoverOrders.forEach((order) => {
-      const soldAt = new Date(order.created_at).getTime();
+      const soldAt = new Date(resolveOrderBusinessDate(order)).getTime();
       order.items.forEach((item) => {
         if (item.is_sample || Number(item.quantity || 0) <= 0) return;
         const productId = item.product_id;
@@ -842,7 +845,7 @@ export const ReportsScreen: React.FC = () => {
       turnoverData,
       salesSummary,
     };
-  }, [isRefundLikeOrder, orders, products, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
+  }, [isRefundLikeOrder, orders, products, reportCityProvinceMap, resolveOrderBusinessDate, selectedCityId, selectedMonth, selectedProvinceId, selectedStore, selectedStoreId, storeInventory]);
 
   useEffect(() => {
     if (reportType !== 'inventory_turnover') {
@@ -1342,7 +1345,7 @@ export const ReportsScreen: React.FC = () => {
       <div className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-bold">供货统计</h3>
-          <p className="text-sm text-white/50">仅统计供货单（distribution）</p>
+          <p className="text-sm text-white/50">统计供货单 + 退货冲减（distribution + return）</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -1,6 +1,18 @@
 export interface MonthSource {
   created_at?: string | null;
+  order_date?: string | null;
+  order_kind?: string | null;
 }
+
+const resolveMonthSourceDate = (row: MonthSource): string | null | undefined => {
+  if (row.order_kind === 'settlement') {
+    const businessDate = String(row.order_date || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+      return businessDate;
+    }
+  }
+  return row.created_at;
+};
 
 export const buildMonthDateRange = (selectedMonth: string): { startDate: string; endDate: string } | null => {
   const [yearText, monthText] = selectedMonth.split('-');
@@ -41,7 +53,7 @@ export const buildMonthOptions = (rows: MonthSource[], now: Date = new Date()): 
 
   let earliestIndex = currentIndex;
   rows.forEach((row) => {
-    const key = toMonthKey(row.created_at);
+    const key = toMonthKey(resolveMonthSourceDate(row));
     if (!key) return;
     const idx = toMonthIndex(key);
     if (idx < earliestIndex) {

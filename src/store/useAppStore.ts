@@ -370,6 +370,7 @@ const createRequestId = (prefix: 'batch' | 'outbound', userId: string): string =
 
 const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
   kind === 'retail' ? 'retail' :
+  kind === 'return' ? 'return' :
   kind === 'settlement' ? 'settlement' :
   kind === 'purchase' ? 'purchase' :
   kind === 'external' ? 'external' :
@@ -521,6 +522,10 @@ interface AppState {
     productId: string,
     quantity: number,
     options?: { skipRefresh?: boolean; note?: string; beforeQuantity?: number },
+  ) => Promise<{ error: Error | null }>;
+  returnStoreInventoryToWarehouse: (
+    storeId: string,
+    items: Array<{ productId: string; quantity: number }>,
   ) => Promise<{ error: Error | null }>;
   updateInventorySettings: (
     productId: string,
@@ -823,6 +828,16 @@ const isSameMonth = (input: string, year: number, monthIndex: number): boolean =
   return date.getFullYear() === year && date.getMonth() === monthIndex;
 };
 
+const resolveSettlementBusinessDate = (order: Pick<Order, 'order_kind' | 'order_date' | 'created_at'>): string => {
+  if (order.order_kind === 'settlement') {
+    const businessDate = String(order.order_date || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+      return `${businessDate}T00:00:00`;
+    }
+  }
+  return order.created_at;
+};
+
 const getMonthContext = (now: Date): {
   year: number;
   monthIndex: number;
@@ -888,7 +903,7 @@ export const buildCityChannelReport = ({
     const cityName = store.city_name || '未知城市';
     const revenueOrders = getRevenueOrdersForStore(orders, storeName);
     const monthRevenue = revenueOrders.reduce((sum, order) => {
-      if (!isSameMonth(order.created_at, month.year, month.monthIndex)) return sum;
+      if (!isSameMonth(resolveSettlementBusinessDate(order), month.year, month.monthIndex)) return sum;
       return sum + Number(order.total_discount_amount || 0);
     }, 0);
     cityRevenueMap.set(cityName, (cityRevenueMap.get(cityName) || 0) + monthRevenue);
@@ -906,8 +921,9 @@ export const buildCityChannelReport = ({
       const soldProductIds = new Set<string>();
 
       revenueOrders.forEach((order) => {
-        const isCurrentMonth = isSameMonth(order.created_at, month.year, month.monthIndex);
-        const isPreviousMonth = isSameMonth(order.created_at, month.prevYear, month.prevMonthIndex);
+        const orderDate = resolveSettlementBusinessDate(order);
+        const isCurrentMonth = isSameMonth(orderDate, month.year, month.monthIndex);
+        const isPreviousMonth = isSameMonth(orderDate, month.prevYear, month.prevMonthIndex);
         if (isCurrentMonth) {
           supplyRevenue += Number(order.total_discount_amount || 0);
         }
@@ -995,14 +1011,14 @@ export const buildProductDetailReport = ({
         const unitCost = Number(product.cost || 0);
 
         const monthSales = revenueOrders.reduce((sum, order) => {
-          if (!isSameMonth(order.created_at, month.year, month.monthIndex)) return sum;
+          if (!isSameMonth(resolveSettlementBusinessDate(order), month.year, month.monthIndex)) return sum;
           return sum + order.items
             .filter((item) => !item.is_sample && item.product_id === productId)
             .reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0);
         }, 0);
 
         const prevSales = revenueOrders.reduce((sum, order) => {
-          if (!isSameMonth(order.created_at, month.prevYear, month.prevMonthIndex)) return sum;
+          if (!isSameMonth(resolveSettlementBusinessDate(order), month.prevYear, month.prevMonthIndex)) return sum;
           return sum + order.items
             .filter((item) => !item.is_sample && item.product_id === productId)
             .reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0);
@@ -1057,7 +1073,7 @@ export const buildPaymentReport = ({
     .map((store, index) => {
       const receivable = orders
         .filter((order) => order.order_kind === 'settlement' && order.store_id === store.id)
-        .filter((order) => isSameMonth(order.created_at, month.year, month.monthIndex))
+        .filter((order) => isSameMonth(resolveSettlementBusinessDate(order), month.year, month.monthIndex))
         .reduce((sum, order) => sum + Number(order.total_discount_amount || 0), 0);
 
       const paidAmount = transactions
@@ -2125,6 +2141,162 @@ export const useAppStore = create<AppState>()(
             await get().fetchStoreInventory(storeId);
           }
 
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      returnStoreInventoryToWarehouse: async (storeId, items) => {
+        try {
+          const { user, stores, products, storeProductPrices } = get();
+          if (!user) throw new Error('未登录');
+          if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager')) {
+            throw new Error('当前角色无退货权限');
+          }
+          if (!storeId) throw new Error('店铺不能为空');
+          if (!Array.isArray(items) || items.length === 0) throw new Error('退货商品不能为空');
+
+          const selectedStore = stores.find((store) => store.id === storeId) || null;
+          if (!selectedStore) throw new Error('店铺不存在或未加载');
+          if (selectedStore.status === 'inactive') throw new Error('店铺已停用');
+
+          const normalizedItems = items
+            .map((item) => ({ productId: item.productId, quantity: Number(item.quantity) }))
+            .filter((item) => item.productId && Number.isFinite(item.quantity) && item.quantity > 0);
+          if (normalizedItems.length === 0) throw new Error('退货数量无效');
+
+          const productIds = Array.from(new Set(normalizedItems.map((item) => item.productId)));
+          const now = new Date().toISOString();
+
+          const productMap = new Map(
+            products
+              .filter((product) => productIds.includes(product.id))
+              .map((product) => [product.id, product]),
+          );
+          if (productMap.size !== productIds.length) {
+            throw new Error('存在已失效商品，请刷新后重试');
+          }
+
+          const { data: storeRows, error: storeError } = await supabase
+            .from('store_inventory')
+            .select('product_id, quantity')
+            .eq('store_id', storeId)
+            .in('product_id', productIds);
+          if (storeError) throw storeError;
+
+          const storeQtyMap = new Map((storeRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]));
+          const insufficient = normalizedItems.find((item) => (storeQtyMap.get(item.productId) || 0) < item.quantity);
+          if (insufficient) throw new Error('店铺库存不足');
+
+          const { data: inventoryRows, error: inventoryError } = await supabase
+            .from('inventory')
+            .select('product_id, quantity')
+            .in('product_id', productIds);
+          if (inventoryError) throw inventoryError;
+
+          const inventoryQtyMap = new Map((inventoryRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]));
+
+          const storePayload = normalizedItems.map((item) => ({
+            store_id: storeId,
+            product_id: item.productId,
+            quantity: (storeQtyMap.get(item.productId) || 0) - item.quantity,
+            updated_at: now,
+          }));
+
+          const inventoryPayload = normalizedItems.map((item) => ({
+            product_id: item.productId,
+            quantity: (inventoryQtyMap.get(item.productId) || 0) + item.quantity,
+            updated_at: now,
+          }));
+
+          const returnOrderItems = normalizedItems.map((item) => {
+            const product = productMap.get(item.productId);
+            if (!product) throw new Error('商品不存在');
+            const retailPrice = Number(product.price || 0);
+            const storeOverride = storeProductPrices.find((entry) => entry.store_id === storeId && entry.product_id === item.productId);
+            const discountPrice = resolvePrice({
+              price: retailPrice,
+              discount_price: product.discount_price,
+              discount_rate: selectedStore.discount_rate,
+              override_price: storeOverride?.override_price,
+            }).price;
+            return {
+              product_id: item.productId,
+              quantity: item.quantity,
+              retail_price: retailPrice,
+              discount_price: discountPrice,
+              unit_cost: Number(product.cost || 0),
+              one_time_cost: Number(product.one_time_cost || 0),
+              is_sample: false,
+            };
+          });
+
+          const returnRetailTotal = returnOrderItems.reduce((sum, item) => sum + item.retail_price * item.quantity, 0);
+          const returnDiscountTotal = returnOrderItems.reduce((sum, item) => sum + item.discount_price * item.quantity, 0);
+
+          const { data: orderInsertData, error: orderInsertError } = await supabase
+            .from('orders')
+            .insert({
+              distributor_id: user.id,
+              city_id: selectedStore.city_id,
+              store_id: storeId,
+              order_kind: 'return' as const,
+              status: 'accepted' as const,
+              total_retail_amount: -returnRetailTotal,
+              total_discount_amount: -returnDiscountTotal,
+            })
+            .select('id')
+            .single();
+          if (orderInsertError) throw orderInsertError;
+
+          const { error: orderItemsInsertError } = await supabase.from('order_items').insert(
+            returnOrderItems.map((item) => ({
+              ...item,
+              order_id: orderInsertData.id,
+            })),
+          );
+          if (orderItemsInsertError) throw orderItemsInsertError;
+
+          const { error: storeUpdateError } = await supabase
+            .from('store_inventory')
+            .upsert(storePayload, { onConflict: 'store_id,product_id' });
+          if (storeUpdateError) throw storeUpdateError;
+
+          const { error: inventoryUpdateError } = await supabase
+            .from('inventory')
+            .upsert(inventoryPayload, { onConflict: 'product_id' });
+          if (inventoryUpdateError) throw inventoryUpdateError;
+
+          const logs = normalizedItems.flatMap((item) => {
+            const beforeStore = storeQtyMap.get(item.productId) || 0;
+            const beforeMain = inventoryQtyMap.get(item.productId) || 0;
+            return [
+              {
+                product_id: item.productId,
+                operator_id: user.id,
+                action: 'manual_adjust',
+                delta_quantity: -item.quantity,
+                before_quantity: beforeStore,
+                after_quantity: beforeStore - item.quantity,
+                note: '店铺退货回总仓(店铺池)',
+              },
+              {
+                product_id: item.productId,
+                operator_id: user.id,
+                action: 'manual_adjust',
+                delta_quantity: item.quantity,
+                before_quantity: beforeMain,
+                after_quantity: beforeMain + item.quantity,
+                note: '店铺退货回总仓(总仓)',
+              },
+            ];
+          });
+
+          const { error: logError } = await supabase.from('inventory_logs').insert(logs);
+          if (logError) throw logError;
+
+          await Promise.all([get().fetchProducts(), get().fetchStoreInventory(storeId), get().fetchOrders()]);
           return { error: null };
         } catch (error) {
           return { error: error as Error };

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 import { getProvinceForCity } from '../utils/provinceMapping';
-import type { City, FinanceReportType } from '../types';
+import type { City, FinanceReportType, Order } from '../types';
 
 type ReportType = FinanceReportType;
 
@@ -280,19 +280,8 @@ export default function ReportsScreen() {
   }, [fetchProducts, fetchStores, fetchTransactions, fetchBalance]);
 
   useEffect(() => {
-    if (selectedMonth === 'all') {
-      fetchOrders();
-      return;
-    }
-
-    const monthRange = buildMonthDateRange(selectedMonth);
-    if (!monthRange) {
-      fetchOrders();
-      return;
-    }
-
-    fetchOrders(monthRange.startDate, monthRange.endDate);
-  }, [fetchOrders, selectedMonth]);
+    fetchOrders();
+  }, [fetchOrders]);
 
   useEffect(() => {
     if (selectedStoreId) {
@@ -316,8 +305,21 @@ export default function ReportsScreen() {
     }
   }, [filteredStores, selectedStoreId]);
 
+  const resolveOrderBusinessDate = useCallback((order: Order): string => {
+    if (order.order_kind === 'settlement') {
+      const businessDate = String(order.order_date || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+        return `${businessDate}T00:00:00`;
+      }
+    }
+    return order.created_at;
+  }, []);
+
   const filteredOrders = useMemo(() => {
     let list = [...orders];
+    if (selectedMonth !== 'all') {
+      list = list.filter((order) => resolveOrderBusinessDate(order).slice(0, 7) === selectedMonth);
+    }
     if (selectedProvinceId) {
       list = list.filter((order) => {
         const province = reportCityProvinceMap.get(order.city_id || '') || getProvinceForCity(order.city_name || '');
@@ -331,7 +333,7 @@ export default function ReportsScreen() {
       list = list.filter((order) => order.store_id === selectedStoreId);
     }
     return list;
-  }, [orders, reportCityProvinceMap, selectedCityId, selectedProvinceId, selectedStoreId]);
+  }, [orders, reportCityProvinceMap, resolveOrderBusinessDate, selectedCityId, selectedMonth, selectedProvinceId, selectedStoreId]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -468,7 +470,7 @@ export default function ReportsScreen() {
   }, [products, revenueScopedOrders, selectedStoreId, storeInventory]);
 
   const supplyData = useMemo(() => {
-    const supplyOrders = filteredOrders.filter((order) => order.order_kind === 'distribution');
+    const supplyOrders = filteredOrders.filter((order) => order.order_kind === 'distribution' || order.order_kind === 'return');
     const totalSupplyOrders = supplyOrders.length;
 
     const productSupplyQty: { [key: string]: { name: string; quantity: number } } = {};
@@ -476,15 +478,16 @@ export default function ReportsScreen() {
     let totalSupplyQuantity = 0;
 
     supplyOrders.forEach((order) => {
+      const signedFactor = order.order_kind === 'return' ? -1 : 1;
       const storeKey = order.store_name || '未知店铺/历史订单';
-      const orderQty = order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      const orderQty = order.items.reduce((sum, item) => sum + Number(item.quantity || 0) * signedFactor, 0);
       storeSupplyQty[storeKey] = (storeSupplyQty[storeKey] || 0) + orderQty;
 
       order.items.forEach((item) => {
         if (item.is_sample) return;
         const productKey = item.product_id;
         const productName = item.product_name || '未知';
-        const quantity = Number(item.quantity || 0);
+        const quantity = Number(item.quantity || 0) * signedFactor;
         if (!productSupplyQty[productKey]) {
           productSupplyQty[productKey] = { name: productName, quantity: 0 };
         }
@@ -557,13 +560,13 @@ export default function ReportsScreen() {
       const [year, month] = selectedMonth.split('-');
       periodDays = new Date(Number(year), Number(month), 0).getDate();
     } else if (soldOrders.length > 0) {
-      const earliest = Math.min(...soldOrders.map((order) => new Date(order.created_at).getTime()));
-      const latest = Math.max(...soldOrders.map((order) => new Date(order.created_at).getTime()));
+      const earliest = Math.min(...soldOrders.map((order) => new Date(resolveOrderBusinessDate(order)).getTime()));
+      const latest = Math.max(...soldOrders.map((order) => new Date(resolveOrderBusinessDate(order)).getTime()));
       periodDays = Math.max(1, Math.ceil((latest - earliest) / (1000 * 60 * 60 * 24)));
     }
 
     soldOrders.forEach((order) => {
-      const soldAt = new Date(order.created_at).getTime();
+      const soldAt = new Date(resolveOrderBusinessDate(order)).getTime();
       if (!Number.isFinite(soldAt)) return;
       order.items.forEach((item) => {
         if (item.is_sample || Number(item.quantity || 0) <= 0) return;
@@ -1005,7 +1008,7 @@ export default function ReportsScreen() {
     const profitTrendMap: { [key: string]: { revenue: number; cost: number } } = {};
     const seenProductsForTrend = new Set<string>();
     revenueScopedOrders.forEach((order) => {
-      const date = new Date(order.created_at);
+      const date = new Date(resolveOrderBusinessDate(order));
       let key = '';
       if (selectedMonth === 'all') {
         key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -1073,7 +1076,7 @@ export default function ReportsScreen() {
       compositionByStore,
       compositionByCity,
     };
-  }, [revenueScopedOrders, selectedMonth]);
+  }, [resolveOrderBusinessDate, revenueScopedOrders, selectedMonth]);
 
   const financeData = useMemo(() => {
     let list = [...transactions];
@@ -1530,7 +1533,7 @@ export default function ReportsScreen() {
     <ScrollView>
       <View style={[styles.card, { backgroundColor: theme.surface }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>供货统计概览</Text>
-        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>仅统计供货单（distribution）</Text>
+        <Text style={[styles.cardSubtitle, { color: theme.textSecondary }]}>统计供货单 + 退货冲减（distribution + return）</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: theme.textPrimary }]}>{supplyData.totalSupplyOrders}</Text>
