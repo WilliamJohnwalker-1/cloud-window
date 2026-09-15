@@ -163,6 +163,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
+65. 执行 `supabase/migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -230,6 +231,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 62. 执行 `supabase/migrate-v8.6-product-dev-logistics-stage.sql`
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
+65. 执行 `supabase/migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -245,7 +247,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.21）
+### 5. 启动 Web 端（v1.3.22）
 
 ```bash
 npm run web:v2
@@ -438,6 +440,35 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.22 (2026-09-15) - 收银台提速 + 结算确认流程 + 成本口径升级 + 报表与日志收口
+
+- 支付链路提速：Worker `/collect` 移除弃用 `micropay` 通路，微信收款直接走 `codepay` 主路径，减少一次必失败回退。
+- 数据库迁移新增 `supabase/migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`：
+  - 结算单新增 `confirmed_at`；
+  - `create_settlement_order_atomic` 改为创建 `pending/pending`；
+  - 新增 `edit_settlement_order_atomic`、`confirm_settlement_order_atomic`；
+  - 已确认结算单禁止删除；
+  - 历史结算单回填 `confirmed_at=created_at`；
+  - `inventory_logs` 增加 `store_id` 并补齐索引。
+- Web 订单页结算流程升级：
+  - 未确认/已确认状态徽标；
+  - 未确认支持修改与确认收款；
+  - “确认收款”改为站内统一弹窗（不再使用浏览器 `window.confirm`）；
+  - 订单卡片 + 详情均展示确认收款时间。
+- 商品成本口径升级：`cost` 自动按 `(cumulative_cost_amount + one_time_cost) / cumulative_cost_quantity` 计算；`one_time_cost` 变更触发自动重算；累计数量为 0 时成本留空（待计算）。
+- 双端报表利润口径统一：利润成本改为 `unitCostTotal + sampleCostTotal`，移除独立 oneTimeCost 重复计入。
+- 新订单明细口径收口：`order_items.one_time_cost` 新写入统一为 `0`，历史数据保留不改。
+- 店铺库存日志收口：总仓日志与店铺日志按 `store_id` 分流；结算建单/修改/删单回滚链路补齐 `settlement_create` / `settlement_edit` 记录。
+- 本轮补丁：结算建单选店后商品列表改为“仅展示该店当前有库存商品”，不再展示该城市全量商品。
+
+### Mobile v2.2.18 (2026-09-15) - 结算流程与库存日志口径对齐收口
+
+- 移动端结算单流程与 Web 对齐：支持确认前修改、确认后锁定、确认时间显示与确认收款动作。
+- 移动端商品成本展示改为只读口径，配合自动成本计算链路；`one_time_cost` 保持可维护。
+- 移动端报表利润口径同步移除独立 oneTimeCost 叠加，避免重复计算。
+- 移动端库存日志读取映射类型化收口：补齐 `store_id/store_name` 与数量字段映射，移除隐式 `any`。
+- 本轮补丁：结算建单选店后仅展示该店有库存商品（编辑结算单场景保留原单已选商品可见性）。
 
 ### Web v1.3.21 (2026-09-03) - 库存排序 + 退货回总仓 + 结算业务日期口径
 

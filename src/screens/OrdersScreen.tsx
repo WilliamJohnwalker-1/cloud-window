@@ -65,6 +65,8 @@ export default function OrdersScreen() {
     deletePurchaseOrderV2,
     findProductByBarcode,
     outboundStock,
+    confirmSettlementOrder,
+    editSettlementOrder,
   } = useAppStore();
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
@@ -119,6 +121,7 @@ export default function OrdersScreen() {
   const [retailQtyInputMode, setRetailQtyInputMode] = useState<Map<string, string>>(new Map());
   const [retailQtyEditingKey, setRetailQtyEditingKey] = useState<string | null>(null);
   const [submittingRetailOrder, setSubmittingRetailOrder] = useState(false);
+  const [editingSettlementOrderId, setEditingSettlementOrderId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [modalSearchText, setModalSearchText] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -733,6 +736,10 @@ export default function OrdersScreen() {
   };
 
   const handleDeleteOrder = (order: Order) => {
+    if (order.order_kind === 'settlement' && order.confirmed_at) {
+      Toast.show({ type: 'error', text1: '不可删除', text2: '已确认的结算单不可删除' });
+      return;
+    }
     const paymentStatus = String(order.payment_status || '').toLowerCase();
     if (['paid', 'partial_refunded', 'refund_pending', 'partial_refund_pending'].includes(paymentStatus)) {
       Toast.show({ type: 'error', text1: '不可删除', text2: '已支付订单请先退款' });
@@ -840,6 +847,7 @@ export default function OrdersScreen() {
     setRetailCart(new Map());
     setRetailQtyInputMode(new Map());
     setRetailQtyEditingKey(null);
+    setEditingSettlementOrderId(null);
   };
 
   const resetReturnForm = () => {
@@ -867,6 +875,27 @@ export default function OrdersScreen() {
         return [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase().includes(keyword);
       });
   }, [products, returnSearchText, returnStoreId, storeInventory, stores]);
+
+  const settlementVisibleProducts = useMemo(() => {
+    if (!retailStoreId) return [];
+    const selectedStore = stores.find((store) => store.id === retailStoreId);
+    if (!selectedStore) return [];
+    const originalOrder = editingSettlementOrderId
+      ? orders.find((order) => order.id === editingSettlementOrderId)
+      : null;
+
+    return products
+      .filter((product) => product.city_id === selectedStore.city_id)
+      .filter((product) => {
+        const stock = Number(
+          storeInventory.find((inv) => inv.product_id === product.id && inv.store_id === retailStoreId)?.quantity || 0,
+        );
+        if (stock > 0) return true;
+        if (!originalOrder) return false;
+        const reservedQty = Number(originalOrder.items.find((item) => item.product_id === product.id)?.quantity || 0);
+        return reservedQty > 0;
+      });
+  }, [editingSettlementOrderId, orders, products, retailStoreId, storeInventory, stores]);
 
   const handleCreateReturnOrder = async (): Promise<void> => {
     if (!returnStoreId) {
@@ -1297,11 +1326,29 @@ export default function OrdersScreen() {
       <View style={styles.orderHeader}>
         <View>
           <Text style={[styles.orderId, { color: theme.textPrimary }]}>订单 #{item.id.slice(0, 8)}</Text>
-          <Text style={[styles.orderKindTag, { color: getOrderKindTagColor(item.order_kind) }]}>{getOrderKindLabel(item.order_kind)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+            <Text style={[styles.orderKindTag, { color: getOrderKindTagColor(item.order_kind), marginTop: 0 }]}>{getOrderKindLabel(item.order_kind)}</Text>
+            {item.order_kind === 'settlement' && (
+              <View style={[styles.settlementBadge, { backgroundColor: item.confirmed_at ? Colors.successBg : Colors.warningBg }]}>
+                <Text style={[styles.settlementBadgeText, { color: item.confirmed_at ? Colors.success : Colors.warning }]}>
+                  {item.confirmed_at ? '已确认' : '未确认'}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
         <View style={styles.orderDateGroup}>
-          <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
-          {item.order_date ? <Text style={[styles.orderBusinessDate, { color: theme.textSecondary }]}>业务 {item.order_date}</Text> : null}
+          {item.order_date ? (
+            <>
+              <Text style={[styles.orderDate, { color: theme.textPrimary, fontWeight: '600' }]}>{item.order_date}</Text>
+              <Text style={[styles.orderBusinessDate, { color: theme.textTertiary }]}>创建: {new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+            </>
+          ) : (
+            <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+          )}
+          {item.order_kind === 'settlement' && item.confirmed_at && (
+            <Text style={[styles.orderBusinessDate, { color: theme.textSecondary }]}>确认: {new Date(item.confirmed_at).toLocaleString('zh-CN')}</Text>
+          )}
         </View>
       </View>
 
@@ -1324,7 +1371,6 @@ export default function OrdersScreen() {
           <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>业务日期: {item.order_date}</Text>
         </View>
       ) : null}
-
       <View style={styles.orderItemsSummary}>
         <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}>
           共 {item.items.length} 种商品，{item.items.reduce((sum, i) => sum + Number(i.quantity || 0), 0)} 件
@@ -1351,7 +1397,7 @@ export default function OrdersScreen() {
           <Download size={14} color={Colors.blue} />
           <Text style={styles.exportButtonText}>导出</Text>
         </TouchableOpacity>
-        {isAdmin && item.status === 'pending' && item.order_kind !== 'purchase' && item.order_kind !== 'external' && (
+        {isAdmin && item.status === 'pending' && item.order_kind !== 'purchase' && item.order_kind !== 'external' && item.order_kind !== 'settlement' && (
           <TouchableOpacity
             style={styles.acceptOrderButton}
             onPress={async () => {
@@ -1379,6 +1425,50 @@ export default function OrdersScreen() {
           >
             <Text style={styles.modifyOrderButtonText}>修改订单</Text>
           </TouchableOpacity>
+        )}
+        {item.order_kind === 'settlement' && !item.confirmed_at && (
+          <>
+            {canCreateSettlement && (
+              <TouchableOpacity
+                style={styles.modifyOrderButton}
+                onPress={() => {
+                  setEditingSettlementOrderId(item.id);
+                  setRetailStoreId(item.store_id || null);
+                  setSettlementOrderDate(item.order_date || '');
+                  const initialCart = new Map<string, number>();
+                  item.items.forEach(i => initialCart.set(i.product_id, i.quantity));
+                  setRetailCart(initialCart);
+                  setRetailModalVisible(true);
+                }}
+              >
+                <Text style={styles.modifyOrderButtonText}>修改</Text>
+              </TouchableOpacity>
+            )}
+            {isAdmin && (
+              <TouchableOpacity
+                style={styles.acceptOrderButton}
+                onPress={() => {
+                  Alert.alert('确认收款', `确定要确认结算单 #${item.id.slice(0, 8)} 的收款吗？确认后将不可修改。`, [
+                    { text: '取消', style: 'cancel' },
+                    {
+                      text: '确认',
+                      onPress: async () => {
+                        const { error } = await confirmSettlementOrder(item.id);
+                        if (error) {
+                          Toast.show({ type: 'error', text1: '确认失败', text2: error.message });
+                        } else {
+                          Toast.show({ type: 'success', text1: '成功', text2: '结算单已确认收款' });
+                          fetchOrders();
+                        }
+                      }
+                    }
+                  ]);
+                }}
+              >
+                <Text style={styles.acceptOrderButtonText}>确认收款</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
         {(isAdmin || user?.id === item.distributor_id) && (
           <TouchableOpacity
@@ -2555,7 +2645,7 @@ export default function OrdersScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.surface }]}> 
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>结算建单</Text>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>{editingSettlementOrderId ? '修改结算单' : '结算建单'}</Text>
               <TouchableOpacity onPress={() => {
                 resetSettlementForm();
                 setRetailModalVisible(false);
@@ -2567,14 +2657,16 @@ export default function OrdersScreen() {
             <View style={[styles.filterPanelContainer, { backgroundColor: theme.surface }]}> 
               <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>选择店铺</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-                {stores.filter(s => s.status === 'active').map(store => (
+                {stores.filter(s => s.status === 'active' || s.id === retailStoreId).map(store => (
                   <TouchableOpacity
                     key={store.id}
-                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, retailStoreId === store.id && styles.chipActive]}
+                    style={[styles.chip, { backgroundColor: theme.surfaceSecondary }, retailStoreId === store.id && styles.chipActive, editingSettlementOrderId && retailStoreId !== store.id && { opacity: 0.5 }]}
                     onPress={() => {
+                      if (editingSettlementOrderId) return;
                       setRetailStoreId(store.id);
                       setRetailCart(new Map());
                     }}
+                    disabled={!!editingSettlementOrderId}
                   >
                     <Text style={[styles.chipText, { color: theme.textSecondary }, retailStoreId === store.id && styles.chipTextActive]} numberOfLines={1} ellipsizeMode="tail">
                       {store.name}
@@ -2604,13 +2696,23 @@ export default function OrdersScreen() {
 
             {retailStoreId ? (
               <FlatList
-                data={products.filter(p => p.city_id === stores.find(s => s.id === retailStoreId)?.city_id)}
+                data={settlementVisibleProducts}
                 keyExtractor={item => item.id}
                 style={styles.list}
                 renderItem={({ item }) => {
                   const stock = storeInventory.find(inv => inv.product_id === item.id && inv.store_id === retailStoreId)?.quantity || 0;
+                  let effectiveStock = stock;
+                  if (editingSettlementOrderId) {
+                    const originalOrder = orders.find(o => o.id === editingSettlementOrderId);
+                    if (originalOrder) {
+                      const originalItem = originalOrder.items.find(i => i.product_id === item.id);
+                      if (originalItem) {
+                        effectiveStock += (originalItem.quantity || 0);
+                      }
+                    }
+                  }
                   const qty = retailCart.get(item.id) || 0;
-                  const isZeroStock = stock <= 0;
+                  const isZeroStock = effectiveStock <= 0;
                   const editing = retailQtyEditingKey === item.id;
                   const inputValue = retailQtyInputMode.get(item.id) || '';
                   
@@ -2626,7 +2728,7 @@ export default function OrdersScreen() {
                       <View style={styles.productRowInfo}>
                         <Text style={[styles.productRowName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
                         <Text style={[styles.productRowMeta, { color: theme.textSecondary }]}>
-                          库存: {stock} · 零售价: {item.price}元
+                          库存: {effectiveStock} · 零售价: {item.price}元
                         </Text>
                       </View>
                       <View style={styles.productRowActions}>
@@ -2660,8 +2762,8 @@ export default function OrdersScreen() {
                                 onBlur={() => {
                                   const val = parseInt(retailQtyInputMode.get(item.id) || '0', 10);
                                   if (!isNaN(val) && val > 0) {
-                                    if (val > stock) {
-                                      Toast.show({ type: 'error', text1: '库存不足', text2: `当前库存仅 ${stock}` });
+                                    if (val > effectiveStock) {
+                                      Toast.show({ type: 'error', text1: '库存不足', text2: `当前库存仅 ${effectiveStock}` });
                                     } else {
                                       setRetailCart(prev => {
                                         const next = new Map(prev);
@@ -2696,7 +2798,7 @@ export default function OrdersScreen() {
                           </>
                         ) : <Text style={styles.qtyEmpty}>0</Text>}
                         <TouchableOpacity 
-                          disabled={isZeroStock || qty >= stock}
+                          disabled={isZeroStock || qty >= effectiveStock}
                           onPress={() => {
                             setRetailCart(prev => {
                               const next = new Map(prev);
@@ -2707,7 +2809,7 @@ export default function OrdersScreen() {
                           activeOpacity={0.85}
                         >
                           <LinearGradient 
-                            colors={isZeroStock || qty >= stock ? ['#ccc', '#ccc'] : ['#FF6B9D', '#5B8DEF']} 
+                            colors={isZeroStock || qty >= effectiveStock ? ['#ccc', '#ccc'] : ['#FF6B9D', '#5B8DEF']} 
                             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} 
                             style={styles.qtyBtnAdd}
                           >
@@ -2737,6 +2839,25 @@ export default function OrdersScreen() {
                     return sum + (p?.price || 0) * qty;
                   }, 0).toFixed(2)}元
                 </Text>
+                {(() => {
+                  if (!editingSettlementOrderId) return null;
+                  const originalOrder = orders.find(o => o.id === editingSettlementOrderId);
+                  if (!originalOrder) return null;
+                  let added = 0;
+                  let removed = 0;
+                  const originalMap = new Map<string, number>();
+                  originalOrder.items.forEach(i => originalMap.set(i.product_id, i.quantity));
+                  retailCart.forEach((qty, productId) => {
+                    const origQty = originalMap.get(productId) || 0;
+                    if (qty > origQty) added += (qty - origQty);
+                    else if (qty < origQty) removed += (origQty - qty);
+                  });
+                  originalMap.forEach((origQty, productId) => {
+                    if (!retailCart.has(productId)) removed += origQty;
+                  });
+                  if (added === 0 && removed === 0) return <Text style={{ color: Colors.warning, fontSize: 11, marginTop: 2, fontWeight: '600' }}>无修改</Text>;
+                  return <Text style={{ color: Colors.warning, fontSize: 11, marginTop: 2, fontWeight: '600' }}>新增 {added} 件, 减少 {removed} 件</Text>;
+                })()}
               </View>
               <TouchableOpacity
                 style={[styles.confirmButtonWrap, { flex: 1 }, (!retailStoreId || retailCart.size === 0 || submittingRetailOrder) && styles.disabledButton]}
@@ -2751,22 +2872,36 @@ export default function OrdersScreen() {
                       price: p?.price || 0,
                     };
                   });
-                  const { error } = await createSettlementOrder(retailStoreId, items, settlementOrderDate);
-                  setSubmittingRetailOrder(false);
-                  if (error) {
-                    Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
+                  
+                  if (editingSettlementOrderId) {
+                    const { error } = await editSettlementOrder(editingSettlementOrderId, items);
+                    setSubmittingRetailOrder(false);
+                    if (error) {
+                      Toast.show({ type: 'error', text1: '修改失败', text2: error.message });
+                    } else {
+                      Toast.show({ type: 'success', text1: '成功', text2: '结算订单已修改' });
+                      resetSettlementForm();
+                      setRetailModalVisible(false);
+                      fetchOrders();
+                    }
                   } else {
-                    Toast.show({ type: 'success', text1: '成功', text2: '结算订单已创建' });
-                    resetSettlementForm();
-                    setRetailModalVisible(false);
-                    fetchOrders();
+                    const { error } = await createSettlementOrder(retailStoreId, items, settlementOrderDate);
+                    setSubmittingRetailOrder(false);
+                    if (error) {
+                      Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
+                    } else {
+                      Toast.show({ type: 'success', text1: '成功', text2: '结算订单已创建' });
+                      resetSettlementForm();
+                      setRetailModalVisible(false);
+                      fetchOrders();
+                    }
                   }
                 }}
                 disabled={!retailStoreId || retailCart.size === 0 || submittingRetailOrder}
                 activeOpacity={0.85}
               >
                 <LinearGradient colors={['#FF6B9D', '#5B8DEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
-                  <Text style={styles.confirmButtonText}>{submittingRetailOrder ? '处理中...' : '确认建单'}</Text>
+                  <Text style={styles.confirmButtonText}>{submittingRetailOrder ? '处理中...' : (editingSettlementOrderId ? '确认修改' : '确认建单')}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -3139,6 +3274,16 @@ const styles = StyleSheet.create({
   orderDateGroup: { alignItems: 'flex-end' },
   orderDate: { fontSize: 12, color: Colors.textTertiary },
   orderBusinessDate: { fontSize: 11, marginTop: 2 },
+  settlementBadge: {
+    marginLeft: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.sm,
+  },
+  settlementBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
   orderMetaContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   orderMeta: { fontSize: 12, color: Colors.textSecondary },
   orderItemsSummary: {

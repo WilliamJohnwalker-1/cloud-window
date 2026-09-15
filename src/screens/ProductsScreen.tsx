@@ -231,10 +231,6 @@ export default function ProductsScreen() {
       return;
     }
 
-    if (!isDistributor && !cost) {
-      Toast.show({ type: 'error', text1: '错误', text2: '请填写单个成本' });
-      return;
-    }
 
     const parsedCumulativeCostQuantity = cumulativeCostQuantity.trim() ? Number(cumulativeCostQuantity) : null;
     const parsedCumulativeCostAmount = cumulativeCostAmount.trim() ? Number(cumulativeCostAmount) : null;
@@ -611,14 +607,12 @@ export default function ProductsScreen() {
               {!isDistributor && (
                 <>
                   <View style={styles.fieldRow}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>单个成本(元)*</Text>
-                    <TextInput
-                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                      value={cost}
-                      onChangeText={setCost}
-                      keyboardType="numeric"
-                      placeholderTextColor={theme.textTertiary}
-                    />
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>单个成本(元)</Text>
+                    <View style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, justifyContent: 'center' }]}>
+                      <Text style={{ fontSize: 16, color: (!cost || cost === '0') ? theme.textTertiary : theme.textPrimary }}>
+                        {(!cost || cost === '0') ? '待计算(进货到货后自动更新)' : cost}
+                      </Text>
+                    </View>
                   </View>
                   <View style={styles.fieldRow}>
                     <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>一次性成本(元)</Text>
@@ -632,25 +626,19 @@ export default function ProductsScreen() {
                   </View>
                   <View style={styles.fieldRow}>
                     <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>累计数量</Text>
-                    <TextInput
-                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                      value={cumulativeCostQuantity}
-                      onChangeText={setCumulativeCostQuantity}
-                      keyboardType="numeric"
-                      placeholder="管理员统计历史总数量"
-                      placeholderTextColor={theme.textTertiary}
-                    />
+                    <View style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, justifyContent: 'center' }]}>
+                      <Text style={{ fontSize: 16, color: theme.textPrimary }}>
+                        {cumulativeCostQuantity || '0'}
+                      </Text>
+                    </View>
                   </View>
                   <View style={styles.fieldRow}>
                     <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>累计成本</Text>
-                    <TextInput
-                      style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
-                      value={cumulativeCostAmount}
-                      onChangeText={setCumulativeCostAmount}
-                      keyboardType="numeric"
-                      placeholder="管理员统计历史总成本"
-                      placeholderTextColor={theme.textTertiary}
-                    />
+                    <View style={[styles.input, styles.fieldInput, { backgroundColor: theme.surfaceSecondary, justifyContent: 'center' }]}>
+                      <Text style={{ fontSize: 16, color: theme.textPrimary }}>
+                        {cumulativeCostAmount || '0'}
+                      </Text>
+                    </View>
                   </View>
                 </>
               )}

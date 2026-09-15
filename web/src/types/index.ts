@@ -129,6 +129,7 @@ export interface Order {
   payment_amount?: number | null;
   payment_paid_at?: string | null;
   payment_note?: string | null;
+  confirmed_at?: string | null;
   total_retail_amount: number;
   total_discount_amount: number;
   order_date?: string | null;
@@ -161,11 +162,13 @@ export interface InventoryLog {
   product_id: string;
   product_name?: string;
   operator_id: string;
-  action: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce' | 'breakage' | 'purchase_receive' | 'sell' | 'refund_restore' | 'outbound';
+  action: 'inbound' | 'manual_adjust' | 'quick_add' | 'quick_reduce' | 'breakage' | 'purchase_receive' | 'sell' | 'refund_restore' | 'outbound' | 'settlement_create' | 'settlement_edit';
   delta_quantity: number;
   before_quantity: number;
   after_quantity: number;
   note?: string;
+  store_id?: string | null;
+  store_name?: string | null;
   created_at: string;
 }
 

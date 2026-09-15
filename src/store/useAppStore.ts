@@ -13,6 +13,7 @@ import type {
   City,
   Product,
   Inventory,
+  InventoryLog,
   Order,
   FinancialTransaction,
   OrderItem,
@@ -24,6 +25,12 @@ import type {
   StoreInventory,
   StoreProductPrice,
 } from '../types';
+
+export interface ExtendedInventoryLog extends Omit<InventoryLog, 'action'> {
+  store_id?: string | null;
+  store_name?: string | null;
+  action: InventoryLog['action'] | 'settlement_create' | 'settlement_edit' | string;
+}
 
 interface CartCreateItem {
   productId: string;
@@ -106,6 +113,7 @@ interface OrderRow {
   total_retail_amount?: number | string | null;
   total_discount_amount?: number | string | null;
   order_date?: string | null;
+  confirmed_at?: string | null;
   created_at: string;
   order_items?: OrderItemRow[];
 }
@@ -208,6 +216,21 @@ interface StoreProductPriceRow {
   override_price?: number | string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface InventoryLogRow {
+  id: string;
+  product_id: string;
+  operator_id: string;
+  action: string;
+  delta_quantity: number | string;
+  before_quantity: number | string;
+  after_quantity: number | string;
+  note?: string | null;
+  created_at: string;
+  store_id?: string | null;
+  products?: { name?: string | null } | null;
+  stores?: { name?: string | null } | null;
 }
 
 interface DistributorProductPriceRow {
@@ -439,6 +462,7 @@ interface AppState {
   cities: City[];
   products: ProductWithDetails[];
   inventory: Inventory[];
+  inventoryLogs: ExtendedInventoryLog[];
   orders: Order[];
   purchaseOrders: PurchaseOrder[];
   distributors: Profile[];
@@ -469,6 +493,7 @@ interface AppState {
   moveCityOrder: (cityId: string, direction: 'up' | 'down') => Promise<{ error: Error | null }>;
   fetchProducts: () => Promise<void>;
   fetchInventory: () => Promise<void>;
+  fetchInventoryLogs: (storeId?: string | null) => Promise<void>;
   fetchOrders: (startDate?: string, endDate?: string) => Promise<void>;
   fetchDistributors: () => Promise<void>;
   fetchStores: () => Promise<void>;
@@ -497,8 +522,13 @@ interface AppState {
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
 
-  addProduct: (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => Promise<{ error: Error | null }>;
-  updateProduct: (id: string, updates: Partial<Product>) => Promise<{ error: Error | null }>;
+  addProduct: (
+    product: Omit<Product, 'id' | 'created_at' | 'updated_at' | 'cost'> & { cost?: number | null },
+  ) => Promise<{ error: Error | null }>;
+  updateProduct: (
+    id: string,
+    updates: Omit<Partial<Product>, 'cost'> & { cost?: number | null },
+  ) => Promise<{ error: Error | null }>;
   deleteProduct: (id: string) => Promise<{ error: Error | null }>;
   setDistributorProductDiscount: (
     distributorId: string,
@@ -547,6 +577,11 @@ interface AppState {
     items: StoreRetailCreateItem[],
     orderDate?: string,
   ) => Promise<{ error: Error | null }>;
+  editSettlementOrder: (
+    orderId: string,
+    items: StoreRetailCreateItem[],
+  ) => Promise<{ error: Error | null }>;
+  confirmSettlementOrder: (orderId: string) => Promise<{ error: Error | null }>;
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
   fetchPurchaseOrders: () => Promise<void>;
@@ -713,6 +748,7 @@ const mapOrder = (raw: OrderRow): Order => {
     total_retail_amount: Number(raw.total_retail_amount || 0),
     total_discount_amount: Number(raw.total_discount_amount || 0),
     order_date: raw.order_date ?? null,
+    confirmed_at: raw.confirmed_at ?? null,
     created_at: raw.created_at,
     items,
   };
@@ -1110,6 +1146,7 @@ export const useAppStore = create<AppState>()(
       cities: [],
       products: [],
       inventory: [],
+  inventoryLogs: [],
       orders: [],
       purchaseOrders: [],
       distributors: [],
@@ -1243,6 +1280,7 @@ export const useAppStore = create<AppState>()(
             cities: [],
             products: [],
             inventory: [],
+            inventoryLogs: [],
             orders: [],
             purchaseOrders: [],
             distributors: [],
@@ -1353,6 +1391,49 @@ export const useAppStore = create<AppState>()(
           .order('updated_at', { ascending: false });
         if (!error && data) set({ inventory: data });
       },
+      fetchInventoryLogs: async (storeId?: string | null) => {
+        const { user } = get();
+        if (!user || user.role === 'distributor') {
+          set({ inventoryLogs: [] });
+          return;
+        }
+        let query = supabase
+          .from('inventory_logs')
+          .select('*, products(name), stores(name)')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (storeId !== undefined) {
+          if (storeId === null) {
+            query = query.is('store_id', null);
+          } else {
+            query = query.eq('store_id', storeId);
+          }
+        } else {
+          set({ inventoryLogs: [] });
+          return;
+        }
+
+        const { data, error } = await query;
+        if (!error && data) {
+          const mapped: ExtendedInventoryLog[] = (data as InventoryLogRow[]).map((row) => ({
+            id: row.id,
+            product_id: row.product_id,
+            operator_id: row.operator_id,
+            action: row.action,
+            delta_quantity: Number(row.delta_quantity || 0),
+            before_quantity: Number(row.before_quantity || 0),
+            after_quantity: Number(row.after_quantity || 0),
+            note: row.note ?? undefined,
+            created_at: row.created_at,
+            product_name: row.products?.name || undefined,
+            store_id: row.store_id ?? null,
+            store_name: row.stores?.name ?? null,
+          }));
+          set({ inventoryLogs: mapped });
+        }
+      },
+
 
       fetchOrders: async (startDate?: string, endDate?: string) => {
         const { user } = get();
@@ -1918,10 +1999,8 @@ export const useAppStore = create<AppState>()(
 
       addProduct: async (product) => {
         try {
-          const unitCost = Number(product.cost);
-          if (Number.isNaN(unitCost)) {
-            throw new Error('单个成本为必填项');
-          }
+          // 成本由进货到货自动计算（含 one_time_cost），创建时允许为空（首次到货前为 NULL）
+          const unitCost = Number(product.cost) || null;
           const cumulativeCostQuantity = product.cumulative_cost_quantity === undefined || product.cumulative_cost_quantity === null
             ? 0
             : Number(product.cumulative_cost_quantity);
@@ -1977,9 +2056,6 @@ export const useAppStore = create<AppState>()(
 
       updateProduct: async (id, updates) => {
         try {
-          if (updates.cost !== undefined && Number.isNaN(Number(updates.cost))) {
-            throw new Error('单个成本为必填项');
-          }
           const cumulativeCostQuantity = updates.cumulative_cost_quantity === undefined || updates.cumulative_cost_quantity === null
             ? null
             : Number(updates.cumulative_cost_quantity);
@@ -1988,7 +2064,7 @@ export const useAppStore = create<AppState>()(
             : Number(updates.cumulative_cost_amount);
           const payload = {
             ...updates,
-            cost: updates.cost !== undefined ? Number(updates.cost) : updates.cost,
+            cost: updates.cost !== undefined ? Number(updates.cost) || null : updates.cost,
             cumulative_cost_quantity: updates.cumulative_cost_quantity !== undefined
               ? (Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity)
               : updates.cumulative_cost_quantity,
@@ -2227,7 +2303,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: discountPrice,
               unit_cost: Number(product.cost || 0),
-              one_time_cost: Number(product.one_time_cost || 0),
+              one_time_cost: 0,
               is_sample: false,
             };
           });
@@ -2418,7 +2494,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: retailPrice,
               unit_cost: Number(product.cost || 0),
-              one_time_cost: Number(product.one_time_cost || 0),
+              one_time_cost: 0,
             });
           if (orderItemError) throw orderItemError;
 
@@ -2586,7 +2662,6 @@ export const useAppStore = create<AppState>()(
               override_price: storeOverride?.override_price,
             }).price;
             const unitCost = Number(product.cost || 0);
-            const oneTimeCost = Number(product.one_time_cost || 0);
 
             totalRetail += retailPrice * quantity;
             totalDiscount += discountPrice * quantity;
@@ -2598,7 +2673,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: discountPrice,
               unit_cost: unitCost,
-              one_time_cost: oneTimeCost,
+              one_time_cost: 0,
             };
           });
 
@@ -2608,8 +2683,8 @@ export const useAppStore = create<AppState>()(
             store_id: storeId,
             request_id: requestId,
             order_kind: 'settlement' as const,
-            status: 'accepted' as const,
-            payment_status: 'paid' as const,
+            status: 'pending' as const,
+            payment_status: 'pending' as const,
             quantity: totalQuantity,
             total_retail_amount: totalRetail,
             total_discount_amount: totalDiscount,
@@ -2739,6 +2814,80 @@ export const useAppStore = create<AppState>()(
           return { error: null };
         } catch (error) {
           return { error: error as Error };
+        }
+      },
+
+      editSettlementOrder: async (orderId, items) => {
+        const { user, orders } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'finance')) {
+            throw new Error('当前角色无结算改单权限');
+          }
+
+          if (!orderId) {
+            throw new Error('订单ID不能为空');
+          }
+
+          if (!Array.isArray(items) || items.length === 0) {
+            throw new Error('购物车为空');
+          }
+
+          const invalidItem = items.find((item) => !item.product_id || item.quantity <= 0);
+          if (invalidItem) {
+            throw new Error('订单商品参数无效');
+          }
+
+          const payload = buildStoreRetailOrderRpcItems(items);
+          const currentOrder = orders.find((order) => order.id === orderId) || null;
+
+          const { error } = await supabase.rpc('edit_settlement_order_atomic', {
+            p_order_id: orderId,
+            p_items: payload,
+          });
+          if (error) throw error;
+
+          const refreshTasks: Array<Promise<void>> = [get().fetchOrders()];
+          if (currentOrder?.store_id) {
+            refreshTasks.push(get().fetchStoreInventory(currentOrder.store_id));
+          }
+          await Promise.all(refreshTasks);
+
+          return { error: null };
+        } catch (error) {
+          return { error: formatSupabaseError(error) };
+        }
+      },
+
+      confirmSettlementOrder: async (orderId) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+
+        try {
+          if (!(user.role === 'admin' || user.role === 'super_admin')) {
+            throw new Error('当前角色无确认结算权限');
+          }
+
+          if (!orderId) {
+            throw new Error('订单ID不能为空');
+          }
+
+          const { error } = await supabase.rpc('confirm_settlement_order_atomic', {
+            p_order_id: orderId,
+          });
+          if (error) throw error;
+
+          const financeStore = useFinanceStore.getState();
+          await Promise.all([
+            get().fetchOrders(),
+            financeStore.fetchTransactions(),
+            financeStore.fetchBalance(),
+          ]);
+
+          return { error: null };
+        } catch (error) {
+          return { error: formatSupabaseError(error) };
         }
       },
 
@@ -3081,7 +3230,6 @@ export const useAppStore = create<AppState>()(
               override_price: storeOverride?.override_price,
             }).price;
             const unitCost = Number(product.cost || 0);
-            const oneTimeCost = Number(product.one_time_cost || 0);
 
             if (!isSample) {
               totalRetail += retailPrice * item.quantity;
@@ -3095,7 +3243,7 @@ export const useAppStore = create<AppState>()(
               retail_price: isSample ? 0 : retailPrice,
               discount_price: isSample ? 0 : discountPrice,
               unit_cost: unitCost,
-              one_time_cost: oneTimeCost,
+              one_time_cost: 0,
               is_sample: isSample,
             };
           });
@@ -3329,7 +3477,14 @@ export const useAppStore = create<AppState>()(
           await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };
         } catch (error) {
-          return { error: error as Error };
+          const formattedError = formatSupabaseError(error);
+          if (
+            formattedError.message.includes('已确认的结算单不可删除')
+            || formattedError.message.includes('已确认结算单不能删除')
+          ) {
+            return { error: new Error('已确认的结算单不可删除') };
+          }
+          return { error: formattedError };
         }
       },
 

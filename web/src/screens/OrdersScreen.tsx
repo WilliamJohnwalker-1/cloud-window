@@ -81,6 +81,8 @@ export const OrdersScreen: React.FC = () => {
     createBatchOrders,
     returnStoreInventoryToWarehouse,
     createSettlementOrder,
+    editSettlementOrder,
+    confirmSettlementOrder,
     confirmExternalOrder,
     confirmPurchaseDelivery,
     confirmPurchaseItemDelivery,
@@ -160,6 +162,11 @@ export const OrdersScreen: React.FC = () => {
   const [modifyOrder, setModifyOrder] = useState<(typeof orders)[number] | null>(null);
   const [modifyCart, setModifyCart] = useState<Map<string, number>>(new Map());
   const [submittingModify, setSubmittingModify] = useState(false);
+  const [editSettlementTarget, setEditSettlementTarget] = useState<(typeof orders)[number] | null>(null);
+  const [editSettlementCart, setEditSettlementCart] = useState<Map<string, number>>(new Map());
+  const [submittingEditSettlement, setSubmittingEditSettlement] = useState(false);
+  const [confirmSettlementTarget, setConfirmSettlementTarget] = useState<(typeof orders)[number] | null>(null);
+  const [submittingConfirmSettlement, setSubmittingConfirmSettlement] = useState(false);
   const [showQuantityStats, setShowQuantityStats] = useState(true);
   const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -221,6 +228,7 @@ export const OrdersScreen: React.FC = () => {
   const getOrderStatusLabel = (order: (typeof orders)[number]): string => {
     if (order.order_kind === 'purchase') return order.status === 'accepted' ? '已到货' : '待到货';
     if (order.order_kind === 'external') return order.status === 'accepted' ? '已签收' : '待签收';
+    if (order.order_kind === 'settlement') return order.status === 'accepted' ? '已确认' : '未确认';
     return order.status === 'accepted' ? '已接单' : '待处理';
   };
 
@@ -586,11 +594,17 @@ export const OrdersScreen: React.FC = () => {
     return products
       .filter((product) => product.city_id === selectedStore.city_id)
       .filter((product) => {
+        const stock = Number(
+          storeInventory.find((item) => item.store_id === settlementStoreId && item.product_id === product.id)?.quantity || 0,
+        );
+        return stock > 0;
+      })
+      .filter((product) => {
         if (!keyword) return true;
         const haystack = [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase();
         return haystack.includes(keyword);
       });
-  }, [products, searchKeyword, settlementStoreId, stores]);
+  }, [products, searchKeyword, settlementStoreId, storeInventory, stores]);
 
   const filteredReturnProducts = useMemo(() => {
     if (!returnStoreId) return [];
@@ -629,6 +643,37 @@ export const OrdersScreen: React.FC = () => {
       return sum + resolvedPrice * qty;
     }, 0);
   }, [products, settlementCart, settlementStoreId, stores, storeProductPrices]);
+  const filteredEditSettlementProducts = useMemo(() => {
+    if (!editSettlementTarget?.store_id) return [];
+    const selectedStore = stores.find((store) => store.id === editSettlementTarget.store_id);
+    if (!selectedStore) return [];
+
+    const keyword = searchKeyword.trim().toLowerCase();
+    return products
+      .filter((product) => product.city_id === selectedStore.city_id)
+      .filter((product) => {
+        if (!keyword) return true;
+        const haystack = [product.name, product.barcode || '', product.city_name || ''].join(' ').toLowerCase();
+        return haystack.includes(keyword);
+      });
+  }, [products, searchKeyword, editSettlementTarget, stores]);
+
+  const editSettlementTotalAmount = useMemo(() => {
+    if (!editSettlementTarget?.store_id || editSettlementCart.size === 0) return 0;
+    const selectedStore = stores.find((store) => store.id === editSettlementTarget.store_id);
+    return Array.from(editSettlementCart.entries()).reduce((sum, [productId, qty]) => {
+      const product = products.find((item) => item.id === productId);
+      if (!product) return sum;
+      const storeOverride = storeProductPrices.find((entry) => entry.store_id === editSettlementTarget.store_id && entry.product_id === productId);
+      const resolvedPrice = resolvePrice({
+        price: Number(product.price || 0),
+        discount_price: product.discount_price,
+        discount_rate: selectedStore?.discount_rate,
+        override_price: storeOverride?.override_price,
+      }).price;
+      return sum + resolvedPrice * qty;
+    }, 0);
+  }, [products, editSettlementCart, editSettlementTarget, stores, storeProductPrices]);
 
   const cartItems = useMemo(() => {
     const parseCartKey = (cartKey: string): { productId: string; lineType: CartLineType } => {
@@ -1476,7 +1521,11 @@ export const OrdersScreen: React.FC = () => {
     const paymentStatus = String(targetOrder?.payment_status || '').toLowerCase();
     if (['paid', 'partial_refunded', 'refund_pending', 'partial_refund_pending'].includes(paymentStatus)) {
       setDeleteConfirmOrderId(null);
-      setPageNotice({ type: 'error', text: '已支付订单不可删除，请先退款' });
+      if (targetOrder?.order_kind === 'settlement') {
+        setPageNotice({ type: 'error', text: '已确认的结算单不可删除' });
+      } else {
+        setPageNotice({ type: 'error', text: '已支付订单不可删除，请先退款' });
+      }
       return;
     }
 
@@ -1628,6 +1677,43 @@ export const OrdersScreen: React.FC = () => {
     setSearchKeyword('');
     setShowSettlementModal(false);
     setPageNotice({ type: 'success', text: '结算订单已创建' });
+  };
+  const setEditSettlementQuantity = (productId: string, quantity: number): void => {
+    setEditSettlementCart((prev) => {
+      const next = new Map(prev);
+      if (quantity <= 0) {
+        next.delete(productId);
+        return next;
+      }
+      next.set(productId, quantity);
+      return next;
+    });
+  };
+
+  const handleEditSettlementOrder = async (): Promise<void> => {
+    if (!editSettlementTarget) return;
+    if (editSettlementCart.size === 0) {
+      setPageNotice({ type: 'error', text: '请先选择商品' });
+      return;
+    }
+
+    const items = Array.from(editSettlementCart.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity,
+    }));
+
+    setSubmittingEditSettlement(true);
+    const { error } = await editSettlementOrder(editSettlementTarget.id, items);
+    setSubmittingEditSettlement(false);
+
+    if (error) {
+      setPageNotice({ type: 'error', text: `修改结算单失败：${error.message}` });
+      return;
+    }
+
+    setEditSettlementCart(new Map());
+    setEditSettlementTarget(null);
+    setPageNotice({ type: 'success', text: '结算单已修改' });
   };
 
   const handleCreateReturnOrder = async (): Promise<void> => {
@@ -2152,8 +2238,21 @@ export const OrdersScreen: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center space-x-4 mt-1 text-white/40 text-xs">
-                    <div className="flex items-center space-x-1"><Clock size={12} /><span>{new Date(order.created_at).toLocaleString()}</span></div>
-                    {businessOrderDate && <div className="flex items-center space-x-1"><span>业务日期：{businessOrderDate}</span></div>}
+                    {businessOrderDate ? (
+                      <>
+                        <div className="flex items-center space-x-1 text-white/70"><Clock size={12} /><span>{businessOrderDate}</span></div>
+                        <div className="flex items-center space-x-1"><span>创建于 {new Date(order.created_at).toLocaleString()}</span></div>
+                      </>
+                    ) : (
+                      <div className="flex items-center space-x-1"><Clock size={12} /><span>{new Date(order.created_at).toLocaleString()}</span></div>
+                    )}
+                    {order.order_kind === 'settlement' ? (
+                      <div className={`flex items-center space-x-1 ${order.confirmed_at ? 'text-green-400/80' : 'text-orange-300/80'}`}>
+                        <span>
+                          确认收款时间：{order.confirmed_at ? new Date(order.confirmed_at).toLocaleString() : '待确认'}
+                        </span>
+                      </div>
+                    ) : null}
                     <div className="flex items-center space-x-1"><MapPin size={12} /><span>{order.city_name || '-'}</span></div>
                     <div className="flex items-center space-x-1"><Store size={12} /><span>配送店铺：{order.store_name || '未指定店铺'}</span></div>
                     <div className="flex items-center space-x-1"><span>分销商：{order.distributor_store || order.distributor_email || '-'}</span></div>
@@ -2177,7 +2276,7 @@ export const OrdersScreen: React.FC = () => {
               <div className="text-right space-y-2">
                 <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest">订单总额</p>
                 <p className="text-2xl font-black text-white">¥{order.total_discount_amount}</p>
-                {order.status === 'pending' && order.order_kind !== 'purchase' && order.order_kind !== 'external' && (user?.role === 'admin' || user?.role === 'super_admin') && (
+                {order.status === 'pending' && order.order_kind !== 'purchase' && order.order_kind !== 'external' && order.order_kind !== 'settlement' && (user?.role === 'admin' || user?.role === 'super_admin') && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -2191,6 +2290,15 @@ export const OrdersScreen: React.FC = () => {
                     className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold"
                   >
                     确认接单
+                  </button>
+                )}
+                {order.status === 'pending' && order.order_kind === 'settlement' && (user?.role === 'admin' || user?.role === 'super_admin') && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmSettlementTarget(order)}
+                    className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold"
+                  >
+                    确认收款
                   </button>
                 )}
                 {order.status === 'pending' && order.order_kind === 'external' && canCreateExternalOrder && (
@@ -2277,6 +2385,21 @@ export const OrdersScreen: React.FC = () => {
                     className="px-2.5 py-1.5 rounded-lg border border-blue-400/30 bg-blue-500/20 text-blue-100 hover:bg-blue-500/30 text-xs font-bold inline-flex items-center gap-1"
                   >
                     <span>修改订单</span>
+                  </button>
+                )}
+                {(user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'finance') && order.status === 'pending' && order.order_kind === 'settlement' && order.store_id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const resolvedOrder = getResolvedOrder(order.id) || order;
+                      setEditSettlementTarget(resolvedOrder);
+                      const initialCart = new Map<string, number>();
+                      resolvedOrder.items.forEach((i) => initialCart.set(i.product_id, Number(i.quantity || 0)));
+                      setEditSettlementCart(initialCart);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-blue-400/30 bg-blue-500/20 text-blue-100 hover:bg-blue-500/30 text-xs font-bold inline-flex items-center gap-1"
+                  >
+                    <span>修改</span>
                   </button>
                 )}
                 {((order.order_kind === 'external' && order.status === 'pending')
@@ -2981,6 +3104,12 @@ export const OrdersScreen: React.FC = () => {
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">配送店铺：</span>{detailOrder.store_name || '未指定'}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">分销商：</span>{detailOrder.distributor_store || detailOrder.distributor_email || '-'}</div>
                 {detailOrder.order_date && <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">业务日期：</span>{detailOrder.order_date}</div>}
+                {detailOrder.order_kind === 'settlement' && (
+                  <div className="bg-white/5 rounded-xl px-4 py-3">
+                    <span className="text-white/50">确认收款时间：</span>
+                    {detailOrder.confirmed_at ? new Date(detailOrder.confirmed_at).toLocaleString() : '待确认'}
+                  </div>
+                )}
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">下单时间：</span>{new Date(detailOrder.created_at).toLocaleString()}</div>
                 <div className="bg-white/5 rounded-xl px-4 py-3"><span className="text-white/50">交易号：</span>{detailOrder.payment_transaction_id || '-'}</div>
                 {detailOrder.order_kind === 'external' && (
@@ -3369,6 +3498,197 @@ export const OrdersScreen: React.FC = () => {
                 className="px-4 py-2 rounded-xl border border-blue-400/30 bg-blue-500/20 text-blue-100 font-semibold disabled:opacity-60"
               >
                 {submittingModify ? '提交中...' : '确认修改'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editSettlementTarget && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold">修改结算单 #{editSettlementTarget.id.slice(0, 8)}</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditSettlementTarget(null);
+                  setEditSettlementCart(new Map());
+                  setSearchKeyword('');
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white/60">
+                店铺：{editSettlementTarget.store_name || '未指定'}
+              </div>
+              <input
+                value={searchKeyword}
+                onChange={(event) => setSearchKeyword(event.target.value)}
+                placeholder="搜索商品名称/条码"
+                className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="max-h-[420px] overflow-auto border border-white/10 rounded-2xl">
+                {filteredEditSettlementProducts.map((product) => {
+                  const currentStock = Number(
+                    storeInventory.find((item) => item.store_id === editSettlementTarget.store_id && item.product_id === product.id)?.quantity || 0,
+                  );
+                  const originalReservedQty = Number(
+                    editSettlementTarget.items.find((item) => item.product_id === product.id)?.quantity || 0,
+                  );
+                  const effectiveStock = currentStock + originalReservedQty;
+                  const qty = editSettlementCart.get(product.id) || 0;
+                  const disabled = effectiveStock <= 0;
+
+                  return (
+                    <div key={product.id} className="p-4 border-b border-white/5 last:border-b-0 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+                          {product.image_url ? (
+                            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[10px] text-white/40">图</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold">{product.name}</p>
+                          <p className="text-xs text-white/40">可用库存: {effectiveStock} (含原订单 {originalReservedQty}) · 零售价: ¥{Number(product.price || 0).toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditSettlementQuantity(product.id, Math.max(0, qty - 1))}
+                          className="px-3 py-1.5 rounded-lg bg-white/10"
+                          disabled={disabled || qty <= 0}
+                        >
+                          -1
+                        </button>
+                        <input
+                          value={qty > 0 ? String(qty) : ''}
+                          onChange={(event) => {
+                            const value = Number(event.target.value.replace(/[^0-9]/g, ''));
+                            if (Number.isNaN(value)) {
+                              setEditSettlementQuantity(product.id, 0);
+                              return;
+                            }
+                            setEditSettlementQuantity(product.id, Math.min(value, effectiveStock));
+                          }}
+                          placeholder="数量(步长1)"
+                          className="w-40 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditSettlementQuantity(product.id, qty + 1)}
+                          className="px-3 py-1.5 rounded-lg bg-white/10"
+                          disabled={disabled || qty >= effectiveStock}
+                        >
+                          +1
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredEditSettlementProducts.length === 0 && (
+                  <p className="px-4 py-6 text-sm text-white/40">当前店铺下暂无可选商品</p>
+                )}
+              </div>
+
+              <div className="border border-white/10 rounded-2xl p-4 flex flex-col">
+                <h4 className="font-semibold mb-3">结算购物车</h4>
+                <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
+                  {Array.from(editSettlementCart.entries()).map(([productId, quantity]) => {
+                    const product = products.find((item) => item.id === productId);
+                    if (!product) return null;
+                    return (
+                      <div key={productId} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                        <div>
+                          <p className="text-sm font-medium">{product.name}</p>
+                          <p className="text-xs text-white/40">数量 {quantity}</p>
+                        </div>
+                        <button type="button" onClick={() => setEditSettlementQuantity(productId, 0)} className="text-xs text-red-300 hover:text-red-200">移除</button>
+                      </div>
+                    );
+                  })}
+                  {editSettlementCart.size === 0 && <p className="text-sm text-white/40">暂无商品</p>}
+                </div>
+
+                <div className="mt-auto pt-4 border-t border-white/10 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-white/60">商品总数</span><span>{Array.from(editSettlementCart.values()).reduce((sum, qty) => sum + qty, 0)}</span></div>
+                  <div className="flex justify-between"><span className="text-white/60">结算总额</span><span className="text-accent font-bold">¥{editSettlementTotalAmount.toFixed(2)}</span></div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleEditSettlementOrder();
+                  }}
+                  disabled={submittingEditSettlement || editSettlementCart.size === 0}
+                  className="mt-4 w-full py-2.5 rounded-xl bg-tech-gradient font-bold disabled:opacity-50"
+                >
+                  {submittingEditSettlement ? '提交中...' : '确认修改'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmSettlementTarget && (
+        <div className="fixed inset-0 bg-black/70 z-[96] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">确认收款</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!submittingConfirmSettlement) {
+                    setConfirmSettlementTarget(null);
+                  }
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-white/70">
+              请确认是否将结算单 #{confirmSettlementTarget.id.slice(0, 8)} 标记为“已确认收款”。
+            </p>
+            <p className="text-xs text-white/50">确认后将不可继续修改该结算单。</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmSettlementTarget(null)}
+                disabled={submittingConfirmSettlement}
+                className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-white/80 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = confirmSettlementTarget;
+                  if (!target) return;
+                  setSubmittingConfirmSettlement(true);
+                  const { error } = await confirmSettlementOrder(target.id);
+                  setSubmittingConfirmSettlement(false);
+                  if (error) {
+                    setPageNotice({ type: 'error', text: `确认收款失败：${error.message}` });
+                    return;
+                  }
+                  setConfirmSettlementTarget(null);
+                  setPageNotice({ type: 'success', text: '结算单已确认收款' });
+                }}
+                disabled={submittingConfirmSettlement}
+                className="px-4 py-2 rounded-xl border border-green-400/30 bg-green-500/20 text-green-100 font-semibold disabled:opacity-60"
+              >
+                {submittingConfirmSettlement ? '提交中...' : '确认收款'}
               </button>
             </div>
           </div>
