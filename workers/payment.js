@@ -1412,7 +1412,7 @@ export default {
 
         let collectResult;
         try {
-          collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/micropay', wechatCollectPayload);
+          collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/codepay', wechatCollectPayload);
         } catch (error) {
           await patchOrderPayment(env, orderId, {
             payment_method: 'wechat',
@@ -1427,26 +1427,6 @@ export default {
             orderId,
             outTradeNo: orderId,
           }, { status: 500 });
-        }
-
-        if (!collectResult.ok && collectResult.httpStatus === 404) {
-          try {
-            collectResult = await postWechatRequest(env, 'POST', '/v3/pay/transactions/codepay', wechatCollectPayload);
-          } catch (error) {
-            await patchOrderPayment(env, orderId, {
-              payment_method: 'wechat',
-              payment_status: 'failed',
-              payment_amount: amount,
-            });
-            const message = error instanceof Error ? error.message : 'wechat codepay request failed';
-            return json({
-              success: false,
-              status: 'failed',
-              error: `微信收款请求异常：${message}`,
-              orderId,
-              outTradeNo: wechatOutTradeNo,
-            }, { status: 500 });
-          }
         }
 
         const wechatTransactionId = collectResult.data?.transaction_id || null;
