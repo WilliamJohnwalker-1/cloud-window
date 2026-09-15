@@ -349,7 +349,6 @@ export const ReportsScreen: React.FC = () => {
       discountRevenue: number;
       unitCostTotal: number;
       sampleCostTotal: number;
-      oneTimeCost: number;
     }> = {};
 
     revenueOrders.forEach((order) => {
@@ -365,7 +364,6 @@ export const ReportsScreen: React.FC = () => {
             discountRevenue: 0,
             unitCostTotal: 0,
             sampleCostTotal: 0,
-            oneTimeCost: Number(item.one_time_cost || 0),
           };
         }
 
@@ -377,15 +375,12 @@ export const ReportsScreen: React.FC = () => {
           productProfit[key].discountRevenue += Number(item.quantity || 0) * Number(item.discount_price || 0);
           productProfit[key].unitCostTotal += Number(item.quantity || 0) * Number(item.unit_cost || 0);
         }
-        if (productProfit[key].oneTimeCost === 0) {
-          productProfit[key].oneTimeCost = Number(item.one_time_cost || 0);
-        }
       });
     });
 
     const profitByProduct = Object.values(productProfit)
       .map((entry) => {
-        const cost = entry.unitCostTotal + entry.sampleCostTotal + entry.oneTimeCost;
+        const cost = entry.unitCostTotal + entry.sampleCostTotal;
         return {
           name: entry.name,
           quantity: entry.quantity,
@@ -403,7 +398,6 @@ export const ReportsScreen: React.FC = () => {
     const totalDiscountRevenue = profitByProduct.reduce((sum, row) => sum + row.discountRevenue, 0);
     const totalCost = profitByProduct.reduce((sum, row) => sum + row.cost, 0);
 
-    const globalSeenProductsForTrend = new Set<string>();
     const profitTrendMap = new Map<string, { revenue: number; cost: number }>();
     
     const sortedRevenueOrders = [...revenueOrders].sort((a, b) => new Date(resolveOrderBusinessDate(a)).getTime() - new Date(resolveOrderBusinessDate(b)).getTime());
@@ -429,11 +423,6 @@ export const ReportsScreen: React.FC = () => {
         } else {
           trendEntry.revenue += qty * Number(item.discount_price || 0);
           trendEntry.cost += qty * Number(item.unit_cost || 0);
-        }
-        
-        if (!globalSeenProductsForTrend.has(item.product_id)) {
-          globalSeenProductsForTrend.add(item.product_id);
-          trendEntry.cost += Number(item.one_time_cost || 0);
         }
       });
     });

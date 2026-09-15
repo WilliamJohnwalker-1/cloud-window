@@ -7,7 +7,7 @@ import { useSupplierStore } from '../store/useSupplierStore';
 import { getProvinceForCity } from '../utils/provinceMapping';
 
 export const InventoryScreen: React.FC = () => {
-  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, createPurchaseOrderV2, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory } = useAppStore();
+  const { user, cities, products, updateInventoryByProduct, updateInventoryMinQuantityByProduct, updateStoreInventoryByProduct, inboundStockByBarcode, createPurchaseOrderV2, inventoryLogs, stores, storeInventory, fetchStores, fetchStoreInventory, fetchInventoryLogs } = useAppStore();
   const [showLogs, setShowLogs] = React.useState(false);
   const [editingProductId, setEditingProductId] = React.useState<string | null>(null);
   const [editingQuantityText, setEditingQuantityText] = React.useState('');
@@ -52,6 +52,8 @@ export const InventoryScreen: React.FC = () => {
     if (action === 'manual_adjust') return '手工调整';
     if (action === 'quick_add') return '快捷加库存';
     if (action === 'quick_reduce') return '快捷减库存';
+    if (action === 'settlement_create') return '结算建单';
+    if (action === 'settlement_edit') return '结算修改';
     return action;
   };
   const { suppliers, fetchSuppliers } = useSupplierStore();
@@ -394,9 +396,7 @@ export const InventoryScreen: React.FC = () => {
               </button>
             </div>
           )}
-          {viewMode === 'main' && (
-            <>
-          {canPurchase && (
+          {viewMode === 'main' && canPurchase && (
           <button
             type="button"
             onClick={() => {
@@ -413,12 +413,18 @@ export const InventoryScreen: React.FC = () => {
           )}
           <button
             type="button"
-            onClick={() => setShowLogs(true)}
-            className="bg-white/5 border border-white/10 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-white/10 transition-colors text-sm font-medium"
+            onClick={() => {
+              if (viewMode === 'store' && !selectedStoreId) return;
+              fetchInventoryLogs(viewMode === 'store' ? selectedStoreId : null);
+              setShowLogs(true);
+            }}
+            disabled={viewMode === 'store' && !selectedStoreId}
+            className="bg-white/5 border border-white/10 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-white/10 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <History size={18} className="text-white/40" />
             <span>变动日志</span>
           </button>
+          {viewMode === 'main' && (
           <button
             type="button"
             onClick={async () => {
@@ -438,8 +444,7 @@ export const InventoryScreen: React.FC = () => {
           >
             <ScanLine size={20} />
             <span>扫描入库</span>
-              </button>
-            </>
+          </button>
           )}
         </div>
       </div>
@@ -834,7 +839,9 @@ export const InventoryScreen: React.FC = () => {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-4xl bg-[#121217] border border-white/10 rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold">库存变动日志</h3>
+              <h3 className="text-xl font-bold">
+                {viewMode === 'store' ? '店铺日志' : '总仓日志'}
+              </h3>
               <button type="button" onClick={() => setShowLogs(false)} className="px-3 py-1 rounded-lg bg-white/10">关闭</button>
             </div>
             <div className="max-h-[65vh] overflow-auto rounded-2xl border border-white/10">
@@ -843,6 +850,7 @@ export const InventoryScreen: React.FC = () => {
                   <tr className="border-b border-white/10 bg-white/[0.02]">
                     <th className="px-4 py-3 text-xs text-white/50">时间</th>
                     <th className="px-4 py-3 text-xs text-white/50">商品</th>
+                    {viewMode === 'store' && <th className="px-4 py-3 text-xs text-white/50">店铺</th>}
                     <th className="px-4 py-3 text-xs text-white/50">动作</th>
                     <th className="px-4 py-3 text-xs text-white/50 text-right">变动</th>
                     <th className="px-4 py-3 text-xs text-white/50 text-right">前后库存</th>
@@ -854,6 +862,7 @@ export const InventoryScreen: React.FC = () => {
                     <tr key={log.id} className="border-b border-white/5">
                       <td className="px-4 py-3 text-xs text-white/70">{new Date(log.created_at).toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm">{log.product_name || log.product_id}</td>
+                      {viewMode === 'store' && <td className="px-4 py-3 text-xs text-white/60">{log.store_name || log.store_id || '-'}</td>}
                       <td className="px-4 py-3 text-xs text-white/60">{getInventoryLogActionLabel(log.action)}</td>
                       <td className={`px-4 py-3 text-right font-bold ${log.delta_quantity >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {log.delta_quantity >= 0 ? '+' : ''}{log.delta_quantity}
@@ -864,7 +873,7 @@ export const InventoryScreen: React.FC = () => {
                   ))}
                   {inventoryLogs.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-white/40">暂无日志数据（请先执行一次库存变动）</td>
+                      <td colSpan={viewMode === 'store' ? 7 : 6} className="px-4 py-8 text-center text-white/40">暂无日志数据（请先执行一次库存变动）</td>
                     </tr>
                   )}
                 </tbody>

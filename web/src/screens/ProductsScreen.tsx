@@ -159,8 +159,8 @@ export const ProductsScreen: React.FC = () => {
       image_url: form.image_url.trim() || undefined,
     };
 
-    if (!payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
-      window.alert('请完整填写城市、零售价、成本价');
+    if (!payload.city_id || Number.isNaN(payload.price)) {
+      window.alert('请完整填写城市、零售价');
       return;
     }
 
@@ -239,8 +239,8 @@ export const ProductsScreen: React.FC = () => {
         image_url: form.image_url.trim() || undefined,
       };
 
-      if (!payload.name || !payload.city_id || Number.isNaN(payload.price) || Number.isNaN(payload.cost)) {
-        window.alert('请完整填写商品名称、城市、零售价、成本价');
+      if (!payload.name || !payload.city_id || Number.isNaN(payload.price)) {
+        window.alert('请完整填写商品名称、城市、零售价');
         return;
       }
 
@@ -618,22 +618,28 @@ export const ProductsScreen: React.FC = () => {
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">零售价</span>
                 <input value={form.price} onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))} placeholder="零售价" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               </label>
-              <label className="space-y-1 block">
+              <div className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">成本价</span>
-                <input value={form.cost} onChange={(event) => setForm((prev) => ({ ...prev, cost: event.target.value }))} placeholder="成本价" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              </label>
+                <div className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white/60 cursor-not-allowed">
+                  {(!form.cost || form.cost === 'null' || Number(form.cost) === 0) ? '待计算' : form.cost}
+                </div>
+              </div>
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">一次性成本</span>
                 <input value={form.one_time_cost} onChange={(event) => setForm((prev) => ({ ...prev, one_time_cost: event.target.value }))} placeholder="一次性成本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
               </label>
-              <label className="space-y-1 block">
+              <div className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">累计数量</span>
-                <input value={form.cumulative_cost_quantity} onChange={(event) => setForm((prev) => ({ ...prev, cumulative_cost_quantity: event.target.value }))} placeholder="管理员统计历史总数量" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              </label>
-              <label className="space-y-1 block">
+                <div className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white/60 cursor-not-allowed">
+                  {form.cumulative_cost_quantity || '0'}
+                </div>
+              </div>
+              <div className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">累计成本</span>
-                <input value={form.cumulative_cost_amount} onChange={(event) => setForm((prev) => ({ ...prev, cumulative_cost_amount: event.target.value }))} placeholder="管理员统计历史总成本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />
-              </label>
+                <div className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white/60 cursor-not-allowed">
+                  {form.cumulative_cost_amount || '0'}
+                </div>
+              </div>
               <label className="space-y-1 block">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-wider">SKU</span>
                 <input value={form.sku} onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))} placeholder="可选，纯文本" className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2" />

@@ -96,6 +96,7 @@ interface OrderRow {
   payment_transaction_id?: string | null;
   payment_paid_at?: string | null;
   payment_note?: string | null;
+  confirmed_at?: string | null;
   product_id?: string | null;
   quantity?: number | string | null;
   unit_price?: number | string | null;
@@ -145,6 +146,8 @@ interface InventoryLogRow {
   delta_quantity: number;
   before_quantity: number;
   after_quantity: number;
+  store_id?: string | null;
+  stores?: { name?: string } | null;
   note?: string | null;
   created_at: string;
   products?: { name?: string } | null;
@@ -359,6 +362,20 @@ const isMissingRpcFunction = (error: RpcErrorLike | null): boolean => {
     || message.includes('could not find the function');
 };
 
+const normalizeDeleteOrderError = (error: unknown): Error => {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : '删除订单失败';
+
+  if (message.includes('已确认结算单不能删除') || message.includes('已确认结算单不可删除')) {
+    return new Error('已确认的结算单不可删除');
+  }
+
+  return error instanceof Error ? error : new Error(message);
+};
+
 const coalesceOrderKind = (kind: OrderRow['order_kind']): OrderKind => (
   kind === 'retail' ? 'retail' :
   kind === 'return' ? 'return' :
@@ -425,7 +442,7 @@ interface AppState {
   fetchStoreProductPrices: (storeId: string) => Promise<void>;
   fetchNotifications: () => Promise<void>;
   createSlowMovingAlertNotification: (payload: SlowMovingAlertNotificationInput) => Promise<{ error: Error | null }>;
-  fetchInventoryLogs: () => Promise<void>;
+  fetchInventoryLogs: (storeId?: string | null) => Promise<void>;
   fetchOrderDetail: (orderId: string) => Promise<Order | null>;
   fetchAllData: () => Promise<void>;
   generateCityChannelReport: () => CityChannelReportRow[];
@@ -462,6 +479,8 @@ interface AppState {
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
   createSettlementOrder: (storeId: string, items: CashierCreateItem[], orderDate?: string) => Promise<{ orderId?: string; error: Error | null }>;
+  editSettlementOrder: (orderId: string, items: CashierCreateItem[]) => Promise<{ error: Error | null }>;
+  confirmSettlementOrder: (orderId: string) => Promise<{ error: Error | null }>;
   createExternalOrder: (
     items: CashierCreateItem[],
     channel: ExternalChannel,
@@ -676,6 +695,7 @@ const mapOrder = (row: OrderRow): Order => {
     payment_transaction_id: row.payment_transaction_id ?? undefined,
     payment_paid_at: row.payment_paid_at ?? undefined,
     payment_note: row.payment_note ?? undefined,
+    confirmed_at: row.confirmed_at ?? undefined,
     order_date: row.order_date ?? undefined,
     created_at: row.created_at,
     items: itemsFromRelation,
@@ -1076,6 +1096,8 @@ const mapInventoryLog = (row: InventoryLogRow): InventoryLog => ({
   delta_quantity: Number(row.delta_quantity || 0),
   before_quantity: Number(row.before_quantity || 0),
   after_quantity: Number(row.after_quantity || 0),
+  store_id: row.store_id ?? null,
+  store_name: row.stores?.name ?? null,
   note: row.note ?? undefined,
   created_at: row.created_at,
 });
@@ -1652,18 +1674,26 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      fetchInventoryLogs: async () => {
+      fetchInventoryLogs: async (storeId?: string | null) => {
         const { user } = get();
         if (!user || user.role === 'distributor') {
           set({ inventoryLogs: [] });
           return;
         }
 
-        const { data, error } = await supabase
+        let query = supabase
           .from('inventory_logs')
-          .select('*, products(name)')
+          .select('*, products(name), stores(name)')
           .order('created_at', { ascending: false })
           .limit(200);
+
+        if (storeId) {
+          query = query.eq('store_id', storeId);
+        } else {
+          query = query.is('store_id', null);
+        }
+
+        const { data, error } = await query;
 
         if (!error && data) {
           set({ inventoryLogs: (data as InventoryLogRow[]).map(mapInventoryLog) });
@@ -1676,7 +1706,7 @@ export const useAppStore = create<AppState>()(
         const [ordersResult, paymentEventsResult, orderItemsResult] = await Promise.all([
           supabase
             .from('orders')
-            .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, order_date, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
+            .select('id, distributor_id, store_id, city_id, status, order_kind, total_retail_amount, total_discount_amount, payment_amount, payment_status, payment_method, payment_transaction_id, payment_paid_at, payment_note, confirmed_at, order_date, created_at, profiles:distributor_id(email,store_name), stores(name), cities(name), product_id, quantity, unit_price, total_amount')
             .eq('id', orderId)
             .maybeSingle(),
           supabase
@@ -2012,7 +2042,7 @@ export const useAppStore = create<AppState>()(
           const { data: createdProduct, error: insertError } = await supabase.from('products').insert({
             name: payload.name,
             price: Number(payload.price),
-            cost: Number(payload.cost),
+            cost: Number(payload.cost) || null,
             one_time_cost: Number(payload.one_time_cost || 0),
             cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? 0 : cumulativeCostQuantity,
             cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? 0 : cumulativeCostAmount,
@@ -2072,7 +2102,7 @@ export const useAppStore = create<AppState>()(
             .update({
               name: payload.name,
               price: Number(payload.price),
-              cost: Number(payload.cost),
+              cost: Number(payload.cost) || null,
               one_time_cost: Number(payload.one_time_cost || 0),
               cumulative_cost_quantity: Number.isNaN(Number(cumulativeCostQuantity)) ? null : cumulativeCostQuantity,
               cumulative_cost_amount: Number.isNaN(Number(cumulativeCostAmount)) ? null : cumulativeCostAmount,
@@ -2328,7 +2358,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: discountPrice,
               unit_cost: Number(product.cost || 0),
-              one_time_cost: Number(product.one_time_cost || 0),
+              one_time_cost: 0,
               is_sample: false,
             };
           });
@@ -2486,7 +2516,6 @@ export const useAppStore = create<AppState>()(
               override_price: storeOverride?.override_price,
             }).price;
             const unitCost = Number(product.cost || 0);
-            const oneTimeCost = Number(product.one_time_cost || 0);
 
             if (!isSample) {
               totalRetail += retailPrice * item.quantity;
@@ -2501,7 +2530,7 @@ export const useAppStore = create<AppState>()(
               retail_price: isSample ? 0 : retailPrice,
               discount_price: isSample ? 0 : discountPrice,
               unit_cost: unitCost,
-              one_time_cost: oneTimeCost,
+              one_time_cost: 0,
               is_sample: isSample,
             };
           });
@@ -2872,7 +2901,6 @@ export const useAppStore = create<AppState>()(
               override_price: storeOverride?.override_price,
             }).price;
             const unitCost = Number(product.cost || 0);
-            const oneTimeCost = Number(product.one_time_cost || 0);
 
             totalRetail += retailPrice * quantity;
             totalDiscount += discountPrice * quantity;
@@ -2884,7 +2912,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: discountPrice,
               unit_cost: unitCost,
-              one_time_cost: oneTimeCost,
+              one_time_cost: 0,
             };
           });
 
@@ -2897,8 +2925,8 @@ export const useAppStore = create<AppState>()(
             total_discount_amount: totalDiscount,
             quantity: totalQuantity,
             order_kind: 'settlement' as const,
-            status: 'accepted' as const,
-            payment_status: 'paid' as const,
+            status: 'pending' as const,
+            payment_status: 'pending' as const,
             order_date: fallbackOrderDate,
           };
 
@@ -3021,8 +3049,89 @@ export const useAppStore = create<AppState>()(
             .upsert(storeInventoryPayload, { onConflict: 'store_id,product_id' });
           if (storeInventoryError) throw storeInventoryError;
 
+          const fallbackLogPayload = Array.from(settlementByProduct.entries()).map(([productId, qty]) => {
+            const beforeQty = existingQuantityMap.get(productId) || 0;
+            const afterQty = Math.max(0, beforeQty - qty);
+            return {
+              product_id: productId,
+              operator_id: user.id,
+              action: 'settlement_create' as const,
+              delta_quantity: -qty,
+              before_quantity: beforeQty,
+              after_quantity: afterQty,
+              note: `结算建单扣减(前端回退)；order_id=${orderData.id}`,
+              store_id: storeId,
+            };
+          });
+          if (fallbackLogPayload.length > 0) {
+            const { error: fallbackLogError } = await supabase
+              .from('inventory_logs')
+              .insert(fallbackLogPayload);
+            if (fallbackLogError) throw fallbackLogError;
+          }
+
           await Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchStoreInventory(storeId)]);
           return { orderId: orderData ? String(orderData.id) : undefined, error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      editSettlementOrder: async (orderId, items) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'finance')) {
+          return { error: new Error('当前角色无结算改单权限') };
+        }
+        if (!Array.isArray(items) || items.length === 0) return { error: new Error('购物车为空') };
+
+        const payload = items.map((item) => ({
+          product_id: item.productId,
+          quantity: Number(item.quantity),
+        }));
+        const invalidItem = payload.find((item) => !item.product_id || !Number.isFinite(item.quantity) || item.quantity <= 0);
+        if (invalidItem) return { error: new Error('订单商品参数无效') };
+
+        try {
+          const { orders } = get();
+          const targetOrder = orders.find((order) => order.id === orderId) || null;
+          const { error } = await supabase.rpc('edit_settlement_order_atomic', {
+            p_order_id: orderId,
+            p_items: payload,
+          });
+          if (error) throw error;
+
+          const refreshTasks: Array<Promise<void>> = [get().fetchOrders()];
+          if (targetOrder?.store_id) {
+            refreshTasks.push(get().fetchStoreInventory(targetOrder.store_id));
+          }
+          await Promise.all(refreshTasks);
+          return { error: null };
+        } catch (error) {
+          return { error: error as Error };
+        }
+      },
+
+      confirmSettlementOrder: async (orderId) => {
+        const { user } = get();
+        if (!user) return { error: new Error('未登录') };
+        if (!(user.role === 'admin' || user.role === 'super_admin')) {
+          return { error: new Error('当前角色无结算确认权限') };
+        }
+
+        try {
+          const { error } = await supabase.rpc('confirm_settlement_order_atomic', {
+            p_order_id: orderId,
+          });
+          if (error) throw error;
+
+          const financeStore = useFinanceStore.getState();
+          await Promise.all([
+            get().fetchOrders(),
+            financeStore.fetchTransactions(),
+            financeStore.fetchBalance(),
+          ]);
+          return { error: null };
         } catch (error) {
           return { error: error as Error };
         }
@@ -3093,7 +3202,7 @@ export const useAppStore = create<AppState>()(
                 retail_price: retailPrice,
                 discount_price: discountPrice,
                 unit_cost: Number(product.cost || 0),
-                one_time_cost: Number(product.one_time_cost || 0),
+                one_time_cost: 0,
               };
             });
 
@@ -3261,7 +3370,6 @@ export const useAppStore = create<AppState>()(
 
             const retailPrice = getRetailUnitPrice(product);
             const unitCost = Number(product.cost || 0);
-            const oneTimeCost = Number(product.one_time_cost || 0);
             orderCityId = product.city_id;
             retailTotalLines.push({ product, quantity: item.quantity });
             totalQuantity += item.quantity;
@@ -3272,7 +3380,7 @@ export const useAppStore = create<AppState>()(
               retail_price: retailPrice,
               discount_price: retailPrice,
               unit_cost: unitCost,
-              one_time_cost: oneTimeCost,
+              one_time_cost: 0,
             };
           });
 
@@ -3284,7 +3392,7 @@ export const useAppStore = create<AppState>()(
             quantity: item.quantity,
             retail_price: item.retail_price,
             unit_cost: item.unit_cost,
-            one_time_cost: item.one_time_cost,
+            one_time_cost: 0,
           }));
           const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_retail_order_atomic', {
             p_items: retailRpcPayload,
@@ -3461,15 +3569,58 @@ export const useAppStore = create<AppState>()(
 
       deleteOrder: async (orderId) => {
         try {
+          const { user, orders } = get();
+          const targetOrder = orders.find((order) => order.id === orderId) || null;
+          const rollbackByProduct = targetOrder?.order_kind === 'settlement' && targetOrder.store_id
+            ? targetOrder.items.reduce<Map<string, number>>((acc, item) => {
+                const current = acc.get(item.product_id) || 0;
+                acc.set(item.product_id, current + Number(item.quantity || 0));
+                return acc;
+              }, new Map<string, number>())
+            : null;
+
           const { error } = await supabase.rpc('delete_order_with_inventory_restore_atomic', {
             p_order_id: orderId,
           });
           if (error) throw error;
 
+          if (user && targetOrder?.store_id && rollbackByProduct && rollbackByProduct.size > 0) {
+            const productIds = Array.from(rollbackByProduct.keys());
+            const { data: restoredStoreInventory } = await supabase
+              .from('store_inventory')
+              .select('product_id, quantity')
+              .eq('store_id', targetOrder.store_id)
+              .in('product_id', productIds);
+
+            const restoredQtyMap = new Map(
+              (restoredStoreInventory || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]),
+            );
+
+            const rollbackLogPayload = productIds.map((productId) => {
+              const rollbackQty = rollbackByProduct.get(productId) || 0;
+              const afterQty = restoredQtyMap.get(productId) || rollbackQty;
+              const beforeQty = Math.max(0, afterQty - rollbackQty);
+              return {
+                product_id: productId,
+                operator_id: user.id,
+                action: 'settlement_edit' as const,
+                delta_quantity: rollbackQty,
+                before_quantity: beforeQty,
+                after_quantity: afterQty,
+                note: `结算删单回滚；order_id=${orderId}`,
+                store_id: targetOrder.store_id,
+              };
+            });
+
+            if (rollbackLogPayload.length > 0) {
+              await supabase.from('inventory_logs').insert(rollbackLogPayload);
+            }
+          }
+
           await Promise.all([get().fetchOrders(), get().fetchProducts()]);
           return { error: null };
         } catch (error) {
-          return { error: error as Error };
+          return { error: normalizeDeleteOrderError(error) };
         }
       },
 
