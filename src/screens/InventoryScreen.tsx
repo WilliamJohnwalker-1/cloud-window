@@ -33,6 +33,8 @@ export default function InventoryScreen() {
     fetchCities,
     fetchStores,
     fetchStoreInventory,
+    inventoryLogs,
+    fetchInventoryLogs,
     updateInventory,
     updateStoreInventory,
     updateInventorySettings,
@@ -50,6 +52,8 @@ export default function InventoryScreen() {
       fetchCities: state.fetchCities,
       fetchStores: state.fetchStores,
       fetchStoreInventory: state.fetchStoreInventory,
+      inventoryLogs: state.inventoryLogs,
+      fetchInventoryLogs: state.fetchInventoryLogs,
       updateInventory: state.updateInventory,
       updateStoreInventory: state.updateStoreInventory,
       updateInventorySettings: state.updateInventorySettings,
@@ -90,6 +94,7 @@ export default function InventoryScreen() {
   const [editStoreQuantity, setEditStoreQuantity] = useState('0');
   const [savingStoreEdit, setSavingStoreEdit] = useState(false);
   const [quantitySort, setQuantitySort] = useState<'none' | 'asc' | 'desc'>('none');
+  const [logsModalVisible, setLogsModalVisible] = useState(false);
   const isDarkMode = useAppStore((state) => state.isDarkMode);
   const theme = isDarkMode ? DarkColors : LightColors;
 
@@ -666,6 +671,25 @@ export default function InventoryScreen() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>库存管理</Text>
         <View style={styles.headerActions}>
+          {isAdminOrManager ? (
+            <TouchableOpacity
+              onPress={() => {
+                setLogsModalVisible(true);
+                fetchInventoryLogs(viewMode === 'store' ? (selectedStoreId || undefined) : null);
+              }}
+              activeOpacity={0.85}
+              style={styles.headerActionSpacing}
+            >
+              <LinearGradient
+                colors={[theme.surfaceSecondary, theme.surfaceSecondary]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.inboundButton}
+              >
+                <Text style={[styles.inboundButtonText, { color: theme.textPrimary }]}>日志</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
           {canCreatePurchase ? (
             <TouchableOpacity
               onPress={() => {
@@ -1267,6 +1291,65 @@ export default function InventoryScreen() {
                 <Text style={styles.saveButtonText}>{submittingPurchase ? '处理中...' : '创建进货单'}</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={logsModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface, height: '80%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalTitle, { color: theme.textPrimary, marginBottom: 0 }]}>
+                {viewMode === 'store' ? '店铺日志' : '总仓日志'}
+              </Text>
+              <TouchableOpacity onPress={() => setLogsModalVisible(false)}>
+                <Text style={{ color: theme.textSecondary, fontSize: 16 }}>关闭</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={inventoryLogs}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <View style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ color: theme.textPrimary, fontWeight: '600' }}>{item.product_name || '未知商品'}</Text>
+                    <Text style={{ color: item.delta_quantity > 0 ? Colors.success : Colors.danger, fontWeight: '600' }}>
+                      {item.delta_quantity > 0 ? '+' : ''}{item.delta_quantity}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                      {item.action === 'inbound' ? '入库' :
+                       item.action === 'manual_adjust' ? '手动调整' :
+                       item.action === 'quick_add' ? '快捷增加' :
+                       item.action === 'quick_reduce' ? '快捷减少' :
+                       item.action === 'breakage' ? '报损' :
+                       item.action === 'purchase_receive' ? '进货到货' :
+                       item.action === 'settlement_create' ? '结算建单' :
+                       item.action === 'settlement_edit' ? '结算修改' :
+                       item.action}
+                    </Text>
+                    <Text style={{ color: theme.textTertiary, fontSize: 12 }}>
+                      {new Date(item.created_at).toLocaleString()}
+                    </Text>
+                  </View>
+                  {item.store_name && (
+                    <Text style={{ color: theme.textTertiary, fontSize: 12, marginBottom: 2 }}>
+                      店铺: {item.store_name}
+                    </Text>
+                  )}
+                  {item.note && (
+                    <Text style={{ color: theme.textTertiary, fontSize: 12 }}>
+                      备注: {item.note}
+                    </Text>
+                  )}
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: theme.textTertiary }}>暂无日志记录</Text>
+                </View>
+              }
+            />
           </View>
         </View>
       </Modal>

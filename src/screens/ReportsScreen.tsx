@@ -937,7 +937,6 @@ export default function ReportsScreen() {
         discountRevenue: number;
         unitCostTotal: number;
         sampleCostTotal: number;
-        oneTimeCost: number;
       };
     } = {};
 
@@ -954,7 +953,6 @@ export default function ReportsScreen() {
             discountRevenue: 0,
             unitCostTotal: 0,
             sampleCostTotal: 0,
-            oneTimeCost: Number(it.one_time_cost || 0),
           };
         }
         productProfit[key].quantity += it.quantity;
@@ -965,15 +963,12 @@ export default function ReportsScreen() {
           productProfit[key].discountRevenue += it.quantity * Number(it.discount_price || 0);
           productProfit[key].unitCostTotal += it.quantity * Number(it.unit_cost || 0);
         }
-        if (productProfit[key].oneTimeCost === 0) {
-          productProfit[key].oneTimeCost = Number(it.one_time_cost || 0);
-        }
       });
     });
 
     const profitByProduct = Object.values(productProfit)
       .map((v) => {
-        const cost = v.unitCostTotal + v.sampleCostTotal + v.oneTimeCost;
+        const cost = v.unitCostTotal + v.sampleCostTotal;
         return {
           name: v.name,
           quantity: v.quantity,
@@ -1006,7 +1001,6 @@ export default function ReportsScreen() {
 
     const trendMap: { [key: string]: number } = {};
     const profitTrendMap: { [key: string]: { revenue: number; cost: number } } = {};
-    const seenProductsForTrend = new Set<string>();
     revenueScopedOrders.forEach((order) => {
       const date = new Date(resolveOrderBusinessDate(order));
       let key = '';
@@ -1022,17 +1016,11 @@ export default function ReportsScreen() {
       }
       
       order.items.forEach((it) => {
-        const pKey = it.product_id;
         if (!it.is_sample) {
           profitTrendMap[key].revenue += it.quantity * Number(it.discount_price || 0);
           profitTrendMap[key].cost += it.quantity * Number(it.unit_cost || 0);
         } else {
           profitTrendMap[key].cost += it.quantity * Number(it.unit_cost || 0);
-        }
-        
-        if (!seenProductsForTrend.has(pKey)) {
-          seenProductsForTrend.add(pKey);
-          profitTrendMap[key].cost += Number(it.one_time_cost || 0);
         }
       });
     });

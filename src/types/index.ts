@@ -132,6 +132,7 @@ export interface Order {
   total_retail_amount: number;
   total_discount_amount: number;
   order_date?: string | null;
+  confirmed_at?: string | null;
   created_at: string;
   items: OrderItem[];
   refunded_items?: RefundedOrderItem[];
