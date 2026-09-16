@@ -248,8 +248,8 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.18`
-- Current web baseline: `v1.3.22`
+- Current mobile baseline: `v2.2.19`
+- Current web baseline: `v1.3.23`
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
@@ -282,6 +282,7 @@ Before committing:
 - Latest dual-end inventory+settlement wave: 双端库存页补齐“库存数量升降序”切换；双端订单页在“上货”旁新增“退货回总仓”能力（店铺库存 -> 总仓库存）；双端结算单筛选与报表统计口径统一优先 `order_date`，历史数据自动回退 `created_at`。
 - Latest return-stat fix wave: 双端库存排序默认态改为中性（不再默认显示降序箭头）；退货写入 `order_kind='return'` 并归并到供货分类统计，供货统计支持退货冲减为负；新增 `migrate-v8.8-return-order-kind-and-delete-wrapper.sql` 修复退货删单回滚方向（总仓减、店铺加）。
 - Latest settlement-v9 wave: Worker 微信收款移除 `micropay` 失败回退并直连 `codepay`；新增 `migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`（结算确认/编辑 RPC、`orders.confirmed_at`、`inventory_logs.store_id`、已确认结算删单门禁、历史回填）；双端结算流程升级为“创建 pending -> 可编辑 -> 确认收款后锁定并自动入账”；双端商品成本切换为采购累计+一次性成本自动计算并在累计数量为 0 时留空；双端报表利润移除 one_time_cost 独立叠加；新订单项 `one_time_cost` 统一新写入 0；双端库存日志补齐店铺维度筛选与结算日志；结算建单商品列表收口为“仅显示所选店铺有库存商品”。
+- Latest cashier+auth+knowledge-base hotfix: Web 收银台建单新增云窗 active 店铺缓存/预热并移除关键路径 `fetchStores` 阻塞；`createRetailOrders` 返回订单草稿并让收银台先进入可收款态，`fetchOrderDetail` 改异步补充（不再作为建单后强阻塞依赖）；移动端会话恢复新增 invalid refresh token 识别与本地 `signOut({ scope: 'local' })` 清理，前后台轮询与 TOKEN_REFRESH_FAILED 事件统一兜底；知识库悬浮球修复 hooks 顺序问题并重做拖拽手势判定，恢复自由拖动与点击打开稳定性。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

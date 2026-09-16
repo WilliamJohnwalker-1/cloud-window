@@ -33,6 +33,15 @@ interface ActiveOrderItemDraft {
   draftDiscountPrice: string;
 }
 
+interface ActiveOrderDraft {
+  id: string;
+  amount: number;
+  originalAmount: number;
+  items: ActiveOrderItemDraft[];
+  createdAtMs: number;
+  itemsResolved: boolean;
+}
+
 interface TimingEntry {
   label: string;
   durationMs: number;
@@ -77,11 +86,11 @@ const detectPaymentMethodByAuthCode = (input: string): 'wechat' | 'alipay' | nul
 };
 
 export const PaymentScreen: React.FC = () => {
-  const { user, products, createRetailOrders, fetchOrders, fetchOrderDetail, deleteOrder, orders } = useAppStore();
+  const { user, stores, products, createRetailOrders, fetchStores, fetchOrders, fetchOrderDetail, deleteOrder, orders } = useAppStore();
   const [productScanCode, setProductScanCode] = useState('');
   const [paymentAuthCode, setPaymentAuthCode] = useState('');
   const [cart, setCart] = useState<Map<string, number>>(new Map());
-  const [activeOrder, setActiveOrder] = useState<{ id: string; amount: number; originalAmount: number; items: ActiveOrderItemDraft[]; createdAtMs: number } | null>(null);
+  const [activeOrder, setActiveOrder] = useState<ActiveOrderDraft | null>(null);
   const [isApplyingItemRounding, setIsApplyingItemRounding] = useState(false);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
@@ -245,6 +254,14 @@ export const PaymentScreen: React.FC = () => {
       productInputRef.current?.focus();
     });
   }, []);
+
+  useEffect(() => {
+    if (!canUseCashier) return;
+    const hasActiveYunChuang = stores.some((store) => store.name === '云窗' && store.status === 'active');
+    if (!hasActiveYunChuang) {
+      void fetchStores();
+    }
+  }, [canUseCashier, stores, fetchStores]);
 
   useEffect(() => {
     scanTargetRef.current = scanTarget;
@@ -423,43 +440,85 @@ export const PaymentScreen: React.FC = () => {
         return;
       }
 
-      const detailStart = performance.now();
-      const detail = await fetchOrderDetail(orderId);
-      pushTimingEntry('订单详情拉取', detailStart, !detail || detail.items.length === 0);
-      if (!detail || detail.items.length === 0) {
-        setStatus('failed');
-        setStatusMessage('订单已创建，但未能加载商品明细，请到订单页刷新后重试');
-        return;
-      }
+      const fallbackItems: ActiveOrderItemDraft[] =
+        result.draft?.items.map((item, index) => {
+          const discountPrice = Number(item.discount_price || 0);
+          return {
+            id: `${item.product_id}-${index}`,
+            productName: item.product_name || '云窗文创',
+            quantity: Number(item.quantity || 0),
+            retailPrice: Number(item.retail_price || 0),
+            discountPrice,
+            draftDiscountPrice: discountPrice.toFixed(2),
+          };
+        })
+        || cartItems.map((item, index) => {
+          const retailPrice = Number(item.product.price || 0);
+          return {
+            id: `${item.product.id}-${index}`,
+            productName: item.product.name || '云窗文创',
+            quantity: Number(item.quantity || 0),
+            retailPrice,
+            discountPrice: retailPrice,
+            draftDiscountPrice: retailPrice.toFixed(2),
+          };
+        });
 
-      if (detail.order_kind !== 'retail') {
-        setStatus('failed');
-        setStatusMessage('收银台仅允许绑定零售单，请在订单页核对后重试建单');
-        return;
-      }
-
-      const orderItems: ActiveOrderItemDraft[] = detail.items.map((item) => {
-        const discountPrice = Number(item.discount_price || 0);
-        return {
-          id: item.id,
-          productName: item.product_name || '云窗文创',
-          quantity: Number(item.quantity || 0),
-          retailPrice: Number(item.retail_price || 0),
-          discountPrice,
-          draftDiscountPrice: discountPrice.toFixed(2),
-        };
-      });
-
-      const originalAmount = Number(detail.total_retail_amount || totalAmount);
-      const discountedAmount = Number(detail.payment_amount || detail.total_discount_amount || totalAmount);
+      const fallbackOriginalAmount = Number(result.draft?.original_amount || totalAmount);
+      const fallbackDiscountedAmount = Number(result.draft?.amount || totalAmount);
+      const fallbackCreatedAtMs = Number.isFinite(new Date(String(result.draft?.created_at || '')).getTime())
+        ? new Date(String(result.draft?.created_at)).getTime()
+        : Date.now();
 
       setActiveOrder({
         id: orderId,
-        amount: discountedAmount,
-        originalAmount,
-        items: orderItems,
-        createdAtMs: Number.isFinite(new Date(detail.created_at).getTime()) ? new Date(detail.created_at).getTime() : Date.now(),
+        amount: fallbackDiscountedAmount,
+        originalAmount: fallbackOriginalAmount,
+        items: fallbackItems,
+        createdAtMs: fallbackCreatedAtMs,
+        itemsResolved: false,
       });
+
+      void (async () => {
+        const detailStart = performance.now();
+        const detail = await fetchOrderDetail(orderId);
+        pushTimingEntry('订单详情拉取', detailStart, !detail || detail.items.length === 0);
+        if (!detail || detail.items.length === 0 || detail.order_kind !== 'retail') {
+          return;
+        }
+
+        const orderItems: ActiveOrderItemDraft[] = detail.items.map((item) => {
+          const discountPrice = Number(item.discount_price || 0);
+          return {
+            id: item.id,
+            productName: item.product_name || '云窗文创',
+            quantity: Number(item.quantity || 0),
+            retailPrice: Number(item.retail_price || 0),
+            discountPrice,
+            draftDiscountPrice: discountPrice.toFixed(2),
+          };
+        });
+
+        const originalAmount = Number(detail.total_retail_amount || fallbackOriginalAmount);
+        const discountedAmount = Number(detail.payment_amount || detail.total_discount_amount || fallbackDiscountedAmount);
+        const detailCreatedAtMs = Number.isFinite(new Date(detail.created_at).getTime()) ? new Date(detail.created_at).getTime() : Date.now();
+
+        setActiveOrder((current) => {
+          if (!current || current.id !== orderId) {
+            return current;
+          }
+
+          return {
+            ...current,
+            amount: discountedAmount,
+            originalAmount,
+            items: orderItems,
+            createdAtMs: detailCreatedAtMs,
+            itemsResolved: true,
+          };
+        });
+      })();
+
       finalizedPaidOrderIdRef.current = null;
       setTransactionId('');
       setPaymentAuthCode('');
@@ -669,6 +728,11 @@ export const PaymentScreen: React.FC = () => {
 
   const applyItemLevelRounding = (): void => {
     if (!activeOrder || !canAdjustAmount || isApplyingItemRounding) return;
+    if (!activeOrder.itemsResolved) {
+      setStatus('pending');
+      setStatusMessage('订单明细加载中，暂不可按商品抹零，请稍后重试');
+      return;
+    }
 
     const nextItems = activeOrder.items.map((item) => {
       const parsed = Number(item.draftDiscountPrice);

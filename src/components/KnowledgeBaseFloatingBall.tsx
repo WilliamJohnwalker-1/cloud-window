@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Dimensions,
   View,
@@ -34,6 +34,9 @@ export default function KnowledgeBaseFloatingBall() {
   const [isUploading, setIsUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 18, y: 140 });
+  const positionRef = useRef(position);
+  const dragStartRef = useRef(position);
+  const movedRef = useRef(false);
 
   const canView = canViewKnowledgeBase(user?.role);
   const canManage = canManageKnowledgeBase(user?.role);
@@ -44,9 +47,9 @@ export default function KnowledgeBaseFloatingBall() {
     }
   }, [modalVisible, canView, fetchFiles]);
 
-  if (!canView) {
-    return null;
-  }
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
 
   const clampPosition = (x: number, y: number): { x: number; y: number } => {
     const { width, height } = Dimensions.get('window');
@@ -61,33 +64,32 @@ export default function KnowledgeBaseFloatingBall() {
   };
 
   const panResponder = useMemo(() => {
-    let startX = 0;
-    let startY = 0;
-    let moved = false;
-
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2,
       onPanResponderGrant: () => {
-        startX = position.x;
-        startY = position.y;
-        moved = false;
+        dragStartRef.current = positionRef.current;
+        movedRef.current = false;
       },
       onPanResponderMove: (_, gestureState) => {
         if (Math.abs(gestureState.dx) > 3 || Math.abs(gestureState.dy) > 3) {
-          moved = true;
+          movedRef.current = true;
         }
-        const next = clampPosition(startX + gestureState.dx, startY + gestureState.dy);
-        setPosition(next);
+        const next = clampPosition(dragStartRef.current.x + gestureState.dx, dragStartRef.current.y + gestureState.dy);
+        setPosition((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
       },
       onPanResponderRelease: () => {
-        if (!moved) {
+        if (!movedRef.current) {
           setModalVisible(true);
         }
       },
       onPanResponderTerminationRequest: () => false,
     });
-  }, [position.x, position.y]);
+  }, []);
+
+  if (!canView) {
+    return null;
+  }
 
   const handleUpload = async () => {
     try {

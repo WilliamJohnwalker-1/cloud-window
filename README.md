@@ -247,7 +247,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.22）
+### 5. 启动 Web 端（v1.3.23）
 
 ```bash
 npm run web:v2
@@ -440,6 +440,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.23 (2026-09-16) - 收银台 active 店铺预热 + 会话恢复兜底 + 知识库悬浮球交互修复
+
+- 收银台建单性能链路补丁：`createRetailOrders` 移除关键路径 `fetchStores()` 阻塞，改为优先命中 active 云窗店铺缓存；未命中时后台预热店铺列表并给出重试提示。
+- 收银台建单后绑定降耦：`createRetailOrders` 现在返回可用订单草稿（金额/商品明细）供页面立即进入收款态；`fetchOrderDetail` 改为异步补充，不再是建单成功后的强阻塞依赖。
+- 收银台页面补齐预热触发：可收银角色进入页面时，若本地无 active 云窗店铺，自动触发一次 `fetchStores()` 预热，减少首单冷启动等待。
+- 会话恢复稳定性修复：移动端新增 invalid refresh token 识别，命中后统一本地 `signOut({ scope: 'local' })` 清理；前后台轮询与 `TOKEN_REFRESH_FAILED` 事件统一兜底，避免坏 token 反复报错。
+- 知识库悬浮球热修：修复 hooks 顺序报错，并重做拖拽手势判定（拖拽与点击分流、拖动边界夹紧），恢复自由拖动与点击打开稳定性。
+
+### Mobile v2.2.19 (2026-09-16) - 会话失效清理与知识库悬浮球拖拽稳定性修复
+
+- 会话恢复链路新增 refresh token 失效识别与本地登出清理，避免 `Invalid Refresh Token: Refresh Token Not Found` 持续打断使用。
+- 前后台状态检查与 auth 事件监听统一补齐 token 失效兜底，异常路径保持用户态与本地缓存一致。
+- 知识库悬浮球修复 hooks 顺序问题并恢复自由拖动交互，点击打开与拖动移动不再互相误触。
 
 ### Web v1.3.22 (2026-09-15) - 收银台提速 + 结算确认流程 + 成本口径升级 + 报表与日志收口
 
