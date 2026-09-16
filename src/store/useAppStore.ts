@@ -316,6 +316,12 @@ const normalizeError = (error: unknown): Error => {
   return new Error(typeof error === 'string' ? error : '未知错误');
 };
 
+const isInvalidRefreshTokenError = (error: unknown): boolean => {
+  const normalized = normalizeError(error);
+  const message = normalized.message.toLowerCase();
+  return message.includes('invalid refresh token') || message.includes('refresh token not found');
+};
+
 const isMissingStoreInvoiceColumnError = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') {
     return false;
@@ -1176,13 +1182,25 @@ export const useAppStore = create<AppState>()(
         };
 
         const firstCheck = await checkActiveSessionOnce();
-        if (firstCheck.error) return firstCheck.error;
+        if (firstCheck.error) {
+          if (isInvalidRefreshTokenError(firstCheck.error)) {
+            await get().signOut();
+            return new Error('登录状态已失效，请重新登录');
+          }
+          return firstCheck.error;
+        }
         if (firstCheck.ok) return null;
 
         for (let attempt = 0; attempt < SESSION_RETRY_TIMES; attempt += 1) {
           await waitMs(SESSION_RETRY_DELAY_MS);
           const retryCheck = await checkActiveSessionOnce();
-          if (retryCheck.error) return retryCheck.error;
+          if (retryCheck.error) {
+            if (isInvalidRefreshTokenError(retryCheck.error)) {
+              await get().signOut();
+              return new Error('登录状态已失效，请重新登录');
+            }
+            return retryCheck.error;
+          }
           if (retryCheck.ok) return null;
         }
 
@@ -1273,7 +1291,11 @@ export const useAppStore = create<AppState>()(
 
       signOut: async () => {
         try {
-          await supabase.auth.signOut();
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch (error) {
+          if (!isInvalidRefreshTokenError(error)) {
+            throw error;
+          }
         } finally {
           set({
             user: null,

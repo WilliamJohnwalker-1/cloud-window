@@ -231,6 +231,7 @@ export default function App() {
   );
   const theme = isDarkMode ? DarkColors : LightColors;
   const ensureActiveSession = useAppStore((state) => state.ensureActiveSession);
+  const signOut = useAppStore((state) => state.signOut);
   const fetchOwnedStores = useAppStore((state) => state.fetchOwnedStores);
   const setDefaultStore = useAppStore((state) => state.setDefaultStore);
 
@@ -240,15 +241,13 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (!session) {
-          setUser(null);
-          await AsyncStorage.removeItem('inventory-app-storage');
+          await signOut();
           return;
         }
 
         const sessionError = await ensureActiveSession();
         if (sessionError) {
-          setUser(null);
-          await AsyncStorage.removeItem('inventory-app-storage');
+          await signOut();
           return;
         }
 
@@ -262,7 +261,7 @@ export default function App() {
       } catch (error) {
         console.error('Error loading stored user:', error);
         try {
-          await AsyncStorage.removeItem('inventory-app-storage');
+          await signOut();
         } catch (storageError) {
           console.warn('Failed clearing local storage after init error:', storageError);
         }
@@ -272,7 +271,7 @@ export default function App() {
     };
 
     initApp();
-  }, [setUser, ensureActiveSession]);
+  }, [setUser, ensureActiveSession, signOut]);
 
   useEffect(() => {
     const checkDistributorDefaultStore = async () => {
@@ -356,9 +355,13 @@ export default function App() {
       if (nextState !== 'active') return;
       if (!user) return;
       const checkSession = async () => {
-        const sessionError = await ensureActiveSession();
-        if (sessionError && sessionError.message.includes('其他设备')) {
-          Toast.show({ type: 'error', text1: '登录状态失效', text2: sessionError.message });
+        try {
+          const sessionError = await ensureActiveSession();
+          if (sessionError) {
+            Toast.show({ type: 'error', text1: '登录状态失效', text2: sessionError.message });
+          }
+        } catch (error) {
+          Toast.show({ type: 'error', text1: '登录状态失效', text2: (error as Error).message });
         }
       };
       void checkSession();
@@ -373,7 +376,7 @@ export default function App() {
     if (!user) return;
 
     const timer = setInterval(() => {
-      void ensureActiveSession();
+      void ensureActiveSession().catch(() => undefined);
     }, 15000);
 
     return () => {
@@ -385,7 +388,7 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT' || String(event) === 'TOKEN_REFRESH_FAILED') {
         setUser(null);
       }
     });
