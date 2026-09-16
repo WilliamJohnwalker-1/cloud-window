@@ -253,6 +253,21 @@ interface CashierCreateItem {
   quantity: number;
 }
 
+interface RetailOrderDraftItem {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  retail_price: number;
+  discount_price: number;
+}
+
+interface RetailOrderDraft {
+  amount: number;
+  original_amount: number;
+  created_at: string;
+  items: RetailOrderDraftItem[];
+}
+
 interface PurchaseOrderCreateItem {
   store_id: string;
   city_id: string;
@@ -292,6 +307,22 @@ const paidRetailStatuses = new Set(['paid', 'partial_refunded', 'partial_refund_
 const unpaidRetailStatuses = new Set(['', 'pending', 'unpaid', 'failed', 'timeout', 'closed', 'cancelled']);
 
 let sessionGraceUntil = 0;
+let cachedActiveYunChuangStoreId: string | null = null;
+
+const pickActiveYunChuangStore = (stores: Store[]): Store | null => {
+  if (cachedActiveYunChuangStoreId) {
+    const cachedMatch = stores.find(
+      (store) => store.id === cachedActiveYunChuangStoreId && store.name === '云窗' && store.status === 'active',
+    );
+    if (cachedMatch) {
+      return cachedMatch;
+    }
+  }
+
+  const resolvedStore = stores.find((store) => store.name === '云窗' && store.status === 'active') || null;
+  cachedActiveYunChuangStoreId = resolvedStore?.id ?? null;
+  return resolvedStore;
+};
 
 const createRequestId = (userId: string): string => {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -488,7 +519,7 @@ interface AppState {
     storeId?: string,
   ) => Promise<{ orderId?: string; error: Error | null }>;
   confirmExternalOrder: (orderId: string) => Promise<{ error: Error | null }>;
-  createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; error: Error | null }>;
+  createRetailOrders: (items: CashierCreateItem[]) => Promise<{ orderId?: string; draft?: RetailOrderDraft; error: Error | null }>;
   acceptOrder: (orderId: string) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
   modifyDistributionOrder: (orderId: string, items: Array<{ order_item_id: string; new_quantity: number }>) => Promise<{ error: Error | null }>;
@@ -1580,6 +1611,7 @@ export const useAppStore = create<AppState>()(
         const sorted = yunchuangIdx > 0
           ? [mapped[yunchuangIdx], ...mapped.filter((_, i) => i !== yunchuangIdx)]
           : mapped;
+        cachedActiveYunChuangStoreId = pickActiveYunChuangStore(sorted)?.id ?? null;
         set({ stores: sorted });
       },
 
@@ -3175,7 +3207,7 @@ export const useAppStore = create<AppState>()(
           try {
             let effectiveStoreId = storeId ?? null;
             if (!effectiveStoreId) {
-              const yunChuangStore = stores.find((store) => store.name === '云窗' && store.status === 'active') || null;
+              const yunChuangStore = pickActiveYunChuangStore(stores);
               if (!yunChuangStore) {
                 throw new Error('默认外部渠道店铺不存在');
               }
@@ -3344,14 +3376,10 @@ export const useAppStore = create<AppState>()(
           return { error: new Error('当前角色无收款建单权限') };
         }
 
-        // Resolve 云窗 store robustly: fetch if stale/empty, error if unresolvable
-        let stores = get().stores;
-        if (!stores.find((s) => s.name === '云窗' && s.status === 'active')) {
-          await get().fetchStores();
-          stores = get().stores;
-        }
-        const yunChuangStore = stores.find((s) => s.name === '云窗' && s.status === 'active') || null;
+        const stores = get().stores;
+        const yunChuangStore = pickActiveYunChuangStore(stores);
         if (!yunChuangStore) {
+          void get().fetchStores();
           return { error: new Error('未找到云窗店铺，请确认店铺数据已初始化') };
         }
 
@@ -3385,6 +3413,22 @@ export const useAppStore = create<AppState>()(
           });
 
           const retailTotals = calculateRetailOrderTotals(retailTotalLines);
+          const createdAt = new Date().toISOString();
+          const draft: RetailOrderDraft = {
+            amount: retailTotals.totalDiscount,
+            original_amount: retailTotals.totalRetail,
+            created_at: createdAt,
+            items: retailTotalLines.map(({ product, quantity }) => {
+              const retailPrice = getRetailUnitPrice(product);
+              return {
+                product_id: product.id,
+                product_name: product.name,
+                quantity,
+                retail_price: retailPrice,
+                discount_price: retailPrice,
+              };
+            }),
+          };
 
           const requestId = createRequestId(user.id);
           const retailRpcPayload = orderItemsPayload.map((item) => ({
@@ -3402,7 +3446,7 @@ export const useAppStore = create<AppState>()(
 
           if (!rpcError) {
             void Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
-            return { orderId: rpcOrderId ? String(rpcOrderId) : undefined, error: null };
+            return { orderId: rpcOrderId ? String(rpcOrderId) : undefined, draft, error: null };
           }
 
           if (!shouldFallbackToLegacyFlow(rpcError as RpcErrorLike)) {
@@ -3536,7 +3580,7 @@ export const useAppStore = create<AppState>()(
           }));
 
           void Promise.all([get().fetchOrders(), get().fetchProducts(), get().fetchNotifications()]);
-          return { orderId: orderData.id, error: null };
+          return { orderId: orderData.id, draft, error: null };
         } catch (error) {
           return { error: error as Error };
         }
