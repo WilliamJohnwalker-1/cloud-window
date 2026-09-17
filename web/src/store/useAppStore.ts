@@ -506,7 +506,7 @@ interface AppState {
     items: Array<{ productId: string; quantity: number }>,
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
-  createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
+  createBatchOrders: (items: CartCreateItem[], storeId?: string | null, orderDate?: string) => Promise<{ error: Error | null }>;
   createPurchaseOrder: (items: PurchaseOrderCreateItem[]) => Promise<{ orderIds?: string[]; error: Error | null }>;
   confirmPurchaseDelivery: (orderId: string) => Promise<{ error: Error | null }>;
   createSettlementOrder: (storeId: string, items: CashierCreateItem[], orderDate?: string) => Promise<{ orderId?: string; error: Error | null }>;
@@ -2487,7 +2487,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      createBatchOrders: async (items, storeId = null) => {
+      createBatchOrders: async (items, storeId = null, orderDate) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
@@ -2568,10 +2568,12 @@ export const useAppStore = create<AppState>()(
           });
 
           const requestId = createRequestId(user.id);
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
           const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
             p_request_id: requestId,
             p_store_id: storeId,
+            p_order_date: normalizedOrderDate,
           });
 
           if (!rpcError) {
@@ -2607,6 +2609,7 @@ export const useAppStore = create<AppState>()(
             total_discount_amount: totalDiscount,
             quantity: totalQuantity,
             order_kind: 'distribution' as const,
+            order_date: normalizedOrderDate,
             ...(shouldAutoAccept ? { status: 'accepted' as const } : {}),
           };
 

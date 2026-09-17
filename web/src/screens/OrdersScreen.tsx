@@ -112,6 +112,7 @@ export const OrdersScreen: React.FC = () => {
   const [selectedFilterCityId, setSelectedFilterCityId] = useState<string | null>(null);
   const [selectedFilterStoreId, setSelectedFilterStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [distributionOrderDate, setDistributionOrderDate] = useState('');
   const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [externalOrderFormVisible, setExternalOrderFormVisible] = useState(false);
@@ -323,7 +324,7 @@ export const OrdersScreen: React.FC = () => {
   }, [rangeEndDate, rangeStartDate, statsRange]);
 
   const resolveOrderFilterDate = useCallback((order: (typeof orders)[number]): string => {
-    if (order.order_kind === 'settlement') {
+    if (order.order_kind === 'settlement' || order.order_kind === 'distribution' || order.order_kind === 'return') {
       const businessDate = order.order_date?.trim();
       if (businessDate) {
         return `${businessDate}T00:00:00`;
@@ -1612,7 +1613,8 @@ export const OrdersScreen: React.FC = () => {
         quantity: item.quantity,
         isSample: item.isSample,
       })),
-      selectedStoreId
+      selectedStoreId,
+      distributionOrderDate || undefined,
     );
     if (result.error) {
       setPageNotice({ type: 'error', text: `下单失败：${result.error.message}` });
@@ -1623,6 +1625,7 @@ export const OrdersScreen: React.FC = () => {
     setSearchKeyword('');
     setShowCreateModal(false);
     setSelectedStoreId(null);
+    setDistributionOrderDate('');
     setPageNotice({ type: 'success', text: '订单已创建' });
   };
 
@@ -1873,7 +1876,10 @@ export const OrdersScreen: React.FC = () => {
           {canCreateOrder && (
             <button
               type="button"
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                setDistributionOrderDate('');
+                setShowCreateModal(true);
+              }}
               className="bg-tech-gradient px-5 py-2.5 rounded-xl font-bold flex items-center space-x-2 shadow-neon hover:scale-[1.02] transition-all"
             >
               <Plus size={18} />
@@ -2241,7 +2247,9 @@ export const OrdersScreen: React.FC = () => {
                     {businessOrderDate ? (
                       <>
                         <div className="flex items-center space-x-1 text-white/70"><Clock size={12} /><span>{businessOrderDate}</span></div>
-                        <div className="flex items-center space-x-1"><span>创建于 {new Date(order.created_at).toLocaleString()}</span></div>
+                        {order.order_kind !== 'distribution' && order.order_kind !== 'return' ? (
+                          <div className="flex items-center space-x-1"><span>创建于 {new Date(order.created_at).toLocaleString()}</span></div>
+                        ) : null}
                       </>
                     ) : (
                       <div className="flex items-center space-x-1"><Clock size={12} /><span>{new Date(order.created_at).toLocaleString()}</span></div>
@@ -2576,7 +2584,14 @@ export const OrdersScreen: React.FC = () => {
           <div className="w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-[#121217] border border-white/10 rounded-3xl p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold">新建分销订单</h3>
-              <button type="button" onClick={() => setShowCreateModal(false)} className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setDistributionOrderDate('');
+                }}
+                className="p-2 rounded-lg bg-white/10 text-white/60 hover:text-white"
+              >
                 <X size={16} />
               </button>
             </div>
@@ -2602,6 +2617,16 @@ export const OrdersScreen: React.FC = () => {
                 onChange={(event) => setSearchKeyword(event.target.value)}
                 placeholder="搜索商品名称/条码"
                 className="flex-1 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-white/60">业务日期（选填）</p>
+              <input
+                type="date"
+                value={distributionOrderDate}
+                onChange={(event) => setDistributionOrderDate(event.target.value)}
+                className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-4 py-3"
               />
             </div>
 
