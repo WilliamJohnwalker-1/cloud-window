@@ -603,7 +603,7 @@ interface AppState {
     store_address: string;
     days_since_ordered: number;
   }>>;
-  createBatchOrders: (items: CartCreateItem[], storeId?: string | null) => Promise<{ error: Error | null }>;
+  createBatchOrders: (items: CartCreateItem[], storeId?: string | null, orderDate?: string) => Promise<{ error: Error | null }>;
   modifyDistributionOrder: (orderId: string, items: { order_item_id: string; new_quantity: number }[]) => Promise<{ error: Error | null }>;
   deleteOrder: (orderId: string) => Promise<{ error: Error | null }>;
   uploadProductImage: (uri: string) => Promise<{ publicUrl: string | null; error: Error | null }>;
@@ -3189,7 +3189,7 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      createBatchOrders: async (items, storeId = null) => {
+      createBatchOrders: async (items, storeId = null, orderDate) => {
         const { user, products, stores, storeProductPrices } = get();
         if (!user) return { error: new Error('未登录') };
         if (items.length === 0) return { error: new Error('购物车为空') };
@@ -3271,11 +3271,13 @@ export const useAppStore = create<AppState>()(
           });
 
           const requestId = createRequestId('batch', user.id);
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
 
           const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
             p_request_id: requestId,
             p_store_id: storeId,
+            p_order_date: normalizedOrderDate,
           });
 
           if (!rpcError) {
@@ -3302,6 +3304,7 @@ export const useAppStore = create<AppState>()(
             order_kind: 'distribution' as const,
             total_retail_amount: totalRetail,
             total_discount_amount: totalDiscount,
+            order_date: normalizedOrderDate,
           };
 
           let orderInsert = await supabase

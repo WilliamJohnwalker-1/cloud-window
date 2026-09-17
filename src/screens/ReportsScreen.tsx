@@ -306,7 +306,7 @@ export default function ReportsScreen() {
   }, [filteredStores, selectedStoreId]);
 
   const resolveOrderBusinessDate = useCallback((order: Order): string => {
-    if (order.order_kind === 'settlement') {
+    if (order.order_kind === 'settlement' || order.order_kind === 'distribution' || order.order_kind === 'return') {
       const businessDate = String(order.order_date || '').trim();
       if (/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
         return `${businessDate}T00:00:00`;
