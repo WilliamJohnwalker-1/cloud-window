@@ -111,6 +111,7 @@ export default function OrdersScreen() {
   const [submittingOutbound, setSubmittingOutbound] = useState(false);
   const [retailModalVisible, setRetailModalVisible] = useState(false);
   const [retailStoreId, setRetailStoreId] = useState<string | null>(null);
+  const [distributionOrderDate, setDistributionOrderDate] = useState('');
   const [settlementOrderDate, setSettlementOrderDate] = useState('');
   const [returnModalVisible, setReturnModalVisible] = useState(false);
   const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
@@ -456,7 +457,7 @@ export default function OrdersScreen() {
   }, []);
 
   const resolveOrderFilterDate = useCallback((order: Order): string => {
-    if (order.order_kind === 'settlement') {
+    if (order.order_kind === 'settlement' || order.order_kind === 'distribution' || order.order_kind === 'return') {
       const businessDate = order.order_date?.trim();
       if (businessDate) {
         return `${businessDate}T00:00:00`;
@@ -723,7 +724,7 @@ export default function OrdersScreen() {
       isSample: item.isSample,
     }));
 
-    const { error } = await createBatchOrders(items, orderModalStoreId);
+    const { error } = await createBatchOrders(items, orderModalStoreId, distributionOrderDate || undefined);
     if (error) {
       Toast.show({ type: 'error', text1: '错误', text2: error.message });
       return;
@@ -731,6 +732,7 @@ export default function OrdersScreen() {
 
     Toast.show({ type: 'success', text1: '成功', text2: '订单已创建（本次购物车合并为一条订单）' });
     clearCart();
+    setDistributionOrderDate('');
     setModalSearchText('');
     setModalVisible(false);
   };
@@ -1341,7 +1343,9 @@ export default function OrdersScreen() {
           {item.order_date ? (
             <>
               <Text style={[styles.orderDate, { color: theme.textPrimary, fontWeight: '600' }]}>{item.order_date}</Text>
-              <Text style={[styles.orderBusinessDate, { color: theme.textTertiary }]}>创建: {new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+              {item.order_kind !== 'distribution' && item.order_kind !== 'return' ? (
+                <Text style={[styles.orderBusinessDate, { color: theme.textTertiary }]}>创建: {new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
+              ) : null}
             </>
           ) : (
             <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
@@ -1715,6 +1719,7 @@ export default function OrdersScreen() {
             <TouchableOpacity
               onPress={() => {
                 setModalSearchText('');
+                setDistributionOrderDate('');
                 setModalVisible(true);
               }}
               activeOpacity={0.85}
@@ -2280,7 +2285,7 @@ export default function OrdersScreen() {
           <View style={[styles.modalContent, { backgroundColor: theme.surface }] }>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>新建分销订单（合并为单条）</Text>
-              <TouchableOpacity onPress={() => { clearCart(); setModalSearchText(''); setModalVisible(false); }}>
+              <TouchableOpacity onPress={() => { clearCart(); setModalSearchText(''); setDistributionOrderDate(''); setModalVisible(false); }}>
                 <Text style={styles.modalClose}>关闭</Text>
               </TouchableOpacity>
             </View>
@@ -2334,6 +2339,24 @@ export default function OrdersScreen() {
                       ))}
                   </ScrollView>
                 </View>
+                <TextInput
+                  value={distributionOrderDate}
+                  onChangeText={setDistributionOrderDate}
+                  placeholder="业务日期 YYYY-MM-DD"
+                  placeholderTextColor={theme.textTertiary}
+                  style={[
+                    styles.modalInput,
+                    styles.businessDateInput,
+                    {
+                      backgroundColor: theme.surfaceSecondary,
+                      color: theme.textPrimary,
+                    },
+                  ]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={10}
+                  textAlignVertical="center"
+                />
             </View>
 
             <View style={[styles.searchContainer, { backgroundColor: theme.surfaceSecondary, marginBottom: 10 }] }>

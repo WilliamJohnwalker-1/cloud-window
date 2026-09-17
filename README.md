@@ -247,7 +247,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.23）
+### 5. 启动 Web 端（v1.3.24）
 
 ```bash
 npm run web:v2
@@ -440,6 +440,20 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.24 (2026-09-17) - 供货单业务日期补齐与供货/结算筛选口径统一
+
+- Web 订单页“新建分销订单”新增业务日期输入（选填），建单时写入 `orders.order_date`。
+- 订单页时间筛选口径扩展：供货单（`distribution/return`）与结算单统一优先按业务日期筛选，历史空值自动回退 `created_at`。
+- 报表页月份筛选口径同步：供货单 + 结算单统一优先按 `order_date`，确保跨端统计一致。
+- 供货单列表在存在业务日期时弱化创建时间展示（默认不再并列显示“创建于”）。
+
+### Mobile v2.2.20 (2026-09-17) - 供货单业务日期补齐与供货/结算筛选口径统一
+
+- 移动端“新建分销订单（上货）”弹窗新增业务日期输入（选填），建单写入 `orders.order_date`。
+- 订单页时间筛选口径扩展：供货单（`distribution/return`）与结算单统一优先按业务日期筛选，历史空值自动回退 `created_at`。
+- 报表页月份筛选口径同步：供货单 + 结算单统一优先按 `order_date`。
+- 供货单卡片在存在业务日期时默认不展示“创建日期”附加行，减少信息噪音。
 
 ### Web v1.3.23 (2026-09-16) - 收银台 active 店铺预热 + 会话恢复兜底 + 知识库悬浮球交互修复
 

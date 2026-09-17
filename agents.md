@@ -248,8 +248,9 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.19`
-- Current web baseline: `v1.3.23`
+- Current mobile baseline: `v2.2.20`
+- Current web baseline: `v1.3.24`
+- Latest business-date alignment wave: 双端供货单新增业务日期录入；订单页与报表中供货单+结算单时间筛选统一优先 `order_date`，历史空值回退 `created_at` 对应日期；供货单卡片创建时间改弱化展示（有业务日期时默认不展示）
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
 - Payment integration status: Web 已接入，真实支付联调/回归 **pending**
 - Latest web stabilization: 省份筛选体系已落地（商品/库存/订单/报表），报表城市筛选改为“店铺+订单并集”修复历史城市不全；店铺库存补齐省份→城市→店铺三级筛选；“未分类”统一为“未知省份”
