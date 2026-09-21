@@ -114,6 +114,7 @@ export const OrdersScreen: React.FC = () => {
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [distributionOrderDate, setDistributionOrderDate] = useState('');
   const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
+  const [returnOrderDate, setReturnOrderDate] = useState('');
   const [showSettlementModal, setShowSettlementModal] = useState(false);
   const [externalOrderFormVisible, setExternalOrderFormVisible] = useState(false);
   const [settlementStoreId, setSettlementStoreId] = useState<string | null>(null);
@@ -1733,6 +1734,7 @@ export const OrdersScreen: React.FC = () => {
     const { error } = await returnStoreInventoryToWarehouse(
       returnStoreId,
       Array.from(returnCart.entries()).map(([productId, quantity]) => ({ productId, quantity })),
+      returnOrderDate || undefined,
     );
     setSubmittingReturnOrder(false);
 
@@ -1743,6 +1745,7 @@ export const OrdersScreen: React.FC = () => {
 
     setReturnCart(new Map());
     setReturnStoreId(null);
+    setReturnOrderDate('');
     setReturnSearchKeyword('');
     setShowReturnModal(false);
     setPageNotice({ type: 'success', text: '退货已回总仓' });
@@ -1891,6 +1894,7 @@ export const OrdersScreen: React.FC = () => {
               type="button"
               onClick={() => {
                 setReturnStoreId(null);
+                setReturnOrderDate('');
                 setReturnCart(new Map());
                 setReturnSearchKeyword('');
                 setShowReturnModal(true);
@@ -2113,6 +2117,10 @@ export const OrdersScreen: React.FC = () => {
               pagedPurchaseOrders.map((purchaseOrder, index) => {
                 const pendingItems = (purchaseOrder.items || []).filter((item) => item.delivery_status !== 'delivered');
                 const canOperatePurchase = user?.role === 'admin' || user?.role === 'super_admin';
+                const purchaseConfirmedAt = (purchaseOrder.items || [])
+                  .map((item) => item.delivered_at)
+                  .filter((value): value is string => Boolean(value))
+                  .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || null;
 
                 return (
                   <motion.div
@@ -2135,8 +2143,10 @@ export const OrdersScreen: React.FC = () => {
                           <span>店铺：{purchaseOrder.store_name || '-'}</span>
                           <span>供应商：{purchaseOrder.supplier_name || '未绑定'}</span>
                           <span>采购成本：¥{Number(purchaseOrder.total_cost_amount || 0).toFixed(2)}</span>
-                          {purchaseOrder.order_date && <span>业务日期：{purchaseOrder.order_date}</span>}
-                          <span>创建时间：{new Date(purchaseOrder.created_at).toLocaleString()}</span>
+                          <span className="text-amber-200 font-semibold">业务日期：{purchaseOrder.order_date || '-'}</span>
+                          <span className={purchaseConfirmedAt ? 'text-green-300' : 'text-orange-300'}>
+                            确认时间：{purchaseConfirmedAt ? new Date(purchaseConfirmedAt).toLocaleString() : '待确认'}
+                          </span>
                         </div>
                       </div>
 
@@ -2771,6 +2781,7 @@ export const OrdersScreen: React.FC = () => {
                 onClick={() => {
                   setShowReturnModal(false);
                   setReturnStoreId(null);
+                  setReturnOrderDate('');
                   setReturnCart(new Map());
                   setReturnSearchKeyword('');
                 }}
@@ -2778,6 +2789,16 @@ export const OrdersScreen: React.FC = () => {
               >
                 <X size={16} />
               </button>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-white/60">业务日期（选填）</p>
+              <input
+                type="date"
+                value={returnOrderDate}
+                onChange={(event) => setReturnOrderDate(event.target.value)}
+                className="w-full sm:w-auto bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              />
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4">

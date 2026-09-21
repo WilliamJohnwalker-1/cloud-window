@@ -45,7 +45,7 @@
 - 销售报表概览显示：零售总价、订单数量（不再显示"总收入(折扣)"）
 - 利润口径：
   - 总成本 = `销售数量 * unit_cost + 一次性成本`
-  - `unit_cost` 固化在 `order_items`（下单时快照），避免后续商品成本修改影响历史利润
+  - `unit_cost`/`one_time_cost` 在读单时优先引用 `products.cost` / `products.one_time_cost`（历史报表按当前成本重算）
   - 一次性成本按商品聚合维度仅计一次，避免重复叠加
 - 利润报表支持导出：Excel / PDF
 
@@ -164,6 +164,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
 65. 执行 `supabase/migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`
+66. 执行 `supabase/migrate-v9.1-return-order-date-and-store-log-hardening.sql`
+67. 执行 `supabase/migrate-v9.2-order-items-cost-physical-cutover.sql`
 
 #### 旧项目升级（v1 -> v2）
 
@@ -232,6 +234,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 63. 执行 `supabase/migrate-v8.7-purchase-line-total-model.sql`
 64. 执行 `supabase/migrate-v8.8-return-order-kind-and-delete-wrapper.sql`
 65. 执行 `supabase/migrate-v9.0-settlement-confirm-and-cost-autocalc.sql`
+66. 执行 `supabase/migrate-v9.1-return-order-date-and-store-log-hardening.sql`
+67. 执行 `supabase/migrate-v9.2-order-items-cost-physical-cutover.sql`
 
 #### 省份字段历史数据补齐（推荐）
 
@@ -247,7 +251,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 npx expo start
 ```
 
-### 5. 启动 Web 端（v1.3.24）
+### 5. 启动 Web 端（v1.3.25）
 
 ```bash
 npm run web:v2
@@ -440,6 +444,24 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 - 计划区已收口（`web-cashier-xiaohongshu`、`v7-upgrade-batch` 已完成，当前无进行中自动续跑计划）
 
 ## 更新日志
+
+### Web v1.3.25 (2026-09-21) - 退货建单修复 + 上货/删单日志完善 + 进货单展示优化
+
+- 修复退货建单 legacy 约束报错：`returnStoreInventoryToWarehouse` 补齐 `orders.unit_price` 旧库兼容 fallback，避免 `null value in column "unit_price"`。
+- 退货建单补齐业务日期：Web 退货弹窗新增业务日期输入并写入 `orders.order_date`；退货单时间筛选继续按业务日期优先（空值回退 `created_at`）。
+- 上货店铺池日志补齐：分销上货建单后新增 `inventory_logs` 店铺池加库存日志（`供货建单增加(店铺池)`），并写入 `store_id`。
+- 总仓日志弹窗尺寸与列宽优化：扩展日志弹窗宽度/高度，补齐列宽与换行策略，改善总仓日志可读性并与店铺日志观感对齐。
+- 进货单卡片展示调整：由“业务日期+创建时间”改为“高亮业务日期+确认时间（按最新 `delivered_at`）”。
+- 订单成本口径切换：订单读取与报表计算中的 `unit_cost/one_time_cost` 统一改为读取 `products` 当前成本字段，缺失即报错（不再回退到 `order_items` 旧值）。
+- 物理收口迁移：新增 `supabase/migrate-v9.2-order-items-cost-physical-cutover.sql`，移除 `order_items.unit_cost/one_time_cost` 两列并同步重写相关 RPC。
+
+### Mobile v2.2.21 (2026-09-21) - 退货建单修复 + 上货/删单日志完善 + 进货单展示优化
+
+- 修复退货建单 legacy 约束报错：移动端退货建单补齐 `orders.unit_price` 旧库 fallback，避免 `null value in column "unit_price"`。
+- 退货建单补齐业务日期：移动端“退货回总仓”弹窗新增业务日期输入并写入 `orders.order_date`。
+- 上货店铺池日志补齐：分销上货建单后新增店铺池加库存日志（`供货建单增加(店铺池)`）并写入 `store_id`；退货店铺池日志同步写入 `store_id`。
+- 进货单卡片展示调整：由“业务日期+创建日期”改为“高亮业务日期+确认时间（按最新 `delivered_at`）”。
+- 新增迁移：`supabase/migrate-v9.1-return-order-date-and-store-log-hardening.sql`（历史上货单业务日期回填、删单回滚店铺池日志 `store_id` 修复、历史成本一次重算；并停用订单明细成本全量覆写触发器，改为读时引用 `products` 成本口径）。
 
 ### Web v1.3.24 (2026-09-17) - 供货单业务日期补齐与供货/结算筛选口径统一
 
