@@ -837,38 +837,38 @@ export const InventoryScreen: React.FC = () => {
 
       {showLogs && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-4xl bg-[#121217] border border-white/10 rounded-3xl p-6">
+          <div className="w-full max-w-6xl bg-[#121217] border border-white/10 rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold">
                 {viewMode === 'store' ? '店铺日志' : '总仓日志'}
               </h3>
               <button type="button" onClick={() => setShowLogs(false)} className="px-3 py-1 rounded-lg bg-white/10">关闭</button>
             </div>
-            <div className="max-h-[65vh] overflow-auto rounded-2xl border border-white/10">
-              <table className="w-full text-left border-collapse">
+            <div className="max-h-[70vh] overflow-auto rounded-2xl border border-white/10">
+              <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="border-b border-white/10 bg-white/[0.02]">
-                    <th className="px-4 py-3 text-xs text-white/50">时间</th>
-                    <th className="px-4 py-3 text-xs text-white/50">商品</th>
-                    {viewMode === 'store' && <th className="px-4 py-3 text-xs text-white/50">店铺</th>}
-                    <th className="px-4 py-3 text-xs text-white/50">动作</th>
-                    <th className="px-4 py-3 text-xs text-white/50 text-right">变动</th>
-                    <th className="px-4 py-3 text-xs text-white/50 text-right">前后库存</th>
+                    <th className="px-4 py-3 text-xs text-white/50 w-[160px]">时间</th>
+                    <th className="px-4 py-3 text-xs text-white/50 w-[260px]">商品</th>
+                    {viewMode === 'store' && <th className="px-4 py-3 text-xs text-white/50 w-[220px]">店铺</th>}
+                    <th className="px-4 py-3 text-xs text-white/50 w-[120px] whitespace-nowrap">动作</th>
+                    <th className="px-4 py-3 text-xs text-white/50 text-right w-[90px] whitespace-nowrap">变动</th>
+                    <th className="px-4 py-3 text-xs text-white/50 text-right w-[120px] whitespace-nowrap">前后库存</th>
                     <th className="px-4 py-3 text-xs text-white/50">备注</th>
                   </tr>
                 </thead>
                 <tbody>
                   {inventoryLogs.map((log) => (
                     <tr key={log.id} className="border-b border-white/5">
-                      <td className="px-4 py-3 text-xs text-white/70">{new Date(log.created_at).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-sm">{log.product_name || log.product_id}</td>
-                      {viewMode === 'store' && <td className="px-4 py-3 text-xs text-white/60">{log.store_name || log.store_id || '-'}</td>}
-                      <td className="px-4 py-3 text-xs text-white/60">{getInventoryLogActionLabel(log.action)}</td>
+                      <td className="px-4 py-3 text-xs text-white/70 align-top">{new Date(log.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm align-top break-words">{log.product_name || log.product_id}</td>
+                      {viewMode === 'store' && <td className="px-4 py-3 text-xs text-white/60 align-top break-words">{log.store_name || log.store_id || '-'}</td>}
+                      <td className="px-4 py-3 text-xs text-white/60 align-top whitespace-nowrap">{getInventoryLogActionLabel(log.action)}</td>
                       <td className={`px-4 py-3 text-right font-bold ${log.delta_quantity >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {log.delta_quantity >= 0 ? '+' : ''}{log.delta_quantity}
                       </td>
-                      <td className="px-4 py-3 text-right text-white/70">{log.before_quantity} → {log.after_quantity}</td>
-                      <td className="px-4 py-3 text-xs text-white/60">{log.note || '-'}</td>
+                      <td className="px-4 py-3 text-right text-white/70 whitespace-nowrap">{log.before_quantity} → {log.after_quantity}</td>
+                      <td className="px-4 py-3 text-xs text-white/60 break-words">{log.note || '-'}</td>
                     </tr>
                   ))}
                   {inventoryLogs.length === 0 && (

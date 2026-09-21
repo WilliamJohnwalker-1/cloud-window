@@ -80,12 +80,12 @@ interface OrderItemRow {
   quantity: number;
   retail_price?: number | string | null;
   discount_price?: number | string | null;
-  unit_cost?: number | string | null;
-  one_time_cost?: number | string | null;
   is_sample?: boolean | null;
   products?: {
     name?: string;
     city_id?: string;
+    cost?: number | string | null;
+    one_time_cost?: number | string | null;
     cities?: { name: string } | null;
   } | null;
 }
@@ -562,6 +562,7 @@ interface AppState {
   returnStoreInventoryToWarehouse: (
     storeId: string,
     items: Array<{ productId: string; quantity: number }>,
+    orderDate?: string,
   ) => Promise<{ error: Error | null }>;
   updateInventorySettings: (
     productId: string,
@@ -712,23 +713,41 @@ const applyRetailRefundProjection = (order: Order): Order => {
   };
 };
 
+const requireProductCosts = (
+  product: OrderItemRow['products'],
+  orderId: string,
+  productId: string,
+): { unitCost: number; oneTimeCost: number } => {
+  if (!product || product.cost == null || product.one_time_cost == null) {
+    throw new Error(`订单成本数据异常：order ${orderId} product ${productId} 缺少 products 成本字段`);
+  }
+
+  return {
+    unitCost: Number(product.cost),
+    oneTimeCost: Number(product.one_time_cost),
+  };
+};
+
 const mapOrder = (raw: OrderRow): Order => {
   const profileData = pickFirstRelation(raw.profiles);
   const cityData = pickFirstRelation(raw.cities);
   const storeData = pickFirstRelation(raw.stores);
-  const items: OrderItem[] = (raw.order_items || []).map((it) => ({
-    id: it.id,
-    order_id: it.order_id,
-    product_id: it.product_id,
-    product_name: it.products?.name,
-    city_name: it.products?.cities?.name,
-    is_sample: Boolean(it.is_sample),
-    quantity: it.quantity,
-    retail_price: Number(it.retail_price || 0),
-    discount_price: Number(it.discount_price || 0),
-    unit_cost: Number(it.unit_cost || 0),
-    one_time_cost: Number(it.one_time_cost || 0),
-  }));
+  const items: OrderItem[] = (raw.order_items || []).map((it) => {
+    const costs = requireProductCosts(it.products, raw.id, it.product_id);
+    return {
+      id: it.id,
+      order_id: it.order_id,
+      product_id: it.product_id,
+      product_name: it.products?.name,
+      city_name: it.products?.cities?.name,
+      is_sample: Boolean(it.is_sample),
+      quantity: it.quantity,
+      retail_price: Number(it.retail_price || 0),
+      discount_price: Number(it.discount_price || 0),
+      unit_cost: costs.unitCost,
+      one_time_cost: costs.oneTimeCost,
+    };
+  });
 
   const mappedOrder: Order = {
     id: raw.id,
@@ -1468,7 +1487,7 @@ export const useAppStore = create<AppState>()(
             stores(name),
             order_items(
               *,
-              products(name, city_id, cities(name))
+              products(name, city_id, cost, one_time_cost, cities(name))
             )
           `;
 
@@ -2245,7 +2264,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      returnStoreInventoryToWarehouse: async (storeId, items) => {
+      returnStoreInventoryToWarehouse: async (storeId, items, orderDate) => {
         try {
           const { user, stores, products, storeProductPrices } = get();
           if (!user) throw new Error('未登录');
@@ -2266,6 +2285,7 @@ export const useAppStore = create<AppState>()(
 
           const productIds = Array.from(new Set(normalizedItems.map((item) => item.productId)));
           const now = new Date().toISOString();
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
 
           const productMap = new Map(
             products
@@ -2324,8 +2344,6 @@ export const useAppStore = create<AppState>()(
               quantity: item.quantity,
               retail_price: retailPrice,
               discount_price: discountPrice,
-              unit_cost: Number(product.cost || 0),
-              one_time_cost: 0,
               is_sample: false,
             };
           });
@@ -2333,19 +2351,58 @@ export const useAppStore = create<AppState>()(
           const returnRetailTotal = returnOrderItems.reduce((sum, item) => sum + item.retail_price * item.quantity, 0);
           const returnDiscountTotal = returnOrderItems.reduce((sum, item) => sum + item.discount_price * item.quantity, 0);
 
-          const { data: orderInsertData, error: orderInsertError } = await supabase
+          const baseOrderPayload = {
+            distributor_id: user.id,
+            city_id: selectedStore.city_id,
+            store_id: storeId,
+            order_kind: 'return' as const,
+            status: 'accepted' as const,
+            total_retail_amount: -returnRetailTotal,
+            total_discount_amount: -returnDiscountTotal,
+            order_date: normalizedOrderDate,
+          };
+
+          let orderInsert = await supabase
             .from('orders')
-            .insert({
-              distributor_id: user.id,
-              city_id: selectedStore.city_id,
-              store_id: storeId,
-              order_kind: 'return' as const,
-              status: 'accepted' as const,
-              total_retail_amount: -returnRetailTotal,
-              total_discount_amount: -returnDiscountTotal,
-            })
+            .insert(baseOrderPayload)
             .select('id')
             .single();
+
+          if (orderInsert.error && returnOrderItems.length > 0) {
+            const message = String(orderInsert.error.message || '').toLowerCase();
+            const details = String(orderInsert.error.details || '').toLowerCase();
+            const combined = `${message} ${details}`;
+            const legacyColumnHit =
+              combined.includes('column "unit_price"')
+              || combined.includes('column unit_price')
+              || combined.includes('column "quantity"')
+              || combined.includes('column quantity')
+              || combined.includes('column "product_id"')
+              || combined.includes('column product_id')
+              || combined.includes('column "total_amount"')
+              || combined.includes('column total_amount')
+              || combined.includes('column "total-amount"')
+              || combined.includes('column total-amount');
+            const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+            const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+            if (legacyConstraintHit) {
+              const primaryItem = returnOrderItems[0];
+              orderInsert = await supabase
+                .from('orders')
+                .insert({
+                  ...baseOrderPayload,
+                  product_id: primaryItem.product_id,
+                  quantity: primaryItem.quantity,
+                  unit_price: primaryItem.discount_price,
+                  total_amount: -returnDiscountTotal,
+                })
+                .select('id')
+                .single();
+            }
+          }
+
+          const { data: orderInsertData, error: orderInsertError } = orderInsert;
           if (orderInsertError) throw orderInsertError;
 
           const { error: orderItemsInsertError } = await supabase.from('order_items').insert(
@@ -2378,6 +2435,7 @@ export const useAppStore = create<AppState>()(
                 before_quantity: beforeStore,
                 after_quantity: beforeStore - item.quantity,
                 note: '店铺退货回总仓(店铺池)',
+                store_id: storeId,
               },
               {
                 product_id: item.productId,
@@ -2515,8 +2573,6 @@ export const useAppStore = create<AppState>()(
               quantity,
               retail_price: retailPrice,
               discount_price: retailPrice,
-              unit_cost: Number(product.cost || 0),
-              one_time_cost: 0,
             });
           if (orderItemError) throw orderItemError;
 
@@ -2683,8 +2739,6 @@ export const useAppStore = create<AppState>()(
               discount_rate: selectedStore.discount_rate,
               override_price: storeOverride?.override_price,
             }).price;
-            const unitCost = Number(product.cost || 0);
-
             totalRetail += retailPrice * quantity;
             totalDiscount += discountPrice * quantity;
             totalQuantity += quantity;
@@ -2694,8 +2748,6 @@ export const useAppStore = create<AppState>()(
               quantity,
               retail_price: retailPrice,
               discount_price: discountPrice,
-              unit_cost: unitCost,
-              one_time_cost: 0,
             };
           });
 
@@ -3226,6 +3278,7 @@ export const useAppStore = create<AppState>()(
           let totalRetail = 0;
           let totalDiscount = 0;
           let orderCityId: string | undefined = selectedStore?.city_id;
+          const storePoolDeltaByProduct = new Map<string, number>();
 
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
@@ -3251,11 +3304,13 @@ export const useAppStore = create<AppState>()(
               discount_rate: selectedStore?.discount_rate,
               override_price: storeOverride?.override_price,
             }).price;
-            const unitCost = Number(product.cost || 0);
-
             if (!isSample) {
               totalRetail += retailPrice * item.quantity;
               totalDiscount += discountPrice * item.quantity;
+              if (storeId) {
+                const current = storePoolDeltaByProduct.get(product.id) || 0;
+                storePoolDeltaByProduct.set(product.id, current + item.quantity);
+              }
             }
             orderCityId = product.city_id;
 
@@ -3264,14 +3319,41 @@ export const useAppStore = create<AppState>()(
               quantity: item.quantity,
               retail_price: isSample ? 0 : retailPrice,
               discount_price: isSample ? 0 : discountPrice,
-              unit_cost: unitCost,
-              one_time_cost: 0,
               is_sample: isSample,
             };
           });
 
           const requestId = createRequestId('batch', user.id);
           const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
+          const insertStorePoolSupplyLogs = async (): Promise<void> => {
+            if (!storeId || storePoolDeltaByProduct.size === 0) return;
+            const productIds = Array.from(storePoolDeltaByProduct.keys());
+            const { data: afterStoreInventoryRows, error: afterStoreInventoryError } = await supabase
+              .from('store_inventory')
+              .select('product_id, quantity')
+              .eq('store_id', storeId)
+              .in('product_id', productIds);
+            if (afterStoreInventoryError) throw afterStoreInventoryError;
+
+            const afterStoreQtyMap = new Map((afterStoreInventoryRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]));
+            const storePoolLogs = productIds.map((productId) => {
+              const delta = storePoolDeltaByProduct.get(productId) || 0;
+              const afterQty = afterStoreQtyMap.get(productId) || delta;
+              const beforeQty = Math.max(0, afterQty - delta);
+              return {
+                product_id: productId,
+                operator_id: user.id,
+                action: 'manual_adjust' as const,
+                delta_quantity: delta,
+                before_quantity: beforeQty,
+                after_quantity: afterQty,
+                note: '供货建单增加(店铺池)',
+                store_id: storeId,
+              };
+            });
+            const { error: storeLogError } = await supabase.from('inventory_logs').insert(storePoolLogs);
+            if (storeLogError) throw storeLogError;
+          };
 
           const { error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
@@ -3281,6 +3363,7 @@ export const useAppStore = create<AppState>()(
           });
 
           if (!rpcError) {
+            await insertStorePoolSupplyLogs();
             const refreshTasks: Array<Promise<void>> = [
               get().fetchOrders(),
               get().fetchProducts(),
@@ -3446,6 +3529,8 @@ export const useAppStore = create<AppState>()(
               if (storeInventoryError) throw storeInventoryError;
             }
           }
+
+          await insertStorePoolSupplyLogs();
 
           // Notify all admins about the new order
           const { data: admins } = await supabase

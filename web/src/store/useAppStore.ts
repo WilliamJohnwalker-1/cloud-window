@@ -68,11 +68,19 @@ interface OrderItemRow {
   quantity: number;
   retail_price?: number | string | null;
   discount_price?: number | string | null;
-  unit_cost?: number | string | null;
-  one_time_cost?: number | string | null;
   is_sample?: boolean | null;
-  product?: { name?: string; cities?: { name: string } | null } | null;
-  products?: { name?: string; cities?: { name: string } | null } | null;
+  product?: {
+    name?: string;
+    cost?: number | string | null;
+    one_time_cost?: number | string | null;
+    cities?: { name: string } | null;
+  } | null;
+  products?: {
+    name?: string;
+    cost?: number | string | null;
+    one_time_cost?: number | string | null;
+    cities?: { name: string } | null;
+  } | null;
 }
 
 interface OrderRow {
@@ -504,6 +512,7 @@ interface AppState {
   returnStoreInventoryToWarehouse: (
     storeId: string,
     items: Array<{ productId: string; quantity: number }>,
+    orderDate?: string,
   ) => Promise<{ error: Error | null }>;
   inboundStockByBarcode: (barcode: string, quantity: number) => Promise<{ error: Error | null }>;
   createBatchOrders: (items: CartCreateItem[], storeId?: string | null, orderDate?: string) => Promise<{ error: Error | null }>;
@@ -539,6 +548,8 @@ const orderSelect = `
     *,
     products(
       name,
+      cost,
+      one_time_cost,
       cities(name)
     )
   )
@@ -682,9 +693,25 @@ const applyRetailRefundProjection = (order: Order, refundedItems: RefundedOrderI
   };
 };
 
+const requireProductCosts = (
+  product: { cost?: number | string | null; one_time_cost?: number | string | null } | null | undefined,
+  orderId: string,
+  productId: string,
+): { unitCost: number; oneTimeCost: number } => {
+  if (!product || product.cost == null || product.one_time_cost == null) {
+    throw new Error(`订单成本数据异常：order ${orderId} product ${productId} 缺少 products 成本字段`);
+  }
+
+  return {
+    unitCost: Number(product.cost),
+    oneTimeCost: Number(product.one_time_cost),
+  };
+};
+
 const mapOrder = (row: OrderRow): Order => {
   const itemsFromRelation: OrderItem[] = (row.order_items || []).map((item) => {
-    const productInfo = item.products || item.product;
+    const productInfo = pickFirstRelation(item.products) || item.product;
+    const costs = requireProductCosts(productInfo, row.id, item.product_id);
     return {
     id: item.id,
     order_id: item.order_id,
@@ -695,8 +722,8 @@ const mapOrder = (row: OrderRow): Order => {
     quantity: Number(item.quantity || 0),
     retail_price: Number(item.retail_price || 0),
     discount_price: Number(item.discount_price || 0),
-    unit_cost: Number(item.unit_cost || 0),
-    one_time_cost: Number(item.one_time_cost || 0),
+    unit_cost: costs.unitCost,
+    one_time_cost: costs.oneTimeCost,
   };
   });
 
@@ -1751,7 +1778,7 @@ export const useAppStore = create<AppState>()(
             .limit(50),
           supabase
             .from('order_items')
-            .select('id, order_id, product_id, quantity, retail_price, discount_price, unit_cost, one_time_cost, is_sample')
+            .select('id, order_id, product_id, quantity, retail_price, discount_price, is_sample, products(name, cost, one_time_cost, cities(name))')
             .eq('order_id', orderId)
             .order('id', { ascending: true }),
         ]);
@@ -1793,25 +1820,37 @@ export const useAppStore = create<AppState>()(
         const { data: itemRows, error: itemError } = orderItemsResult;
 
         if (!itemError && itemRows && itemRows.length > 0) {
-          const productMap = new Map<string, { name?: string; city?: string }>();
+          const normalizedItemRows = itemRows as unknown as OrderItemRow[];
+          const productMap = new Map<string, { name?: string; city?: string; cost?: number; one_time_cost?: number }>();
           get().products.forEach((product) => {
-            productMap.set(product.id, { name: product.name, city: product.city_name });
+            productMap.set(product.id, {
+              name: product.name,
+              city: product.city_name,
+              cost: Number(product.cost || 0),
+              one_time_cost: Number(product.one_time_cost || 0),
+            });
           });
 
-          const items: OrderItem[] = itemRows.map((item) => {
+          const items: OrderItem[] = normalizedItemRows.map((item) => {
+            const relationProduct = pickFirstRelation(item.products) || item.product;
             const product = productMap.get(item.product_id);
+            const costSource = relationProduct || (product ? {
+              cost: product.cost,
+              one_time_cost: product.one_time_cost,
+            } : null);
+            const costs = requireProductCosts(costSource, orderId, item.product_id);
             return {
               id: item.id,
               order_id: item.order_id,
               product_id: item.product_id,
-              product_name: product?.name,
-              city_name: product?.city || base.city_name,
+              product_name: relationProduct?.name || product?.name,
+              city_name: relationProduct?.cities?.name || product?.city || base.city_name,
               quantity: Number(item.quantity || 0),
               is_sample: Boolean(item.is_sample),
               retail_price: Number(item.retail_price || 0),
               discount_price: Number(item.discount_price || 0),
-              unit_cost: Number(item.unit_cost || 0),
-              one_time_cost: Number(item.one_time_cost || 0),
+              unit_cost: costs.unitCost,
+              one_time_cost: costs.oneTimeCost,
             };
           });
 
@@ -1839,6 +1878,10 @@ export const useAppStore = create<AppState>()(
 
             if (!hasSameLegacyItem && discountMismatch) {
               const legacyProduct = productMap.get(legacyProductId);
+              const legacyCosts = requireProductCosts(legacyProduct ? {
+                cost: legacyProduct.cost,
+                one_time_cost: legacyProduct.one_time_cost,
+              } : null, orderId, legacyProductId);
               items.unshift({
                 id: `legacy-${orderId}`,
                 order_id: orderId,
@@ -1848,8 +1891,8 @@ export const useAppStore = create<AppState>()(
                 quantity: legacyQty,
                 retail_price: legacyRetail,
                 discount_price: legacyDiscount,
-                unit_cost: 0,
-                one_time_cost: 0,
+                unit_cost: legacyCosts.unitCost,
+                one_time_cost: legacyCosts.oneTimeCost,
               });
             }
           }
@@ -1864,9 +1907,10 @@ export const useAppStore = create<AppState>()(
         if (row.product_id && Number(row.quantity || 0) > 0) {
           const { data: legacyProduct } = await supabase
             .from('products')
-            .select('name')
+            .select('name, cost, one_time_cost')
             .eq('id', row.product_id)
             .maybeSingle();
+          const legacyCosts = requireProductCosts(legacyProduct, orderId, row.product_id);
 
           const qty = Number(row.quantity || 0);
           const retailPrice = Number(row.unit_price || 0);
@@ -1885,8 +1929,8 @@ export const useAppStore = create<AppState>()(
                 quantity: qty,
                 retail_price: retailPrice,
                 discount_price: discountPrice,
-                unit_cost: 0,
-                one_time_cost: 0,
+                unit_cost: legacyCosts.unitCost,
+                one_time_cost: legacyCosts.oneTimeCost,
               },
             ],
             refunded_items: refundedItemsFromEvents,
@@ -2311,7 +2355,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      returnStoreInventoryToWarehouse: async (storeId, items) => {
+      returnStoreInventoryToWarehouse: async (storeId, items, orderDate) => {
         try {
           const { user, stores, products, storeProductPrices } = get();
           if (!user) throw new Error('未登录');
@@ -2332,6 +2376,7 @@ export const useAppStore = create<AppState>()(
 
           const productIds = Array.from(new Set(normalizedItems.map((item) => item.productId)));
           const now = new Date().toISOString();
+          const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
 
           const productMap = new Map(
             products
@@ -2389,8 +2434,6 @@ export const useAppStore = create<AppState>()(
               quantity: item.quantity,
               retail_price: retailPrice,
               discount_price: discountPrice,
-              unit_cost: Number(product.cost || 0),
-              one_time_cost: 0,
               is_sample: false,
             };
           });
@@ -2398,19 +2441,58 @@ export const useAppStore = create<AppState>()(
           const returnRetailTotal = returnOrderItems.reduce((sum, item) => sum + item.retail_price * item.quantity, 0);
           const returnDiscountTotal = returnOrderItems.reduce((sum, item) => sum + item.discount_price * item.quantity, 0);
 
-          const { data: orderInsertData, error: orderInsertError } = await supabase
+          const baseOrderPayload = {
+            distributor_id: user.id,
+            city_id: selectedStore.city_id,
+            store_id: storeId,
+            order_kind: 'return' as const,
+            status: 'accepted' as const,
+            total_retail_amount: -returnRetailTotal,
+            total_discount_amount: -returnDiscountTotal,
+            order_date: normalizedOrderDate,
+          };
+
+          let orderInsert = await supabase
             .from('orders')
-            .insert({
-              distributor_id: user.id,
-              city_id: selectedStore.city_id,
-              store_id: storeId,
-              order_kind: 'return' as const,
-              status: 'accepted' as const,
-              total_retail_amount: -returnRetailTotal,
-              total_discount_amount: -returnDiscountTotal,
-            })
+            .insert(baseOrderPayload)
             .select('id')
             .single();
+
+          if (orderInsert.error && returnOrderItems.length > 0) {
+            const message = String(orderInsert.error.message || '').toLowerCase();
+            const details = String((orderInsert.error as { details?: string }).details || '').toLowerCase();
+            const combined = `${message} ${details}`;
+            const legacyColumnHit =
+              combined.includes('column "unit_price"')
+              || combined.includes('column unit_price')
+              || combined.includes('column "quantity"')
+              || combined.includes('column quantity')
+              || combined.includes('column "product_id"')
+              || combined.includes('column product_id')
+              || combined.includes('column "total_amount"')
+              || combined.includes('column total_amount')
+              || combined.includes('column "total-amount"')
+              || combined.includes('column total-amount');
+            const onOrdersTable = combined.includes('relation "orders"') || combined.includes('table "orders"');
+            const legacyConstraintHit = orderInsert.error.code === '23502' && legacyColumnHit && onOrdersTable;
+
+            if (legacyConstraintHit) {
+              const primaryItem = returnOrderItems[0];
+              orderInsert = await supabase
+                .from('orders')
+                .insert({
+                  ...baseOrderPayload,
+                  product_id: primaryItem.product_id,
+                  quantity: primaryItem.quantity,
+                  unit_price: primaryItem.discount_price,
+                  total_amount: -returnDiscountTotal,
+                })
+                .select('id')
+                .single();
+            }
+          }
+
+          const { data: orderInsertData, error: orderInsertError } = orderInsert;
           if (orderInsertError) throw orderInsertError;
 
           const { error: orderItemsInsertError } = await supabase.from('order_items').insert(
@@ -2443,6 +2525,7 @@ export const useAppStore = create<AppState>()(
                 before_quantity: beforeStore,
                 after_quantity: beforeStore - item.quantity,
                 note: '店铺退货回总仓(店铺池)',
+                store_id: storeId,
               },
               {
                 product_id: item.productId,
@@ -2524,6 +2607,7 @@ export const useAppStore = create<AppState>()(
           let totalDiscount = 0;
           let totalQuantity = 0;
           let orderCityId: string | undefined = selectedStore?.city_id;
+          const storePoolDeltaByProduct = new Map<string, number>();
 
           const orderItemsPayload = items.map((item) => {
             const product = products.find((p) => p.id === item.productId);
@@ -2547,11 +2631,13 @@ export const useAppStore = create<AppState>()(
               discount_rate: selectedStore?.discount_rate,
               override_price: storeOverride?.override_price,
             }).price;
-            const unitCost = Number(product.cost || 0);
-
             if (!isSample) {
               totalRetail += retailPrice * item.quantity;
               totalDiscount += discountPrice * item.quantity;
+              if (storeId) {
+                const current = storePoolDeltaByProduct.get(product.id) || 0;
+                storePoolDeltaByProduct.set(product.id, current + item.quantity);
+              }
             }
             totalQuantity += item.quantity;
             orderCityId = product.city_id;
@@ -2561,14 +2647,41 @@ export const useAppStore = create<AppState>()(
               quantity: item.quantity,
               retail_price: isSample ? 0 : retailPrice,
               discount_price: isSample ? 0 : discountPrice,
-              unit_cost: unitCost,
-              one_time_cost: 0,
               is_sample: isSample,
             };
           });
 
           const requestId = createRequestId(user.id);
           const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
+          const insertStorePoolSupplyLogs = async (): Promise<void> => {
+            if (!storeId || storePoolDeltaByProduct.size === 0) return;
+            const productIds = Array.from(storePoolDeltaByProduct.keys());
+            const { data: afterStoreInventoryRows, error: afterStoreInventoryError } = await supabase
+              .from('store_inventory')
+              .select('product_id, quantity')
+              .eq('store_id', storeId)
+              .in('product_id', productIds);
+            if (afterStoreInventoryError) throw afterStoreInventoryError;
+
+            const afterStoreQtyMap = new Map((afterStoreInventoryRows || []).map((row) => [row.product_id as string, Number(row.quantity || 0)]));
+            const storePoolLogs = productIds.map((productId) => {
+              const delta = storePoolDeltaByProduct.get(productId) || 0;
+              const afterQty = afterStoreQtyMap.get(productId) || delta;
+              const beforeQty = Math.max(0, afterQty - delta);
+              return {
+                product_id: productId,
+                operator_id: user.id,
+                action: 'manual_adjust' as const,
+                delta_quantity: delta,
+                before_quantity: beforeQty,
+                after_quantity: afterQty,
+                note: '供货建单增加(店铺池)',
+                store_id: storeId,
+              };
+            });
+            const { error: storeLogError } = await supabase.from('inventory_logs').insert(storePoolLogs);
+            if (storeLogError) throw storeLogError;
+          };
           const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_batch_order_atomic', {
             p_items: orderItemsPayload,
             p_request_id: requestId,
@@ -2584,6 +2697,8 @@ export const useAppStore = create<AppState>()(
                 .eq('id', String(rpcOrderId));
               if (acceptError) throw acceptError;
             }
+
+            await insertStorePoolSupplyLogs();
 
             const refreshTasks: Array<Promise<void>> = [
               get().fetchOrders(),
@@ -2763,6 +2878,8 @@ export const useAppStore = create<AppState>()(
             }
           }
 
+          await insertStorePoolSupplyLogs();
+
           const { data: admins } = await supabase.from('profiles').select('id').in('role', ['admin', 'super_admin']);
           if (admins && admins.length > 0) {
             const notifications = admins.map((admin: { id: string }) => ({
@@ -2935,8 +3052,6 @@ export const useAppStore = create<AppState>()(
               discount_rate: selectedStore.discount_rate,
               override_price: storeOverride?.override_price,
             }).price;
-            const unitCost = Number(product.cost || 0);
-
             totalRetail += retailPrice * quantity;
             totalDiscount += discountPrice * quantity;
             totalQuantity += quantity;
@@ -2946,8 +3061,6 @@ export const useAppStore = create<AppState>()(
               quantity,
               retail_price: retailPrice,
               discount_price: discountPrice,
-              unit_cost: unitCost,
-              one_time_cost: 0,
             };
           });
 
@@ -3236,8 +3349,6 @@ export const useAppStore = create<AppState>()(
                 quantity,
                 retail_price: retailPrice,
                 discount_price: discountPrice,
-                unit_cost: Number(product.cost || 0),
-                one_time_cost: 0,
               };
             });
 
@@ -3400,7 +3511,6 @@ export const useAppStore = create<AppState>()(
             if (available < item.quantity) throw new Error(`${product.name} 库存不足`);
 
             const retailPrice = getRetailUnitPrice(product);
-            const unitCost = Number(product.cost || 0);
             orderCityId = product.city_id;
             retailTotalLines.push({ product, quantity: item.quantity });
             totalQuantity += item.quantity;
@@ -3410,8 +3520,6 @@ export const useAppStore = create<AppState>()(
               quantity: item.quantity,
               retail_price: retailPrice,
               discount_price: retailPrice,
-              unit_cost: unitCost,
-              one_time_cost: 0,
             };
           });
 
@@ -3438,8 +3546,6 @@ export const useAppStore = create<AppState>()(
             product_id: item.product_id,
             quantity: item.quantity,
             retail_price: item.retail_price,
-            unit_cost: item.unit_cost,
-            one_time_cost: 0,
           }));
           const { data: rpcOrderId, error: rpcError } = await supabase.rpc('create_retail_order_atomic', {
             p_items: retailRpcPayload,

@@ -115,6 +115,7 @@ export default function OrdersScreen() {
   const [settlementOrderDate, setSettlementOrderDate] = useState('');
   const [returnModalVisible, setReturnModalVisible] = useState(false);
   const [returnStoreId, setReturnStoreId] = useState<string | null>(null);
+  const [returnOrderDate, setReturnOrderDate] = useState('');
   const [returnCart, setReturnCart] = useState<Map<string, number>>(new Map());
   const [returnSearchText, setReturnSearchText] = useState('');
   const [submittingReturnOrder, setSubmittingReturnOrder] = useState(false);
@@ -854,6 +855,7 @@ export default function OrdersScreen() {
 
   const resetReturnForm = () => {
     setReturnStoreId(null);
+    setReturnOrderDate('');
     setReturnCart(new Map());
     setReturnSearchText('');
   };
@@ -913,6 +915,7 @@ export default function OrdersScreen() {
     const { error } = await returnStoreInventoryToWarehouse(
       returnStoreId,
       Array.from(returnCart.entries()).map(([productId, quantity]) => ({ productId, quantity })),
+      returnOrderDate || undefined,
     );
     setSubmittingReturnOrder(false);
 
@@ -1489,6 +1492,10 @@ export default function OrdersScreen() {
 
   const renderPurchaseOrder = ({ item }: { item: PurchaseOrder }) => {
     const pendingItems = (item.items || []).filter((purchaseItem) => purchaseItem.delivery_status !== 'delivered');
+    const purchaseConfirmedAt = (item.items || [])
+      .map((purchaseItem) => purchaseItem.delivered_at)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || null;
 
     return (
       <View style={[styles.orderCard, { backgroundColor: theme.surface }] }>
@@ -1498,8 +1505,8 @@ export default function OrdersScreen() {
             <Text style={[styles.orderKindTag, { color: theme.blue }]}>{item.status === 'delivered' ? '已到货' : item.status === 'partially_delivered' ? '部分到货' : '待到货'}</Text>
           </View>
           <View style={styles.orderDateGroup}>
-            <Text style={[styles.orderDate, { color: theme.textTertiary }]}>{new Date(item.created_at).toLocaleDateString('zh-CN')}</Text>
-            {item.order_date ? <Text style={[styles.orderBusinessDate, { color: theme.textSecondary }]}>业务 {item.order_date}</Text> : null}
+            <Text style={[styles.orderDate, { color: theme.textPrimary, fontWeight: '700' }]}>业务 {item.order_date || '-'}</Text>
+            <Text style={[styles.orderBusinessDate, { color: purchaseConfirmedAt ? Colors.success : Colors.warning }]}>确认 {purchaseConfirmedAt ? new Date(purchaseConfirmedAt).toLocaleString('zh-CN') : '待确认'}</Text>
           </View>
         </View>
 
@@ -1511,13 +1518,6 @@ export default function OrdersScreen() {
           <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
           <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>供应商: {item.supplier_name || '未绑定'}</Text>
         </View>
-        {item.order_date ? (
-          <View style={styles.orderMetaContainer}>
-            <PackageCheck size={14} color={theme.textTertiary} style={{ marginRight: 4 }} />
-            <Text style={[styles.orderMeta, { color: theme.textSecondary }]}>业务日期: {item.order_date}</Text>
-          </View>
-        ) : null}
-
         <View style={styles.orderItemsSummary}>
           <Text style={[styles.orderItemsSummaryText, { color: theme.textSecondary }]}> 
             共 {(item.items || []).length} 种商品，待到货 {pendingItems.length} 项
@@ -2964,6 +2964,16 @@ export default function OrdersScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+              <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>业务日期（选填）</Text>
+              <TextInput
+                value={returnOrderDate}
+                onChangeText={setReturnOrderDate}
+                placeholder="业务日期 YYYY-MM-DD"
+                placeholderTextColor={theme.textTertiary}
+                style={[styles.modalInput, { backgroundColor: theme.surfaceSecondary, color: theme.textPrimary }]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
               <TextInput
                 value={returnSearchText}
                 onChangeText={setReturnSearchText}
