@@ -2266,7 +2266,7 @@ export const useAppStore = create<AppState>()(
 
       returnStoreInventoryToWarehouse: async (storeId, items, orderDate) => {
         try {
-          const { user, stores, products, storeProductPrices } = get();
+          const { user, stores, products } = get();
           if (!user) throw new Error('未登录');
           if (!(user.role === 'admin' || user.role === 'super_admin' || user.role === 'inventory_manager')) {
             throw new Error('当前角色无退货权限');
@@ -2286,6 +2286,21 @@ export const useAppStore = create<AppState>()(
           const productIds = Array.from(new Set(normalizedItems.map((item) => item.productId)));
           const now = new Date().toISOString();
           const normalizedOrderDate = orderDate?.trim() ? orderDate.trim() : null;
+
+          const { data: returnStorePriceRows, error: returnStorePriceError } = await supabase
+            .from('store_product_prices')
+            .select('store_id, product_id, override_price')
+            .eq('store_id', storeId)
+            .in('product_id', productIds);
+          if (returnStorePriceError) throw returnStorePriceError;
+          const returnStorePriceMap = new Map<string, number>();
+          (returnStorePriceRows || []).forEach((row) => {
+            if (row.override_price == null) return;
+            returnStorePriceMap.set(
+              `${row.store_id as string}-${row.product_id as string}`,
+              Number(row.override_price),
+            );
+          });
 
           const productMap = new Map(
             products
@@ -2332,12 +2347,13 @@ export const useAppStore = create<AppState>()(
             const product = productMap.get(item.productId);
             if (!product) throw new Error('商品不存在');
             const retailPrice = Number(product.price || 0);
-            const storeOverride = storeProductPrices.find((entry) => entry.store_id === storeId && entry.product_id === item.productId);
+            const overrideKey = `${storeId}-${item.productId}`;
+            const overridePrice = returnStorePriceMap.get(overrideKey);
             const discountPrice = resolvePrice({
               price: retailPrice,
               discount_price: product.discount_price,
               discount_rate: selectedStore.discount_rate,
-              override_price: storeOverride?.override_price,
+              override_price: overridePrice,
             }).price;
             return {
               product_id: item.productId,
