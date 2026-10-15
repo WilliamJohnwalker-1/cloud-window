@@ -1,6 +1,6 @@
 {
   "name": "inventory-app",
-  "version": "2.2.23",
+  "version": "2.2.24",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",

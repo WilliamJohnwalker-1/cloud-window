@@ -1160,6 +1160,30 @@ export default {
 
     try {
 
+    if (url.pathname.startsWith('/supabase/')) {
+      const upstreamBase = String(env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+      if (!upstreamBase) {
+        return json({ ok: false, error: 'SUPABASE_URL not configured in worker env' }, { status: 500 });
+      }
+
+      const upstreamPath = url.pathname.replace(/^\/supabase/, '') || '/';
+      const upstreamUrl = `${upstreamBase}${upstreamPath}${url.search}`;
+
+      const forwardHeaders = new Headers(request.headers);
+      const upstreamResponse = await fetch(upstreamUrl, {
+        method: request.method,
+        headers: forwardHeaders,
+        body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+        redirect: 'follow',
+      });
+
+      return new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: upstreamResponse.headers,
+      });
+    }
+
     if (url.pathname === '/health') {
       return json({ ok: true, mock: isMock, ts: Date.now() });
     }
