@@ -22,6 +22,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useFinanceStore } from '../store/useFinanceStore';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import { buildMonthDateRange, buildMonthOptions } from '../utils/reportsMonth';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import type { City, FinanceReportType, Order } from '../types';
@@ -1205,7 +1206,7 @@ export default function ReportsScreen() {
       await shareStyledWorkbook(workbook, `云窗渠道库存销售管理表-${timestamp}.xlsx`);
     } catch (error: unknown) {
       if (isShareCancelledError(error)) return;
-      const message = error instanceof Error ? error.message : '经营数据导出失败';
+      const message = error instanceof Error ? getErrorMessageZh(error) : '经营数据导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
     } finally {
       if (selectedStoreId) {

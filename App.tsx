@@ -23,6 +23,7 @@ import { useAppStore } from './src/store/useAppStore';
 import { useProductDevStore } from './src/store/useProductDevStore';
 import UpdatePrompt, { UpdateType } from './src/components/UpdatePrompt';
 import { compareVersion, resolveBinaryUpdateInfo } from './src/utils/update';
+import { getErrorMessageZh } from './src/utils/errorMessage';
 import { Colors, LightColors, DarkColors, Shadow } from './src/theme';
 import { supabase, supabaseConfigError } from './src/lib/supabase';
 import { canEditFinance, canViewInventory, canViewOrders, canViewProducts, canViewReports, canViewProductDev } from './src/utils/permissions';
@@ -296,7 +297,7 @@ export default function App() {
       if (stores.length === 1) {
         const { error } = await setDefaultStore(stores[0].id);
         if (error) {
-          Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: error.message });
+          Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: getErrorMessageZh(error) });
           setStoreSelectionVisible(true);
           setOwnedStores(stores);
         } else {
@@ -420,7 +421,7 @@ export default function App() {
     setStoreSelectionSubmitting(true);
     const { error } = await setDefaultStore(storeId);
     if (error) {
-      Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '默认店铺设置失败', text2: getErrorMessageZh(error) });
       setStoreSelectionSubmitting(false);
       return;
     }

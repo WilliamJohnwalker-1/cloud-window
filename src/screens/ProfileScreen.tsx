@@ -40,6 +40,7 @@ import {
   canViewFinance,
   canViewSuppliers,
 } from '../utils/permissions';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import { getProvincesFromCities, getProvinceForCity } from '../utils/provinceMapping';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { compareVersion, resolveBinaryUpdateInfo } from '../utils/update';
@@ -430,7 +431,7 @@ export default function ProfileScreen() {
       }, 1500);
       Toast.show({ type: 'success', text1: '成功', text2: '已复制到剪贴板' });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '未知错误';
+      const message = error instanceof Error ? getErrorMessageZh(error) : '未知错误';
       Toast.show({ type: 'error', text1: '复制失败', text2: message });
     }
   }, []);
@@ -493,7 +494,7 @@ export default function ProfileScreen() {
     const { error } = await updateOwnStoreName(ownStoreName.trim());
     setSavingOwnStore(false);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
     } else {
       Toast.show({ type: 'success', text1: '成功', text2: '店面名称已更新' });
       setProfileModalVisible(false);
@@ -517,7 +518,7 @@ export default function ProfileScreen() {
     const storeToSave = editStoreName.trim() || undefined;
     const { error } = await updateDistributorProfile(editingDistributorId, editCityId, storeToSave);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
       return;
     }
     Toast.show({ type: 'success', text1: '成功', text2: '分销商资料已更新' });
@@ -581,7 +582,7 @@ export default function ProfileScreen() {
 
     const { error } = await setInitialBalance(nextBalance);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -667,7 +668,7 @@ export default function ProfileScreen() {
         : { error: new Error('未找到要保存的财务流水') };
 
     if (result.error) {
-      Toast.show({ type: 'error', text1: '错误', text2: result.error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(result.error) });
       return;
     }
 
@@ -693,7 +694,7 @@ export default function ProfileScreen() {
         onPress: async () => {
           const { error } = await deleteTransaction(transaction.id);
           if (error) {
-            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
             return;
           }
 
@@ -758,7 +759,7 @@ export default function ProfileScreen() {
         sort_index: sortValue,
       });
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '系列已添加' });
@@ -768,7 +769,7 @@ export default function ProfileScreen() {
         sort_index: sortValue,
       });
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '系列已更新' });
@@ -795,7 +796,7 @@ export default function ProfileScreen() {
         onPress: async () => {
           const { error } = await deleteSeries(id);
           if (error) {
-            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
             return;
           }
 
@@ -883,7 +884,7 @@ export default function ProfileScreen() {
       });
 
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
 
@@ -900,7 +901,7 @@ export default function ProfileScreen() {
       });
 
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
 
@@ -925,7 +926,7 @@ export default function ProfileScreen() {
         onPress: async () => {
           const { error } = await deleteSupplier(id);
           if (error) {
-            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
             return;
           }
 
@@ -1046,7 +1047,7 @@ export default function ProfileScreen() {
         invoice_address: editStoreData.invoice_address.trim() || null,
       });
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '店铺已添加' });
@@ -1073,7 +1074,7 @@ export default function ProfileScreen() {
         status: editStoreData.status,
       });
       if (error) {
-        Toast.show({ type: 'error', text1: '错误', text2: error.message });
+        Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '店铺已更新' });
@@ -1095,7 +1096,7 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await deactivateStore(id);
-          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
           else Toast.show({ type: 'success', text1: '成功', text2: '店铺已停用' });
         },
       },
@@ -1113,7 +1114,7 @@ export default function ProfileScreen() {
         text: '启用',
         onPress: async () => {
           const { error } = await updateStore(id, { status: 'active' });
-          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
           else Toast.show({ type: 'success', text1: '成功', text2: '店铺已启用' });
         },
       },
@@ -1132,7 +1133,7 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await deleteStore(id);
-          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
           else Toast.show({ type: 'success', text1: '成功', text2: '店铺已删除' });
         },
       },
@@ -1143,7 +1144,7 @@ export default function ProfileScreen() {
   const handleAcceptOrder = async (orderId: string, notificationId: string) => {
     const { error } = await acceptOrder(orderId);
     if (error) {
-      Toast.show({ type: 'error', text1: '接单失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '接单失败', text2: getErrorMessageZh(error) });
     } else {
       await markNotificationRead(notificationId);
       Toast.show({ type: 'success', text1: '成功', text2: '已接单' });
@@ -1157,7 +1158,7 @@ export default function ProfileScreen() {
     }
     const { error } = await addCity(newCityName.trim());
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
     } else {
       setNewCityName('');
     }
@@ -1171,7 +1172,7 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await deleteCity(id);
-          if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+          if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
         },
       },
     ]);
@@ -1210,7 +1211,7 @@ export default function ProfileScreen() {
       await Updates.fetchUpdateAsync();
       setUpdateConfirmVisible(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '检查更新失败';
+      const message = error instanceof Error ? getErrorMessageZh(error) : '检查更新失败';
       Toast.show({ type: 'error', text1: '更新失败', text2: message });
     } finally {
       setCheckingUpdate(false);
@@ -1238,7 +1239,7 @@ export default function ProfileScreen() {
     const { error } = await updateOwnAvatar(avatarUrl);
     if (error) {
       setUser({ ...user, avatar_url: previousAvatar });
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
       return;
     }
   };
@@ -2375,7 +2376,7 @@ export default function ProfileScreen() {
                         setSortingCityId(item.id);
                         const { error } = await moveCityOrder(item.id, 'up');
                         setSortingCityId(null);
-                        if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+                        if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
                       }}
                       disabled={sortingCityId === item.id}
                       style={[styles.citySortBtn, sortingCityId === item.id && styles.citySortBtnDisabled]}
@@ -2387,7 +2388,7 @@ export default function ProfileScreen() {
                         setSortingCityId(item.id);
                         const { error } = await moveCityOrder(item.id, 'down');
                         setSortingCityId(null);
-                        if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+                        if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
                       }}
                       disabled={sortingCityId === item.id}
                       style={[styles.citySortBtn, sortingCityId === item.id && styles.citySortBtnDisabled]}

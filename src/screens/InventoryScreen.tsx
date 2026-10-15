@@ -20,6 +20,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useSupplierStore } from '../store/useSupplierStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import type { ProductWithDetails, StoreInventory } from '../types';
 
@@ -272,7 +273,7 @@ export default function InventoryScreen() {
           text: '确认',
           onPress: async () => {
             const { error } = await updateInventory(product.id, newQuantity);
-            if (error) Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            if (error) Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
           },
         },
       ]
@@ -303,7 +304,7 @@ export default function InventoryScreen() {
     setSavingEdit(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '保存失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '保存失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -348,7 +349,7 @@ export default function InventoryScreen() {
     setSubmittingInbound(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '入库失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '入库失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -417,7 +418,7 @@ export default function InventoryScreen() {
     setSubmittingPurchase(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '进货建单失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '进货建单失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -548,7 +549,7 @@ export default function InventoryScreen() {
 
       const { error } = await updateStoreInventory(selectedStoreId, item.product_id, nextQuantity);
       if (error) {
-        Toast.show({ type: 'error', text1: '更新失败', text2: error.message });
+        Toast.show({ type: 'error', text1: '更新失败', text2: getErrorMessageZh(error) });
       }
     };
 
@@ -647,7 +648,7 @@ export default function InventoryScreen() {
     setSavingStoreEdit(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '更新失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '更新失败', text2: getErrorMessageZh(error) });
       return;
     }
 
