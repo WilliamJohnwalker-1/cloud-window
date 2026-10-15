@@ -248,7 +248,7 @@ Before committing:
 
 ## RELEASE NOTES
 
-- Current mobile baseline: `v2.2.22`
+- Current mobile baseline: `v2.2.23`
 - Current web baseline: `v1.3.26`
 - Latest business-date alignment wave: 双端供货单新增业务日期录入；订单页与报表中供货单+结算单时间筛选统一优先 `order_date`，历史空值回退 `created_at` 对应日期；供货单卡片创建时间改弱化展示（有业务日期时默认不展示）
 - Order split baseline: 手动建单 = `distribution`（折扣价 + 5倍数）；收款台扫码建单 = `retail`（零售价 + 粒度1 + 支付链路）
@@ -286,6 +286,7 @@ Before committing:
 - Latest return+log hardening wave: 新增 `migrate-v9.1-return-order-date-and-store-log-hardening.sql`（历史上货单 `order_date` 回填、删单回滚店铺池日志 `store_id` 修复、历史成本按实到数量/总价一次性覆写且 0 成本跳过保留旧值、停用订单明细成本全量覆写触发器）；双端订单读取与报表成本计算统一读取 `products.cost/products.one_time_cost`，缺失即报错（不再回退 `order_items` 旧值）；新增 `migrate-v9.2-order-items-cost-physical-cutover.sql` 完成 `order_items.unit_cost/one_time_cost` 物理删列与相关 RPC 重写；双端退货建单补齐业务日期；双端上货建单补齐店铺池加库存日志；Web 总仓日志弹窗尺寸与列宽优化；双端进货单展示改为“高亮业务日期 + 确认时间”。
 - Latest return-pricing hotfix wave: 双端退货建单改为实时查询 `store_product_prices`（按店铺+商品）计算折扣价，优先店铺覆盖价再回退折扣率/商品折扣价，避免缓存未命中导致“直接半价”；Web 订单详情在 `return` 单据禁用 legacy 合成行，修复同一商品重复显示一正一负两条明细。
 - Latest cashier+auth+knowledge-base hotfix: Web 收银台建单新增云窗 active 店铺缓存/预热并移除关键路径 `fetchStores` 阻塞；`createRetailOrders` 返回订单草稿并让收银台先进入可收款态，`fetchOrderDetail` 改异步补充（不再作为建单后强阻塞依赖）；移动端会话恢复新增 invalid refresh token 识别与本地 `signOut({ scope: 'local' })` 清理，前后台轮询与 TOKEN_REFRESH_FAILED 事件统一兜底；知识库悬浮球修复 hooks 顺序问题并重做拖拽手势判定，恢复自由拖动与点击打开稳定性。
+- Latest mobile error-localization wave: 移动端统一新增客户端报错中文归一化（含登录、商品、库存、订单、报表、财务、个人页与知识库入口），将常见英文网络/鉴权/权限错误映射为中文提示，避免用户侧出现 `Network request failed` 等英文报错直出。
 - v2.1.5 changelog should be treated as a merged block: avatar library/feedback optimization + search box/layout stability optimization + release pipeline hardening.
 - Worker publish strategy: **do not manually deploy from local workflow**; code is synced via repository automation.
 - Android build release flow:

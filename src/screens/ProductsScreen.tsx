@@ -25,6 +25,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useProductSeriesStore } from '../store/useProductSeriesStore';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { encodeEAN13Bars } from '../utils/barcode';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import type { ProductWithDetails } from '../types';
@@ -268,7 +269,7 @@ export default function ProductsScreen() {
     }
 
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
     } else {
       setModalVisible(false);
       resetForm();
@@ -283,7 +284,7 @@ export default function ProductsScreen() {
         style: 'destructive',
         onPress: async () => {
           const { error } = await deleteProduct(id);
-          if (error) Alert.alert('错误', error.message);
+          if (error) Alert.alert('错误', getErrorMessageZh(error));
         },
       },
     ]);
@@ -305,7 +306,7 @@ export default function ProductsScreen() {
     }
     const { error } = await setStoreProductPrice(selectedStoreId, editingProduct.id, overridePrice);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
     } else {
       Toast.show({ type: 'success', text1: '成功', text2: '店铺专属定价已更新' });
       setCustomStorePrice('');
@@ -379,7 +380,7 @@ export default function ProductsScreen() {
       if (publicUrl) setImageUrl(publicUrl);
     } catch (error: unknown) {
       console.error('Upload error:', error);
-      const message = error instanceof Error ? error.message : '无法上传图片';
+      const message = error instanceof Error ? getErrorMessageZh(error) : '无法上传图片';
       if (message.includes('row-level security')) {
         Toast.show({ type: 'error', text1: '上传失败', text2: '存储权限不足（RLS）。请重新登录后重试，或联系管理员执行 storage policy 脚本。' });
       } else {
@@ -453,7 +454,7 @@ export default function ProductsScreen() {
           <TouchableOpacity
             onPress={async () => {
               const { count, error } = await backfillBarcodes();
-              if (error) Toast.show({ type: 'error', text1: '生成失败', text2: error.message });
+              if (error) Toast.show({ type: 'error', text1: '生成失败', text2: getErrorMessageZh(error) });
               else Toast.show({ type: 'success', text1: '条码生成完毕', text2: `已为 ${count} 个商品生成条码` });
             }}
             activeOpacity={0.85}

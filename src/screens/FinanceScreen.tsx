@@ -16,6 +16,7 @@ import Toast from 'react-native-toast-message';
 import { useAppStore } from '../store/useAppStore';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { Colors, Radius, Shadow, Spacing } from '../theme';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import {
   canEditFinance,
   canEditFinanceInitialBalance,
@@ -317,7 +318,7 @@ export default function FinanceScreen() {
     }
     const { error } = await setInitialBalance(nextValue);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
       return;
     }
     setEditingBalance(false);
@@ -357,7 +358,7 @@ export default function FinanceScreen() {
       : await addTransaction(payload);
 
     if (result.error) {
-      Toast.show({ type: 'error', text1: '错误', text2: result.error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(result.error) });
       return;
     }
 
@@ -375,7 +376,7 @@ export default function FinanceScreen() {
         onPress: async () => {
           const { error } = await deleteTransaction(id);
           if (error) {
-            Toast.show({ type: 'error', text1: '错误', text2: error.message });
+            Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
             return;
           }
           Toast.show({ type: 'success', text1: '成功', text2: '财务流水已删除' });

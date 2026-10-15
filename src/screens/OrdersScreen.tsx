@@ -24,6 +24,7 @@ import ProvinceCityFilter from '../components/ProvinceCityFilter';
 import { Colors, Shadow, Radius, LightColors, DarkColors } from '../theme';
 import { EXTERNAL_CHANNEL_LABELS } from '../types';
 import type { City, Order, OrderKind, ProductWithDetails, PurchaseOrder } from '../types';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import { getProvinceForCity } from '../utils/provinceMapping';
 import { resolvePrice } from '../utils/priceResolver';
 
@@ -727,7 +728,7 @@ export default function OrdersScreen() {
 
     const { error } = await createBatchOrders(items, orderModalStoreId, distributionOrderDate || undefined);
     if (error) {
-      Toast.show({ type: 'error', text1: '错误', text2: error.message });
+      Toast.show({ type: 'error', text1: '错误', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -759,7 +760,7 @@ export default function OrdersScreen() {
           const { error } = await deleteOrder(order.id);
           setDeletingOrderId(null);
           if (error) {
-            Toast.show({ type: 'error', text1: '删除失败', text2: error.message });
+            Toast.show({ type: 'error', text1: '删除失败', text2: getErrorMessageZh(error) });
           } else {
             Toast.show({ type: 'success', text1: '已删除', text2: '订单已删除并恢复库存' });
           }
@@ -795,7 +796,7 @@ export default function OrdersScreen() {
     setSubmittingPurchaseConfirm(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '确认到货失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '确认到货失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -815,7 +816,7 @@ export default function OrdersScreen() {
     setDeletingPurchaseOrderId(null);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '删除失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '删除失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -920,7 +921,7 @@ export default function OrdersScreen() {
     setSubmittingReturnOrder(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '退货失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '退货失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -950,7 +951,7 @@ export default function OrdersScreen() {
     setSubmittingOutbound(false);
 
     if (error) {
-      Toast.show({ type: 'error', text1: '出库失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '出库失败', text2: getErrorMessageZh(error) });
       return;
     }
 
@@ -1234,7 +1235,7 @@ export default function OrdersScreen() {
 
       await saveWorkbook(`delivery-${order.id.slice(0, 8)}-${Date.now()}.xlsx`);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Excel 导出失败';
+      const message = error instanceof Error ? getErrorMessageZh(error) : 'Excel 导出失败';
       Toast.show({ type: 'error', text1: '导出失败', text2: message });
     }
   };
@@ -1409,7 +1410,7 @@ export default function OrdersScreen() {
             style={styles.acceptOrderButton}
             onPress={async () => {
               const { error } = await acceptOrder(item.id);
-              if (error) Toast.show({ type: 'error', text1: '接单失败', text2: error.message });
+              if (error) Toast.show({ type: 'error', text1: '接单失败', text2: getErrorMessageZh(error) });
             }}
           >
             <Text style={styles.acceptOrderButtonText}>接单</Text>
@@ -1462,7 +1463,7 @@ export default function OrdersScreen() {
                       onPress: async () => {
                         const { error } = await confirmSettlementOrder(item.id);
                         if (error) {
-                          Toast.show({ type: 'error', text1: '确认失败', text2: error.message });
+                          Toast.show({ type: 'error', text1: '确认失败', text2: getErrorMessageZh(error) });
                         } else {
                           Toast.show({ type: 'success', text1: '成功', text2: '结算单已确认收款' });
                           fetchOrders();
@@ -2645,7 +2646,7 @@ export default function OrdersScreen() {
                   const { error } = await useAppStore.getState().modifyDistributionOrder(modifyOrder.id, itemsPayload);
                   setSubmittingModify(false);
                   if (error) {
-                    Toast.show({ type: 'error', text1: '修改失败', text2: error.message });
+                    Toast.show({ type: 'error', text1: '修改失败', text2: getErrorMessageZh(error) });
                   } else {
                     Toast.show({ type: 'success', text1: '成功', text2: '订单已修改' });
                     setModifyOrder(null);
@@ -2900,7 +2901,7 @@ export default function OrdersScreen() {
                     const { error } = await editSettlementOrder(editingSettlementOrderId, items);
                     setSubmittingRetailOrder(false);
                     if (error) {
-                      Toast.show({ type: 'error', text1: '修改失败', text2: error.message });
+                      Toast.show({ type: 'error', text1: '修改失败', text2: getErrorMessageZh(error) });
                     } else {
                       Toast.show({ type: 'success', text1: '成功', text2: '结算订单已修改' });
                       resetSettlementForm();
@@ -2911,7 +2912,7 @@ export default function OrdersScreen() {
                     const { error } = await createSettlementOrder(retailStoreId, items, settlementOrderDate);
                     setSubmittingRetailOrder(false);
                     if (error) {
-                      Toast.show({ type: 'error', text1: '建单失败', text2: error.message });
+                      Toast.show({ type: 'error', text1: '建单失败', text2: getErrorMessageZh(error) });
                     } else {
                       Toast.show({ type: 'success', text1: '成功', text2: '结算订单已创建' });
                       resetSettlementForm();

@@ -20,6 +20,7 @@ import Toast from 'react-native-toast-message';
 import { useProductDevStore } from '../store/useProductDevStore';
 import { useAppStore } from '../store/useAppStore';
 import { Colors, LightColors, DarkColors, Shadow, Radius, Spacing, Typography } from '../theme';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import type { DevelopmentStage, ProductDevelopment, ProductWithDetails, PurchaseOrder } from '../types';
 
 const STAGE_LABELS: Record<DevelopmentStage, string> = {
@@ -287,7 +288,7 @@ export default function ProductDevScreen() {
       });
 
       if (error) {
-        Toast.show({ type: 'error', text1: '更新失败', text2: error.message });
+        Toast.show({ type: 'error', text1: '更新失败', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '项目已更新' });
@@ -303,7 +304,7 @@ export default function ProductDevScreen() {
       });
 
       if (error) {
-        Toast.show({ type: 'error', text1: '创建失败', text2: error.message });
+        Toast.show({ type: 'error', text1: '创建失败', text2: getErrorMessageZh(error) });
         return;
       }
       Toast.show({ type: 'success', text1: '成功', text2: '项目已创建' });
@@ -321,7 +322,7 @@ export default function ProductDevScreen() {
         onPress: async () => {
           const { error } = await deleteProject(project.id);
           if (error) {
-            Toast.show({ type: 'error', text1: '删除失败', text2: error.message });
+            Toast.show({ type: 'error', text1: '删除失败', text2: getErrorMessageZh(error) });
           } else {
             Toast.show({ type: 'success', text1: '成功', text2: '项目已删除' });
           }
@@ -344,7 +345,7 @@ export default function ProductDevScreen() {
           onPress: async () => {
             const { error } = await advanceStage(project.id, nextStage);
             if (error) {
-              Toast.show({ type: 'error', text1: '推进失败', text2: error.message });
+              Toast.show({ type: 'error', text1: '推进失败', text2: getErrorMessageZh(error) });
             } else {
               Toast.show({ type: 'success', text1: '成功', text2: `已推进至 ${STAGE_LABELS[nextStage]}` });
               const updatedProject = useProductDevStore.getState().projects.find((item) => item.id === project.id);
@@ -372,7 +373,7 @@ export default function ProductDevScreen() {
           onPress: async () => {
             const { error } = await advanceStage(project.id, toStage);
             if (error) {
-              Toast.show({ type: 'error', text1: '回退失败', text2: error.message });
+              Toast.show({ type: 'error', text1: '回退失败', text2: getErrorMessageZh(error) });
             } else {
               Toast.show({ type: 'success', text1: '成功', text2: `已回退至 ${STAGE_LABELS[toStage]}` });
             }
@@ -394,7 +395,7 @@ export default function ProductDevScreen() {
 
     const { error } = await updateProject(project.id, { is_pinned: nextPinned });
     if (error) {
-      Toast.show({ type: 'error', text1: '置顶更新失败', text2: error.message });
+      Toast.show({ type: 'error', text1: '置顶更新失败', text2: getErrorMessageZh(error) });
       return;
     }
 

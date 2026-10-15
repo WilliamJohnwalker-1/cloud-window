@@ -20,6 +20,7 @@ import Toast from 'react-native-toast-message';
 import { useAppStore } from '../store/useAppStore';
 import { useKnowledgeBaseStore } from '../store/useKnowledgeBaseStore';
 import { canViewKnowledgeBase, canManageKnowledgeBase } from '../utils/permissions';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import { Colors, LightColors, DarkColors, Shadow } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { KnowledgeBaseFile } from '../types';
@@ -137,7 +138,7 @@ export default function KnowledgeBaseFloatingBall() {
 
       Toast.show({ type: 'success', text1: '上传成功' });
     } catch (error) {
-      Toast.show({ type: 'error', text1: '上传失败', text2: (error as Error).message });
+      Toast.show({ type: 'error', text1: '上传失败', text2: getErrorMessageZh(error) });
     } finally {
       setIsUploading(false);
     }
@@ -152,7 +153,7 @@ export default function KnowledgeBaseFloatingBall() {
         onPress: async () => {
           const { error } = await deleteFile(id);
           if (error) {
-            Toast.show({ type: 'error', text1: '删除失败', text2: error.message });
+            Toast.show({ type: 'error', text1: '删除失败', text2: getErrorMessageZh(error) });
           } else {
             Toast.show({ type: 'success', text1: '删除成功' });
           }
@@ -183,7 +184,7 @@ export default function KnowledgeBaseFloatingBall() {
         Toast.show({ type: 'error', text1: '无法打开文件', text2: '设备不支持分享/打开文件' });
       }
     } catch (error) {
-      Toast.show({ type: 'error', text1: '打开失败', text2: (error as Error).message });
+      Toast.show({ type: 'error', text1: '打开失败', text2: getErrorMessageZh(error) });
     } finally {
       setDownloadingId(null);
     }

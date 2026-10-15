@@ -17,6 +17,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useAppStore } from '../store/useAppStore';
 import { Colors, Gradients, Shadow, Radius, LightColors, DarkColors } from '../theme';
+import { getErrorMessageZh } from '../utils/errorMessage';
 import logoAvatar from '../../assets/ui/login-avatar.png';
 
 export default function LoginScreen() {
@@ -44,19 +45,19 @@ export default function LoginScreen() {
 
   const handleAuth = async () => {
     if (!email || !password) {
-      alert('Please fill in all fields');
+      alert('请填写完整信息');
       return;
     }
 
     if (!isLogin && password !== confirmPassword) {
-      alert('Passwords do not match');
+      alert('两次输入的密码不一致');
       return;
     }
 
     if (isLogin) {
       const { error } = await signIn(email, password);
       if (error) {
-        alert(error.message);
+        alert(getErrorMessageZh(error));
       }
     } else {
       if (!selectedCityId) {
@@ -66,7 +67,7 @@ export default function LoginScreen() {
 
       const { error } = await signUp(email, password, 'distributor', selectedCityId);
       if (error) {
-        alert(error.message);
+        alert(getErrorMessageZh(error));
       } else {
         alert('注册成功！请检查邮箱验证或直接登录。');
         setIsLogin(true);
@@ -83,7 +84,7 @@ export default function LoginScreen() {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
       if (error) {
-        alert('发送失败：' + error.message);
+        alert('发送失败：' + getErrorMessageZh(error));
       } else {
         alert('重置链接已发送到您的邮箱，请查收。');
       }
