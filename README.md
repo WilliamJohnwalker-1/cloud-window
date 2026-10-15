@@ -445,6 +445,12 @@ curl -I https://yunchuang888888.com/mobile/download/latest.apk
 
 ## 更新日志
 
+### Mobile v2.2.24 (2026-10-15) - Supabase 连接代理与网络回退
+
+- 移动端 Supabase 客户端新增代理优先链路：默认走 `https://pay.yunchuang888888.com/supabase`，用于规避部分网络环境对 `*.supabase.co` 的连接重置。
+- 新增网络错误回退策略：当代理链路发生网络失败时，自动回退到直连 Supabase，避免单链路故障导致登录全量失败。
+- Worker 新增 `/supabase/*` 透明转发能力，转发到 `SUPABASE_URL` 对应实例，保持 Auth/REST/Storage 路径兼容。
+
 ### Mobile v2.2.23 (2026-10-15) - 客户端报错中文统一
 
 - 新增统一错误文案归一化工具，覆盖登录、商品、库存、订单、报表、财务、个人页与知识库入口。
